@@ -449,20 +449,54 @@ export function reduceWrinkles(
   }
   if (box.x1 < 0) return { add, mul };
 
-  // Denoised colour: used for detection and as the base of the smooth layer only.
+  // Thin dark structures (lashes, brow and stray hair) are found on the RAW luminance. On the
+  // denoised image a 1-2 px lash is already too light to recognise, which is how lashes used to
+  // slip through and get smoothed away.
+  const k = Math.max(3, Math.round(radius * 1.5));
+  const rawLum = new Float32Array(count);
+  for (let p = 0; p < count; p++)
+    rawLum[p] =
+      source[p * 4] * 0.2126 +
+      source[p * 4 + 1] * 0.7152 +
+      source[p * 4 + 2] * 0.0722;
+  const rawClosed = closeChannel(rawLum, valid, width, height, box, k);
+  const hair = new Float32Array(count);
+  {
+    // Creases are only mildly darker than the skin around them; lashes, brow and stray hair are
+    // far darker. So the detector is strict ONLY around the eyes (where lashes are
+    // anti-aliased to faint pixels) and lenient everywhere else. Using the strict threshold on
+    // the forehead classifies the creases themselves as hair and leaves them untouched.
+    const hk = new Float32Array(count),
+      hkEye = new Float32Array(count);
+    for (let p = 0; p < count; p++) {
+      if (Number.isNaN(rawClosed[p])) continue;
+      const ratio = rawLum[p] / Math.max(rawClosed[p], 1);
+      hk[p] = clamp((0.62 - ratio) / 0.1); // full below 52%, none above 62%
+      if (protect[p] > 0.01) hkEye[p] = clamp((0.76 - ratio) / 0.12);
+    }
+    const near = windowFilter(hk, width, height, box, 1, true), // 1px margin
+      eye = windowFilter(hkEye, width, height, box, 3, true); // 3px margin at the eyes
+    for (let p = 0; p < count; p++) hair[p] = Math.max(0, near[p], eye[p]);
+  }
+  // Hair never contributes colour to anything below.
+  for (let p = 0; p < count; p++) wt[p] = valid[p] ? 1 - hair[p] : 0;
+
+  // Denoised colour: detection helper and base of the smooth layer. Masked blur, so lash/hair
+  // and non-skin pixels cannot bleed a dark halo into the skin beside them.
+  const wBlur = blur5(wt, width, height, denoise);
   const ch = [0, 1, 2].map((c) => {
     const a = new Float32Array(count);
-    for (let p = 0; p < count; p++) a[p] = source[p * 4 + c];
-    return blur5(a, width, height, denoise);
+    for (let p = 0; p < count; p++) a[p] = source[p * 4 + c] * wt[p];
+    const b = blur5(a, width, height, denoise);
+    for (let p = 0; p < count; p++)
+      b[p] = wBlur[p] > 0.05 ? b[p] / wBlur[p] : source[p * 4 + c];
+    return b;
   });
   const lum = new Float32Array(count);
   for (let p = 0; p < count; p++)
     lum[p] = ch[0][p] * 0.2126 + ch[1][p] * 0.7152 + ch[2][p] * 0.0722;
 
-  // Thin dark structures (lashes, stray hair) are protected from every stage below.
-  const hair = new Float32Array(count);
   // 1. Crease fill.
-  const k = Math.max(3, Math.round(radius * 1.5));
   const closed = ch.map((v) => closeChannel(v, valid, width, height, box, k));
   const filled = ch.map((v) => Float32Array.from(v));
   for (let p = 0; p < count; p++) {
@@ -475,33 +509,17 @@ export function reduceWrinkles(
     if (depth <= 0.5) continue;
     const notEdge = clamp((95 - depth) / 30); // very deep = hair, brow, accessory
     const notDark = clamp((lum[p] - 38) / 22); // near-black = hair/shadow, not skin
-    // Lashes/hair are far darker than the skin around them in RELATIVE terms; creases are not.
-    const cl =
-      closed[0][p] * 0.2126 + closed[1][p] * 0.7152 + closed[2][p] * 0.0722;
-    const notHair = clamp((lum[p] / Math.max(cl, 1) - 0.5) / 0.14);
     const f =
       clamp(
         (Math.max(0, depth - 1.2) *
           notEdge *
           notDark *
-          notHair *
+          (1 - hair[p]) *
           (0.35 + 0.65 * target[p])) /
           depth,
       ) * Math.min(1, focus[p] * 1.5);
     for (let c = 0; c < 3; c++)
       filled[c][p] = ch[c][p] + (closed[c][p] - ch[c][p]) * f;
-  }
-
-  {
-    const hk = new Float32Array(count);
-    for (let p = 0; p < count; p++) {
-      if (Number.isNaN(closed[0][p])) continue;
-      const cl =
-        closed[0][p] * 0.2126 + closed[1][p] * 0.7152 + closed[2][p] * 0.0722;
-      hk[p] = clamp((0.64 - lum[p] / Math.max(cl, 1)) / 0.1);
-    }
-    const grown = windowFilter(hk, width, height, box, 2, true); // 2px safety margin
-    for (let p = 0; p < count; p++) hair[p] = Math.max(0, grown[p]);
   }
 
   // 2. Edge-preserving smoothing of what is left (folds, ridges, blotches).

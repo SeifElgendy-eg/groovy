@@ -1,4 +1,5 @@
-import { reduceWrinkles, wrinkleRegions } from "./wrinkles.js?v=93";
+import { reduceWrinkles, wrinkleRegions } from "./wrinkles.js?v=95";
+import { faceOval, guardContours, refineSkinMask } from "./facemask.js?v=1";
 import { repairBlemishes, insetSkinMask } from "./acne.js?v=78";
 import {
   FilesetResolver,
@@ -27,6 +28,9 @@ const EXCLUSION_CONTOURS = [
   OUTER_LIP,
   [48, 64, 98, 97, 2, 326, 327, 294, 278],
 ];
+// Wrinkles: eyes and brows are guarded by facemask.js guardContours() (full loops, grown to
+// cover lashes / brow hair), so only the mouth and nose underside stay as plain contours.
+const WRINKLE_EXCLUSIONS = [OUTER_LIP, [48, 64, 98, 97, 2, 326, 327, 294, 278]];
 
 const SEG_MODEL = "./models/selfie_multiclass_256x256.tflite";
 const skinDebug = document.getElementById("skinDebug");
@@ -107,8 +111,6 @@ const liveBadge = document.getElementById("liveBadge");
 const startBtn = document.getElementById("startBtn");
 const overlay = document.getElementById("overlay");
 
-const statusText = document.getElementById("statusText");
-const statusDot = document.getElementById("statusDot");
 const sourceBadge = document.getElementById("sourceBadge");
 const faceBadge = document.getElementById("faceBadge");
 const perfBadge = document.getElementById("perfBadge");
@@ -267,11 +269,9 @@ const lipFeatherCtx = lipFeatherCanvas.getContext("2d");
 const lipColorCanvas = document.createElement("canvas");
 const lipColorCtx = lipColorCanvas.getContext("2d");
 
-function setStatus(text, type = "loading") {
-  statusText.textContent = text;
-  statusDot.classList.remove("ready", "error");
-  if (type === "ready") statusDot.classList.add("ready");
-  if (type === "error") statusDot.classList.add("error");
+function setStatus(_text, _type = "loading") {
+  // Status UI has been removed; keep this function as a no-op
+  // so existing loading/camera flow remains unchanged.
 }
 
 function setSourceMode(mode) {
@@ -1201,14 +1201,33 @@ function prepareWrinkles(w, h) {
     points[234].y - points[454].y,
   );
 
+  // 1. Face only: clip to the landmark oval so ears (and anything else the segmenter calls
+  //    skin outside the face) can never be treated.
+  wrinklesMaskCtx.save();
+  wrinklesMaskCtx.globalCompositeOperation = "destination-in";
+  wrinklesMaskCtx.fillStyle = "#fff";
+  wrinklesMaskCtx.beginPath();
+  addClosedContour(wrinklesMaskCtx, faceOval(points, faceWidth));
+  wrinklesMaskCtx.fill();
+  wrinklesMaskCtx.restore();
+
   wrinklesMaskCtx.save();
   wrinklesMaskCtx.globalCompositeOperation = "destination-out";
   carveContours(
     wrinklesMaskCtx,
-    EXCLUSION_CONTOURS,
+    WRINKLE_EXCLUSIONS,
     points,
     Math.max(1, faceWidth * 0.005),
   );
+  // 2. Lashes and eyebrows: full loops grown outward, with a rounded edge.
+  wrinklesMaskCtx.lineJoin = "round";
+  wrinklesMaskCtx.lineWidth = Math.max(1.5, faceWidth * 0.008);
+  for (const poly of guardContours(points, faceWidth)) {
+    wrinklesMaskCtx.beginPath();
+    addClosedContour(wrinklesMaskCtx, poly);
+    wrinklesMaskCtx.fill();
+    wrinklesMaskCtx.stroke();
+  }
   // The bridge and sidewalls are facial shape, not wrinkle creases.
   // Protect the complete nose, with an inward feather below.
   const noseTop = points[6],
@@ -1235,16 +1254,25 @@ function prepareWrinkles(w, h) {
   );
   wrinklesMaskCtx.fill();
   wrinklesMaskCtx.restore();
-  const faded = insetSkinMask(
+  const original = wrinklesWorkCtx.getImageData(0, 0, aw, ah).data;
+  // 3. Snap the soft 256px segmentation edge to the real hairline using the photo's own
+  //    colours, then fade inward. Small margin/feather = treatment runs close to the hair.
+  const refined = refineSkinMask(
     wrinklesMaskCtx.getImageData(0, 0, aw, ah).data,
+    original,
     aw,
     ah,
-    Math.max(1, faceWidth * 0.004),
-    Math.max(3, faceWidth * 0.014),
+    Math.max(3, Math.round(faceWidth * 0.02)),
+  );
+  const faded = insetSkinMask(
+    refined,
+    aw,
+    ah,
+    1,
+    Math.max(3, faceWidth * 0.01),
   );
   wrinklesMaskCtx.putImageData(new ImageData(faded, aw, ah), 0, 0);
   const regions = wrinkleRegions(points, faceWidth);
-  const original = wrinklesWorkCtx.getImageData(0, 0, aw, ah).data;
   // reduceWrinkles returns a signed correction: `mul` (gain <= 1) and `add` (light).
   // Only these smooth maps are upscaled, never a downsampled copy of the skin, so the
   // full-resolution photo keeps its own texture inside and outside the treated areas.
@@ -1255,6 +1283,10 @@ function prepareWrinkles(w, h) {
     ah,
     Math.max(2, Math.round(faceWidth * 0.012)),
     regions,
+    // Smoothing strength. smoothing: how big a fold the filter flattens (default 1, max ~2.2).
+    // lines: removal of faint thin lines (default 1). texture: pore detail kept (default 0.9;
+    // lower = smoother but more "plastic").
+    { smoothing: 1.25, lines: 1.3, texture: 0.82 },
   );
   wrinklesCtx.putImageData(new ImageData(add, aw, ah), 0, 0);
   wrinklesMulCtx.putImageData(new ImageData(mul, aw, ah), 0, 0);

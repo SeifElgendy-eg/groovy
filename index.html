@@ -1,194 +1,345 @@
 <!doctype html>
 <html lang="en" dir="ltr">
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Beauty Simulator V6.0</title>
-  <link rel="stylesheet" href="./styles.css?v=93" />
-</head>
-<body class="home-screen">
-<main class="app">
-  <header class="topbar">
-    <div class="brand-heading">
-      <img class="brand-logo" src="./images/groovy-logo.png?v=74" alt="Groovy" />
-      <h1>What are you looking for today?</h1>
-    </div>
-    <div class="status">
-      <span id="statusDot" class="dot"></span>
-      <span id="statusText">Loading models…</span>
-    </div>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beauty Simulator V6.0</title>
+    <link rel="stylesheet" href="./styles.css?v=93" />
+  </head>
+  <body class="home-screen">
+    <main class="app">
+      <header class="topbar">
+        <div class="brand-heading">
+          <img
+            class="brand-logo"
+            src="./images/groovy-logo.png?v=74"
+            alt="Groovy"
+          />
+          <h1>What are you looking for today?</h1>
+        </div>
+      </header>
 
-  <section class="layout">
-    <div class="viewer-card">
-      <div class="source-bar">
-        <button id="cameraBtn" class="source-btn active">Camera</button>
-        <label class="upload-btn">
-          <input id="fileInput" type="file" accept="image/*" />
-          Upload photo
-        </label>
-        <button id="sampleBtn" class="ghost-btn">Test Photo</button>
-      </div>
+      <section class="layout">
+        <div class="viewer-card">
+          <div class="source-bar">
+            <button id="cameraBtn" class="source-btn active">Camera</button>
+            <label class="upload-btn">
+              <input id="fileInput" type="file" accept="image/*" />
+              Upload photo
+            </label>
+            <button id="sampleBtn" class="ghost-btn">Test Photo</button>
+          </div>
 
-      <div id="stageWrap" class="stage-wrap">
-        <video id="video" autoplay playsinline muted></video>
-        <img id="photo" alt="" />
-        <canvas id="stage"></canvas>
+          <div id="stageWrap" class="stage-wrap">
+            <video id="video" autoplay playsinline muted></video>
+            <img id="photo" alt="" />
+            <canvas id="stage"></canvas>
 
-        <div class="hud">
-          <span id="sourceBadge" class="badge">SOURCE — CAMERA</span>
-          <span id="faceBadge" class="badge">No face</span>
-          <span id="perfBadge" class="badge">PROC -- fps</span>
-          <span id="liveBadge" class="badge live"><i></i> LIVE</span>
+            <div class="hud">
+              <span id="sourceBadge" class="badge">SOURCE — CAMERA</span>
+              <span id="faceBadge" class="badge">No face</span>
+              <span id="perfBadge" class="badge">PROC -- fps</span>
+              <span id="liveBadge" class="badge live"><i></i> LIVE</span>
+            </div>
+
+            <div id="overlay" class="overlay">
+              <div class="start-box">
+                <div class="camera-icon">◉</div>
+                <h2>Start your experience</h2>
+                <p>
+                  Position your face, then select Take photo. Effects are
+                  applied to the captured photo. You can also upload a photo or
+                  use a test photo.
+                </p>
+                <div class="overlay-actions">
+                  <button id="startBtn" class="primary" disabled>
+                    Start camera
+                  </button>
+                  <label class="secondary-upload">
+                    <input id="fileInputOverlay" type="file" accept="image/*" />
+                    Upload photo
+                  </label>
+                  <button id="sampleBtnOverlay" class="ghost-btn">
+                    Test Photo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div id="overlay" class="overlay">
-          <div class="start-box">
-            <div class="camera-icon">◉</div>
-            <h2>Start your experience</h2>
-            <p>Position your face, then select Take photo. Effects are applied to the captured photo. You can also upload a photo or use a test photo.</p>
-            <div class="overlay-actions">
-              <button id="startBtn" class="primary" disabled>Start camera</button>
-              <label class="secondary-upload">
-                <input id="fileInputOverlay" type="file" accept="image/*" />
-                Upload photo
+        <aside class="sidebar">
+          <div class="sidebar-scroll">
+            <section id="moduleHome" class="section module-home">
+              <div class="eyebrow">SERVICES</div>
+              <h3>Choose a service</h3>
+              <div class="service-grid">
+                <button id="chooseLipsBtn" class="service-card">
+                  <span class="service-symbol" aria-hidden="true">◡</span
+                  ><strong>Filler (lips)</strong
+                  ><small>Explore your look</small>
+                </button>
+                <button id="chooseWrinklesBtn" class="service-card rose-card">
+                  <span class="service-symbol" aria-hidden="true">✧</span
+                  ><strong>Botox (wrinkles)</strong
+                  ><small>Before and after</small>
+                </button>
+                <button id="chooseAcneBtn" class="service-card rose-card">
+                  <span class="service-symbol" aria-hidden="true">✦</span
+                  ><strong>Acne Treatment</strong
+                  ><small>Your skin journey</small>
+                </button>
+                <button class="service-card" disabled>
+                  <span class="service-symbol" aria-hidden="true">♧</span
+                  ><strong>Weight loss<br />(Body shaping)</strong
+                  ><small class="coming-soon">Coming soon</small>
+                </button>
+              </div>
+              <button id="chooseSkinBtn" hidden>Skin Brightness</button>
+              <div class="small-note">
+                Choose a service to view its controls.
+              </div>
+            </section>
+
+            <section
+              id="moduleHeader"
+              class="section module-header hidden-section"
+            >
+              <div class="module-header-row">
+                <div>
+                  <div id="moduleEyebrow" class="eyebrow">SERVICE</div>
+                  <h3 id="moduleTitle">Choose a service</h3>
+                </div>
+                <button id="backHomeBtn" class="ghost-btn small-back">
+                  Back
+                </button>
+              </div>
+            </section>
+
+            <section
+              id="compareSection"
+              class="section common-module hidden-section"
+            >
+              <div class="eyebrow">COMPARE</div>
+              <h3>Before / After</h3>
+              <button id="beforeBtn" class="before-btn">Show Before</button>
+              <div class="small-note">
+                Select Show Before to view the original, then Show After to
+                compare.
+              </div>
+            </section>
+
+            <section
+              id="wrinklesSection"
+              class="section module-section hidden-section"
+            >
+              <div class="eyebrow">WRINKLES</div>
+              <h3>Botox (wrinkles)</h3>
+              <button id="wrinklesSampleBtn" class="ghost-btn">
+                Try a wrinkles test photo
+              </button>
+              <div hidden>
+                <input
+                  id="wrinklesSlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="100"
+                /><span id="wrinklesValue"></span
+                ><span id="wrinklesSelection"></span>
+              </div>
+              <div id="wrinklesStatus" class="small-note">
+                Compare Before and After to preview smoother skin.
+              </div>
+            </section>
+            <section
+              id="acneSection"
+              class="section module-section hidden-section"
+            >
+              <div class="eyebrow">ACNE</div>
+              <h3>Acne Treatment</h3>
+              <button id="acneSampleBtn" class="ghost-btn">
+                Try an acne test photo
+              </button>
+              <div class="preset-grid">
+                <button class="ghost-btn" data-acne-preset="0">Original</button
+                ><button class="ghost-btn" data-acne-preset="50">
+                  One month</button
+                ><button class="ghost-btn" data-acne-preset="80">
+                  2 months</button
+                ><button class="ghost-btn" data-acne-preset="100">
+                  3 months
+                </button>
+              </div>
+              <div id="acneSelection" class="small-note" aria-live="polite">
+                Selected: Original · 0%
+              </div>
+              <div class="control">
+                <div class="row">
+                  <strong>Treatment intensity</strong
+                  ><span id="acneValue" class="value">0%</span>
+                </div>
+                <input
+                  id="acneSlider"
+                  aria-label="Treatment intensity"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                />
+              </div>
+              <div id="acneStatus" class="small-note">
+                Load a test photo and select a treatment duration.
+              </div>
+              <div class="small-note">
+                Illustrative simulation only. Treatment durations do not predict
+                clinical results.
+              </div>
+            </section>
+
+            <section
+              id="skinSection"
+              class="section module-section module-skin hidden-section"
+            >
+              <div class="eyebrow">SKIN</div>
+              <h3>Skin Brightness</h3>
+              <div class="control">
+                <div class="row">
+                  <strong>Brightness</strong
+                  ><span id="brightnessValue" class="value">0%</span>
+                </div>
+                <input
+                  id="brightnessSlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                />
+              </div>
+            </section>
+
+            <section
+              id="lipsSection"
+              class="section module-section module-lips hidden-section"
+            >
+              <div class="eyebrow">LIPS</div>
+              <h3>Filler (lips)</h3>
+              <div class="preset-grid">
+                <button class="preset-btn" data-lip-preset="0">Original</button>
+                <button class="preset-btn" data-lip-preset="16">1</button>
+                <button class="preset-btn" data-lip-preset="28">2</button>
+                <button class="preset-btn" data-lip-preset="50">3</button>
+              </div>
+
+              <div class="control">
+                <div class="row">
+                  <strong>Amount</strong>
+                  <span id="lipValue" class="value">0%</span>
+                </div>
+                <input id="lipSlider" type="range" min="0" max="55" value="0" />
+              </div>
+
+              <div class="control">
+                <div class="row">
+                  <strong>Lip Roll</strong>
+                  <span id="verticalValue" class="value">60%</span>
+                </div>
+                <input
+                  id="verticalSlider"
+                  type="range"
+                  min="20"
+                  max="100"
+                  value="60"
+                />
+              </div>
+
+              <div class="control">
+                <div class="row">
+                  <strong>Edge Blend</strong>
+                  <span id="blendValue" class="value">55%</span>
+                </div>
+                <input
+                  id="blendSlider"
+                  type="range"
+                  min="10"
+                  max="100"
+                  value="55"
+                />
+              </div>
+
+              <label class="check-row">
+                <span>Show lip outline</span>
+                <input id="lipDebug" type="checkbox" />
               </label>
-              <button id="sampleBtnOverlay" class="ghost-btn">Test Photo</button>
-            </div>
+            </section>
+
+            <section
+              id="colorSection"
+              class="section module-section module-lips hidden-section"
+            >
+              <div class="eyebrow">COLOR</div>
+              <h3>Lip Color</h3>
+              <div class="shade-grid">
+                <button class="shade-btn active" data-shade="off" data-hex="">
+                  <span class="swatch off"></span><span>Original</span>
+                </button>
+                <button
+                  class="shade-btn"
+                  data-shade="brightred"
+                  data-hex="#DE4B50"
+                >
+                  <span class="swatch" style="--sw: #de4b50"></span
+                  ><span>Coral red</span>
+                </button>
+              </div>
+
+              <div class="control">
+                <div class="row">
+                  <strong>Color Intensity</strong>
+                  <span id="colorValue" class="value">0%</span>
+                </div>
+                <input
+                  id="colorSlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                />
+              </div>
+
+              <div class="small-note">
+                Optional coral red. Select Original to remove the color.
+              </div>
+            </section>
+
+            <section id="skinDebugSection" class="section hidden-section">
+              <label class="check-row"
+                ><span>Show face mask</span
+                ><input id="skinDebug" type="checkbox"
+              /></label>
+              <div class="small-note">
+                Green shows the effect area. Protected features and feathered
+                edges are excluded.
+              </div>
+            </section>
+            <section
+              id="resetSection"
+              class="section common-module hidden-section"
+            >
+              <button id="resetBtn" class="reset-btn">Reset All</button>
+              <div class="small-note">
+                Select Back to choose another service.
+              </div>
+            </section>
           </div>
-        </div>
-      </div>
-    </div>
+        </aside>
+      </section>
+    </main>
 
-    <aside class="sidebar">
-      <div class="sidebar-scroll">
-        <section id="moduleHome" class="section module-home">
-          <div class="eyebrow">SERVICES</div>
-          <h3>Choose a service</h3>
-          <div class="service-grid">
-            <button id="chooseLipsBtn" class="service-card"><span class="service-symbol" aria-hidden="true">◡</span><strong>Filler (lips)</strong><small>Explore your look</small></button>
-            <button id="chooseWrinklesBtn" class="service-card rose-card"><span class="service-symbol" aria-hidden="true">✧</span><strong>Botox (wrinkles)</strong><small>Before and after</small></button>
-            <button id="chooseAcneBtn" class="service-card rose-card"><span class="service-symbol" aria-hidden="true">✦</span><strong>Acne Treatment</strong><small>Your skin journey</small></button>
-            <button class="service-card" disabled><span class="service-symbol" aria-hidden="true">♧</span><strong>Weight loss<br />(Body shaping)</strong><small class="coming-soon">Coming soon</small></button>
-          </div>
-          <button id="chooseSkinBtn" hidden>Skin Brightness</button>
-          <div class="small-note">Choose a service to view its controls.</div>
-        </section>
-
-        <section id="moduleHeader" class="section module-header hidden-section">
-          <div class="module-header-row">
-            <div>
-              <div id="moduleEyebrow" class="eyebrow">SERVICE</div>
-              <h3 id="moduleTitle">Choose a service</h3>
-            </div>
-            <button id="backHomeBtn" class="ghost-btn small-back">Back</button>
-          </div>
-        </section>
-
-        <section id="compareSection" class="section common-module hidden-section">
-          <div class="eyebrow">COMPARE</div>
-          <h3>Before / After</h3>
-          <button id="beforeBtn" class="before-btn">Show Before</button>
-          <div class="small-note">Select Show Before to view the original, then Show After to compare.</div>
-        </section>
-
-        <section id="wrinklesSection" class="section module-section hidden-section">
-          <div class="eyebrow">WRINKLES</div><h3>Botox (wrinkles)</h3>
-          <button id="wrinklesSampleBtn" class="ghost-btn">Try a wrinkles test photo</button>
-          <div hidden><input id="wrinklesSlider" type="range" min="0" max="100" value="100" /><span id="wrinklesValue"></span><span id="wrinklesSelection"></span></div>
-          <div id="wrinklesStatus" class="small-note">Compare Before and After to preview smoother skin.</div>
-        </section>
-        <section id="acneSection" class="section module-section hidden-section">
-          <div class="eyebrow">ACNE</div><h3>Acne Treatment</h3>
-          <button id="acneSampleBtn" class="ghost-btn">Try an acne test photo</button>
-          <div class="preset-grid"><button class="ghost-btn" data-acne-preset="0">Original</button><button class="ghost-btn" data-acne-preset="50">One month</button><button class="ghost-btn" data-acne-preset="80">2 months</button><button class="ghost-btn" data-acne-preset="100">3 months</button></div>
-          <div id="acneSelection" class="small-note" aria-live="polite">Selected: Original · 0%</div>
-          <div class="control"><div class="row"><strong>Treatment intensity</strong><span id="acneValue" class="value">0%</span></div><input id="acneSlider" aria-label="Treatment intensity" type="range" min="0" max="100" value="0" /></div>
-          <div id="acneStatus" class="small-note">Load a test photo and select a treatment duration.</div>
-          <div class="small-note">Illustrative simulation only. Treatment durations do not predict clinical results.</div>
-        </section>
-
-        <section id="skinSection" class="section module-section module-skin hidden-section">
-          <div class="eyebrow">SKIN</div><h3>Skin Brightness</h3>
-          <div class="control">
-            <div class="row"><strong>Brightness</strong><span id="brightnessValue" class="value">0%</span></div>
-            <input id="brightnessSlider" type="range" min="0" max="100" value="0" />
-          </div>
-        </section>
-
-        <section id="lipsSection" class="section module-section module-lips hidden-section">
-          <div class="eyebrow">LIPS</div>
-          <h3>Filler (lips)</h3>
-          <div class="preset-grid">
-            <button class="preset-btn" data-lip-preset="0">Original</button>
-            <button class="preset-btn" data-lip-preset="16">1</button>
-            <button class="preset-btn" data-lip-preset="28">2</button>
-            <button class="preset-btn" data-lip-preset="50">3</button>
-          </div>
-
-          <div class="control">
-            <div class="row">
-              <strong>Amount</strong>
-              <span id="lipValue" class="value">0%</span>
-            </div>
-            <input id="lipSlider" type="range" min="0" max="55" value="0" />
-          </div>
-
-          <div class="control">
-            <div class="row">
-              <strong>Lip Roll</strong>
-              <span id="verticalValue" class="value">60%</span>
-            </div>
-            <input id="verticalSlider" type="range" min="20" max="100" value="60" />
-          </div>
-
-          <div class="control">
-            <div class="row">
-              <strong>Edge Blend</strong>
-              <span id="blendValue" class="value">55%</span>
-            </div>
-            <input id="blendSlider" type="range" min="10" max="100" value="55" />
-          </div>
-
-          <label class="check-row">
-            <span>Show lip outline</span>
-            <input id="lipDebug" type="checkbox" />
-          </label>
-        </section>
-
-        <section id="colorSection" class="section module-section module-lips hidden-section">
-          <div class="eyebrow">COLOR</div>
-          <h3>Lip Color</h3>
-          <div class="shade-grid">
-            <button class="shade-btn active" data-shade="off" data-hex=""><span class="swatch off"></span><span>Original</span></button>
-            <button class="shade-btn" data-shade="brightred" data-hex="#DE4B50"><span class="swatch" style="--sw:#DE4B50"></span><span>Coral red</span></button>
-          </div>
-
-          <div class="control">
-            <div class="row">
-              <strong>Color Intensity</strong>
-              <span id="colorValue" class="value">0%</span>
-            </div>
-            <input id="colorSlider" type="range" min="0" max="100" value="0" />
-          </div>
-
-          <div class="small-note">Optional coral red. Select Original to remove the color.</div>
-        </section>
-
-        <section id="skinDebugSection" class="section hidden-section">
-          <label class="check-row"><span>Show face mask</span><input id="skinDebug" type="checkbox" /></label>
-          <div class="small-note">Green shows the effect area. Protected features and feathered edges are excluded.</div>
-        </section>
-        <section id="resetSection" class="section common-module hidden-section">
-          <button id="resetBtn" class="reset-btn">Reset All</button>
-          <div class="small-note">Select Back to choose another service.</div>
-        </section>
-      </div>
-    </aside>
-  </section>
-</main>
-
-<script type="module" src="./app.js?v=93"></script>
-</body>
+    <script type="module" src="./app.js?v=93"></script>
+  </body>
 </html>
