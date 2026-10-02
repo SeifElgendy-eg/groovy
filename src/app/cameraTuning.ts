@@ -10,9 +10,10 @@ import {
 } from "../io/cameraControls";
 import { cameraInfo, type CameraInfo } from "../io/camera";
 import {
+  DEFAULT_TARGET,
+  faceMeterBox,
   isUnusableFrame,
-  meterFace,
-  meterFrame,
+  meterPixels,
   nextExposure,
   nextOffset,
   type FaceMeter,
@@ -46,12 +47,28 @@ function save(s: Saved): void {
 
 type Listener = () => void;
 
+// Metering reads a tiny downscaled copy, never the full frame: a full-frame getImageData forces
+// the GPU to hand the whole picture back to the CPU, which stalls the live preview.
+const METER = 48;
+const meterCanvas = document.createElement("canvas");
+meterCanvas.width = meterCanvas.height = METER;
+const meterCtx = meterCanvas.getContext("2d", { willReadFrequently: true })!;
+
+function readScaled(src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number): Uint8ClampedArray {
+  meterCtx.drawImage(src, sx, sy, sw, sh, 0, 0, METER, METER);
+  return meterCtx.getImageData(0, 0, METER, METER).data;
+}
+
 class CameraTuning {
   private track: MediaStreamTrack | null = null;
   private saved = load();
   private lastMeterAt = 0;
   private lastAdjustAt = 0;
   private adjusting = false;
+  /** Last step landed in the dead band: hold until the face drifts clearly off target. */
+  private onTarget = false;
+  /** The staff panel is open (it shows the live reading). */
+  panelOpen = false;
   private listeners = new Set<Listener>();
   info: CameraInfo | null = null;
   controls: CameraControl[] = [];
@@ -137,28 +154,39 @@ class CameraTuning {
     return this.controls.find((c): c is RangeControl => c.kind === "range" && c.name === name);
   }
 
+  /** Metering costs a little each time, so it only runs when someone uses the result. */
+  get wantsFrames(): boolean {
+    return this.panelOpen || this.saved.faceAuto;
+  }
+
   /**
-   * Called with every live frame the pipeline analysed (un-mirrored source canvas).
-   * Meters ~3x/s; adjusts at most every 600 ms so the camera can settle between steps.
+   * Called with live frames the pipeline analysed (un-mirrored source canvas).
+   * Meters ~3x/s; adjusts at most every 800 ms so the camera can settle between steps.
    */
   observe(
-    ctx: CanvasRenderingContext2D,
+    src: CanvasImageSource,
     w: number,
     h: number,
     landmarks: NormalizedLandmark[] | null,
   ): void {
+    if (!this.wantsFrames) return;
     const now = performance.now();
     if (now - this.lastMeterAt < 330) return;
     this.lastMeterAt = now;
-    const pixels = ctx.getImageData(0, 0, w, h).data;
-    this.meter = landmarks ? meterFace(pixels, w, h, landmarks, false) : null;
+    const box = landmarks ? faceMeterBox(landmarks, w, h, false) : null;
+    this.meter = box ? meterPixels(readScaled(src, box.x, box.y, box.w, box.h), METER) : null;
     this.emit();
     if (!this.saved.faceAuto || !this.track || this.adjusting) return;
-    if (now - this.lastAdjustAt < 600) return;
-    if (this.meter) return void this.adjust(this.meter);
+    if (now - this.lastAdjustAt < 800) return;
+    if (this.meter) {
+      const off = Math.abs(this.meter.mean - DEFAULT_TARGET.mean) / DEFAULT_TARGET.mean;
+      const blown = this.meter.clipped > DEFAULT_TARGET.maxClipped;
+      if (this.onTarget && off < 0.2 && !blown) return; // hysteresis: no needless camera calls
+      return void this.adjust(this.meter);
+    }
     // No face: only act if the whole frame is so dark/bright that a face could not be seen.
     // (A black frame hides the face from the detector, which would otherwise stay stuck.)
-    const frame = meterFrame(pixels, w, h);
+    const frame = meterPixels(readScaled(src, 0, 0, w, h), METER)!;
     if (isUnusableFrame(frame)) void this.adjust(frame, "frame");
     else this.autoNote = "waiting for a face";
   }
@@ -181,8 +209,12 @@ class CameraTuning {
           await setControl(track, "exposureTime", stepped);
           this.autoNote = `${basis === "frame" ? "dark/bright frame, " : ""}exposure ${current.toFixed(0)} → ${stepped.toFixed(0)}`;
           this.lastAdjustAt = performance.now();
+          this.onTarget = false;
           this.refresh();
-        } else this.autoNote = "face exposure on target";
+        } else {
+          this.autoNote = "face exposure on target";
+          this.onTarget = true;
+        }
         return;
       }
       const brightness = this.range("brightness");
@@ -193,8 +225,12 @@ class CameraTuning {
           await setControl(track, "brightness", next);
           this.autoNote = `brightness ${current} → ${next}`;
           this.lastAdjustAt = performance.now();
+          this.onTarget = false;
           this.refresh();
-        } else this.autoNote = "face exposure on target";
+        } else {
+          this.autoNote = "face exposure on target";
+          this.onTarget = true;
+        }
         return;
       }
       this.autoNote = "this camera exposes no exposure or brightness control";

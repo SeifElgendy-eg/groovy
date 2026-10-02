@@ -14,17 +14,23 @@ export interface FaceMeter {
   crushed: number;
 }
 
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /**
- * Meter the central face (between the eyes' outer corners, brow to upper lip), which is mostly
- * skin and avoids hair and background.
+ * The central face (inner 60% x 70% of the face box: cheeks, nose, forehead centre), which is
+ * mostly skin and avoids hair and background. In pixels of a w x h frame.
  */
-export function meterFace(
-  data: Uint8ClampedArray,
+export function faceMeterBox(
+  landmarks: NormalizedLandmark[],
   w: number,
   h: number,
-  landmarks: NormalizedLandmark[],
   mirrored: boolean,
-): FaceMeter | null {
+): Box | null {
   const xs = [LM.faceLeft, LM.faceRight].map((i) =>
     mirrored ? (1 - landmarks[i].x) * w : landmarks[i].x * w,
   );
@@ -35,17 +41,27 @@ export function meterFace(
   const fw = fx1 - fx0,
     fh = chin - top;
   if (fw < 8 || fh < 8) return null;
-  // Inner 60% x 70% of the face box: cheeks, nose, forehead centre.
   const x0 = Math.max(0, Math.floor(fx0 + fw * 0.2)),
     x1 = Math.min(w, Math.ceil(fx1 - fw * 0.2)),
     y0 = Math.max(0, Math.floor(top + fh * 0.15)),
     y1 = Math.min(h, Math.ceil(chin - fh * 0.15));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Meter every `step`-th pixel of an RGBA buffer (rows of width w). */
+export function meterPixels(
+  data: Uint8ClampedArray,
+  w: number,
+  box: Box = { x: 0, y: 0, w, h: data.length / 4 / w },
+  step = 1,
+): FaceMeter | null {
   let n = 0,
     sum = 0,
     clipped = 0,
     crushed = 0;
-  for (let y = y0; y < y1; y += 2)
-    for (let x = x0; x < x1; x += 2) {
+  for (let y = box.y; y < box.y + box.h; y += step)
+    for (let x = box.x; x < box.x + box.w; x += step) {
       const i = (y * w + x) * 4;
       const r = data[i],
         g = data[i + 1],
@@ -56,8 +72,19 @@ export function meterFace(
       if (l <= 12) crushed++;
       n++;
     }
-  if (!n) return null;
-  return { mean: sum / n, clipped: clipped / n, crushed: crushed / n };
+  return n ? { mean: sum / n, clipped: clipped / n, crushed: crushed / n } : null;
+}
+
+/** Meter the central face of a full w x h RGBA frame. */
+export function meterFace(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  landmarks: NormalizedLandmark[],
+  mirrored: boolean,
+): FaceMeter | null {
+  const box = faceMeterBox(landmarks, w, h, mirrored);
+  return box ? meterPixels(data, w, box, 2) : null;
 }
 
 /**
@@ -65,25 +92,7 @@ export function meterFace(
  * that went black (or white) hides the face from the detector, so nothing could ever correct it.
  */
 export function meterFrame(data: Uint8ClampedArray, w: number, h: number): FaceMeter {
-  let n = 0,
-    sum = 0,
-    clipped = 0,
-    crushed = 0;
-  for (let y = 0; y < h; y += 8)
-    for (let x = 0; x < w; x += 8) {
-      const i = (y * w + x) * 4;
-      const r = data[i],
-        g = data[i + 1],
-        b = data[i + 2];
-      const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      sum += l;
-      if (r >= 250 || g >= 250 || b >= 250) clipped++;
-      if (l <= 12) crushed++;
-      n++;
-    }
-  return n
-    ? { mean: sum / n, clipped: clipped / n, crushed: crushed / n }
-    : { mean: 128, clipped: 0, crushed: 0 };
+  return meterPixels(data, w, { x: 0, y: 0, w, h }, 8) ?? { mean: 128, clipped: 0, crushed: 0 };
 }
 
 /** A frame so dark or so bright that no face can be read from it. */
