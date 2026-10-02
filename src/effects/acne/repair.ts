@@ -1,5 +1,7 @@
-// Local blemish repair: finds small red spots against a blurred baseline and paints them
-// over with the surrounding skin colour and lighting.
+// Local blemish repair: finds small spots that stand out from the surrounding skin (see detect.ts)
+// and paints them over with the surrounding skin colour and lighting.
+import { detectSeeds, SEED_MARK } from "./detect";
+
 export function repairBlemishes(
   source: Uint8ClampedArray,
   baseline: Uint8ClampedArray,
@@ -8,21 +10,18 @@ export function repairBlemishes(
   height: number,
   radius: number,
 ): Uint8ClampedArray<ArrayBuffer> {
-  const output=new Uint8ClampedArray(source.length),seed=new Uint8Array(width*height),seen=new Uint8Array(width*height);
+  const output=new Uint8ClampedArray(source.length),seen=new Uint8Array(width*height);
   const red=(r: number,g: number,b: number)=>(r-(g+b)/2)/Math.max(30,r+g+b);
-  for(let p=0;p<seed.length;p++){
-    const i=p*4;
-    if(skin[i+3]<250)continue;
-    const delta=red(source[i],source[i+1],source[i+2])-red(baseline[i],baseline[i+1],baseline[i+2]);
-    // Darkness alone is not acne: it includes pores, facial contours and hair.
-    seed[p]=delta>0.006 && source[i]>source[i+1]*1.12 ? 1 : 0;
-  }
+  // Seeds are measured against this face's own variation, so they work on every skin tone and
+  // exposure; red spots and brown marks are told apart for the fill below.
+  const seed=detectSeeds(source,baseline,skin,width,height);
   for(let start=0;start<seed.length;start++){
     if(!seed[start]||seen[start])continue;
     const queue: number[]=[start];seen[start]=1;
-    let minX=width,maxX=0,minY=height,maxY=0;
+    let minX=width,maxX=0,minY=height,maxY=0,marks=0;
     for(let n=0;n<queue.length;n++){
       const p=queue[n],x=p%width,y=Math.floor(p/width);
+      if(seed[p]===SEED_MARK)marks++;
       minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
       for(const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]){
         const xx=x+dx,yy=y+dy,q=yy*width+xx;
@@ -35,8 +34,14 @@ export function repairBlemishes(
     // Bound area as well as extent so local spots survive without admitting
     // broad cheek redness or long feature boundaries.
     if(queue.length<3||bw>radius*3||bh>radius*3||queue.length>radius*radius*3||Math.max(bw/bh,bh/bw)>2.4)continue;
+    // A mostly-dark spot is a mark only if it is bigger than a pore and fairly round.
+    const isMark=marks*2>queue.length;
+    if(isMark&&(queue.length<Math.max(5,radius*0.4)||Math.max(bw/bh,bh/bw)>1.8))continue;
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
-    const rx=Math.max(2,bw*.65+1),ry=Math.max(2,bh*.65+1);
+    // Seeds mark a spot's core; its softer red halo lies just outside, so the repair reaches past
+    // the seeds by a fraction of the expected spot size.
+    const grow=radius*0.22;
+    const rx=Math.max(2,bw*.65+1+grow),ry=Math.max(2,bh*.65+1+grow);
     const ring=Math.max(radius,Math.max(rx,ry)*1.7);
     const samples: number[][]=[];
     for(let k=0;k<32;k++){
@@ -51,7 +56,7 @@ export function repairBlemishes(
     const light=samples.map(v=>v[0]*.2126+v[1]*.7152+v[2]*.0722).sort((a,b)=>a-b);
     if(light[Math.floor(light.length*.85)]-light[Math.floor(light.length*.15)]>40)continue;
     // Trim extremes, retaining a consistent local skin colour for each spot.
-    const target=[0,1,2].map(ch=>{
+    const target=[0,1,2].map((ch: number)=>{
       const vals=samples.map(v=>v[ch]).sort((a,b)=>a-b),trim=Math.floor(vals.length*.2);
       const middle=vals.slice(trim,vals.length-trim);return middle.reduce((a,b)=>a+b,0)/middle.length;
     });
@@ -78,9 +83,13 @@ export function repairBlemishes(
       const sourceLum=source[i]*.2126+source[i+1]*.7152+source[i+2]*.0722;
       const targetLum=local[0]*.2126+local[1]*.7152+local[2]*.0722;
       // Preserve dark strands and neutral grey hairs, even if segmentation calls them skin.
-      const luminanceMatch=Math.max(0,Math.min(1,(55-Math.abs(sourceLum-targetLum))/30));
+      // Marks are darker than the skin by nature, so they get more room before being protected.
+      const luminanceMatch=Math.max(0,Math.min(1,((isMark?80:55)-Math.abs(sourceLum-targetLum))/30));
+      // "Is this skin-coloured?" relative to the surrounding skin rather than a fixed redness:
+      // grey hairs (no warmth) are kept; every skin tone counts as skin.
       const redness=red(source[i],source[i+1],source[i+2]);
-      const skinColor=Math.max(0,Math.min(1,(redness-.025)/.025));
+      const skinRed=Math.max(0.01,red(local[0],local[1],local[2]));
+      const skinColor=Math.max(0,Math.min(1,(redness-skinRed*.35)/(skinRed*.35)));
       const t=Math.max(0,Math.min(1,(1-d)/.45));
       const alpha=t*t*(3-2*t)*skin[i+3]/255*.98*luminanceMatch*skinColor;
       if(alpha*255<=output[i+3])continue;

@@ -1,6 +1,7 @@
 // Acne treatment: finds small red blemishes inside the skin mask and repairs them from the
 // surrounding skin. Runs on a reduced analysis copy; the caller scales the result to the display.
 import { carveContours, addClosedContour } from "../../imaging/contours";
+import { guardContours } from "../../face/mask";
 import { ACNE_EXCLUSION_CONTOURS, OUTER_LIP } from "../../core/landmarks";
 import {
   analysisSize,
@@ -92,6 +93,13 @@ export class AcneEffect {
   mask.ctx.beginPath();
   addClosedContour(mask.ctx, protectedMouth);
   mask.ctx.fill();
+  // Lashes, lid margins and brow hair: the same grown guards the wrinkle filter uses, so the
+  // naturally pinker lid skin and lash shadows are never "repaired".
+  for (const poly of guardContours(points, faceWidth)) {
+    mask.ctx.beginPath();
+    addClosedContour(mask.ctx, poly);
+    mask.ctx.fill();
+  }
   mask.ctx.lineWidth = Math.max(2, faceWidth * 0.012);
   mask.ctx.stroke();
   mask.ctx.restore();
