@@ -2,3 +2,4 @@ node_modules/
 dist/
 tests/golden/out/
 tests/golden/out-base/
+release/
