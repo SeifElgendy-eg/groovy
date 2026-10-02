@@ -1,6 +1,19 @@
-import { reduceWrinkles, wrinkleRegions } from "./wrinkles.js";
-import { faceOval, guardContours, refineSkinMask } from "./facemask.js";
-import { repairBlemishes, insetSkinMask } from "./acne.js";
+import { reduceWrinkles } from "../effects/wrinkles/reduce";
+import { wrinkleRegions } from "../effects/wrinkles/regions";
+import { faceOval, guardContours, refineSkinMask } from "../face/mask";
+import { repairBlemishes } from "../effects/acne/repair";
+import { insetSkinMask } from "../imaging/maskOps";
+import {
+  addClosedContour,
+  boundsOfPoints,
+  carveContours,
+} from "../imaging/contours";
+import {
+  ACNE_EXCLUSION_CONTOURS,
+  INNER_MOUTH,
+  OUTER_LIP,
+  WRINKLE_EXCLUSION_CONTOURS,
+} from "../core/landmarks";
 import {
   FilesetResolver,
   ImageSegmenter,
@@ -9,28 +22,6 @@ import {
 
 const MP_BASE = "./vendor/mediapipe";
 const FACE_MODEL = "./models/face_landmarker.task";
-
-const OUTER_LIP = [
-  61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84,
-  181, 91, 146,
-];
-const INNER_MOUTH = [
-  78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87,
-  178, 88, 95,
-];
-
-// Eyes, brows, outer lips and nose underside: never corrected by acne or wrinkles.
-const EXCLUSION_CONTOURS = [
-  [33, 160, 158, 133, 153, 144],
-  [362, 385, 387, 263, 373, 380],
-  [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
-  [336, 296, 334, 293, 300, 276, 283, 282, 295, 285],
-  OUTER_LIP,
-  [48, 64, 98, 97, 2, 326, 327, 294, 278],
-];
-// Wrinkles: eyes and brows are guarded by facemask.js guardContours() (full loops, grown to
-// cover lashes / brow hair), so only the mouth and nose underside stay as plain contours.
-const WRINKLE_EXCLUSIONS = [OUTER_LIP, [48, 64, 98, 97, 2, 326, 327, 294, 278]];
 
 const SEG_MODEL = "./models/selfie_multiclass_256x256.tflite";
 const skinDebug = document.getElementById("skinDebug");
@@ -439,60 +430,6 @@ function drawForDisplay(targetCtx, w, h, filter = "none") {
   targetCtx.drawImage(src, 0, 0, w, h);
   targetCtx.restore();
   targetCtx.filter = "none";
-}
-
-function boundsOfPoints(pts) {
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity,
-    sx = 0,
-    sy = 0;
-  for (const p of pts) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-    sx += p.x;
-    sy += p.y;
-  }
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    cx: sx / pts.length,
-    cy: sy / pts.length,
-    width: maxX - minX,
-    height: maxY - minY,
-  };
-}
-
-function bellWeight(x, minX, maxX) {
-  const t = Math.max(0, Math.min(1, (x - minX) / Math.max(1, maxX - minX)));
-  return Math.pow(Math.sin(Math.PI * t), 1.45);
-}
-
-function addClosedContour(context, pts) {
-  if (!pts.length) return;
-  context.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length; i++) context.lineTo(pts[i].x, pts[i].y);
-  context.closePath();
-}
-
-// Punch feature contours out of a mask canvas (caller sets destination-out).
-function carveContours(context, contours, points, lineWidth) {
-  context.lineJoin = "round";
-  context.lineWidth = lineWidth;
-  for (const ids of contours) {
-    context.beginPath();
-    addClosedContour(
-      context,
-      ids.map((i) => points[i]),
-    );
-    context.fill();
-    context.stroke();
-  }
 }
 
 function setShade(name, hex) {
@@ -1118,7 +1055,7 @@ function prepareAcne(w, h) {
   acneMaskCtx.globalCompositeOperation = "destination-out";
   carveContours(
     acneMaskCtx,
-    EXCLUSION_CONTOURS,
+    ACNE_EXCLUSION_CONTOURS,
     points,
     Math.max(1, faceWidth * 0.005),
   );
@@ -1216,7 +1153,7 @@ function prepareWrinkles(w, h) {
   wrinklesMaskCtx.globalCompositeOperation = "destination-out";
   carveContours(
     wrinklesMaskCtx,
-    WRINKLE_EXCLUSIONS,
+    WRINKLE_EXCLUSION_CONTOURS,
     points,
     Math.max(1, faceWidth * 0.005),
   );

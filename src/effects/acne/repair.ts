@@ -1,26 +1,15 @@
-// Inset the actual segmentation mask before sampling: hair, face silhouette,
-// eyes and mouth must never contribute to a repair or receive one.
-export function insetSkinMask(mask,width,height,margin,feather=Math.max(2,margin*.4)){
-  const distance=new Float32Array(width*height),out=new Uint8ClampedArray(mask.length);
-  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    const p=y*width+x;distance[p]=mask[p*4+3]>245 && x && y && x<width-1 && y<height-1 ? 1e6 : 0;
-    if(x)distance[p]=Math.min(distance[p],distance[p-1]+1);
-    if(y)distance[p]=Math.min(distance[p],distance[p-width]+1);
-  }
-  for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){
-    const p=y*width+x;
-    if(x<width-1)distance[p]=Math.min(distance[p],distance[p+1]+1);
-    if(y<height-1)distance[p]=Math.min(distance[p],distance[p+width]+1);
-    out[p*4]=out[p*4+1]=out[p*4+2]=255;
-    const t=Math.max(0,Math.min(1,(distance[p]-margin)/feather));
-    out[p*4+3]=255*t*t*(3-2*t);
-  }
-  return out;
-}
-
-export function repairBlemishes(source,baseline,skin,width,height,radius){
+// Local blemish repair: finds small red spots against a blurred baseline and paints them
+// over with the surrounding skin colour and lighting.
+export function repairBlemishes(
+  source: Uint8ClampedArray,
+  baseline: Uint8ClampedArray,
+  skin: Uint8ClampedArray,
+  width: number,
+  height: number,
+  radius: number,
+): Uint8ClampedArray {
   const output=new Uint8ClampedArray(source.length),seed=new Uint8Array(width*height),seen=new Uint8Array(width*height);
-  const red=(r,g,b)=>(r-(g+b)/2)/Math.max(30,r+g+b);
+  const red=(r: number,g: number,b: number)=>(r-(g+b)/2)/Math.max(30,r+g+b);
   for(let p=0;p<seed.length;p++){
     const i=p*4;
     if(skin[i+3]<250)continue;
@@ -30,7 +19,7 @@ export function repairBlemishes(source,baseline,skin,width,height,radius){
   }
   for(let start=0;start<seed.length;start++){
     if(!seed[start]||seen[start])continue;
-    const queue=[start];seen[start]=1;
+    const queue: number[]=[start];seen[start]=1;
     let minX=width,maxX=0,minY=height,maxY=0;
     for(let n=0;n<queue.length;n++){
       const p=queue[n],x=p%width,y=Math.floor(p/width);
@@ -49,7 +38,7 @@ export function repairBlemishes(source,baseline,skin,width,height,radius){
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
     const rx=Math.max(2,bw*.65+1),ry=Math.max(2,bh*.65+1);
     const ring=Math.max(radius,Math.max(rx,ry)*1.7);
-    const samples=[];
+    const samples: number[][]=[];
     for(let k=0;k<32;k++){
       const a=k*Math.PI/16,x=Math.round(cx+Math.cos(a)*ring),y=Math.round(cy+Math.sin(a)*ring);
       if(x<0||x>=width||y<0||y>=height)continue;
@@ -68,7 +57,7 @@ export function repairBlemishes(source,baseline,skin,width,height,radius){
     });
     // Fit the surrounding illumination, rather than painting a flat-colour
     // disk across a nose/cheek gradient. Robust weights reject donor outliers.
-    const plane=[0,1,2].map(ch=>{
+    const plane: [number,number,number][]=[0,1,2].map((ch): [number,number,number]=>{
       let sw=0,sx=0,sy=0,sxx=0,sxy=0,syy=0,sz=0,sxz=0,syz=0;
       for(const sample of samples){
         const x=sample[3],y=sample[4],z=sample[ch];
