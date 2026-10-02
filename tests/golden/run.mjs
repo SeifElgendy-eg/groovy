@@ -3,6 +3,7 @@
 //   node tests/golden/run.mjs --url http://127.0.0.1:8080/            (compare)
 // The DOM ids / data-attributes used below are the test contract: keep them stable in any refactor.
 import { chromium } from "playwright";
+import { preview } from "vite";
 import sharp from "sharp";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +12,13 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const arg = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
-const URL_ = arg("--url", "http://127.0.0.1:8080/");
+// Without --url, serve the freshly built dist/ (run `npm run build` first).
+let previewServer = null;
+let URL_ = arg("--url", "");
+if (!URL_) {
+  previewServer = await preview({ preview: { host: "127.0.0.1", port: 0, strictPort: false, open: false } });
+  URL_ = previewServer.resolvedUrls.local[0];
+}
 const UPDATE = args.includes("--update");
 const GOLD = path.join(here, "golden-images");
 const OUT = path.join(here, "out");
@@ -68,4 +75,5 @@ for (const s of scenarios) {
   if (!ok) failed++;
 }
 await browser.close();
+await previewServer?.close();
 process.exit(failed ? 1 : 0);

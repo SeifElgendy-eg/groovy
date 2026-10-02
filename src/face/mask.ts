@@ -13,29 +13,13 @@
 //                         off by several pixels. Boundary pixels are re-tested against the skin
 //                         colour next to them at full resolution; hair/brow pixels get dropped.
 //                         This is what lets the mask run right up to the hairline.
-const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
-const smooth = (t) => t * t * (3 - 2 * t);
-
-export const FACE_OVAL = [
-  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378,
-  400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21,
-  54, 103, 67, 109,
-];
-// Full lid loops, outer corner first (index 0), inner corner at index 8.
-export const RIGHT_EYE = [
-  33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7,
-];
-export const LEFT_EYE = [
-  263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390,
-  249,
-];
-export const BROWS = [
-  [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
-  [336, 296, 334, 293, 300, 276, 283, 282, 295, 285],
-];
+import type { Point } from "../core/types";
+import { BROWS, FACE_OVAL, LEFT_EYE, RIGHT_EYE } from "../core/landmarks";
+import { clamp, smooth } from "../imaging/math";
+import { distanceToOutside } from "../imaging/maskOps";
 
 // ------------------------------------------------------------------ 1. oval
-export function faceOval(points, faceWidth) {
+export function faceOval(points: Point[], faceWidth: number): Point[] {
   const top = points[10],
     chin = points[152];
   let ux = top.x - chin.x,
@@ -77,7 +61,14 @@ export function faceOval(points, faceWidth) {
 
 // ------------------------------------------------------------------ 2. guards
 // Grow a contour along the head's own axes: sideways, upward, downward.
-function growAxial(pts, ux, uy, g) {
+interface Growth {
+  side: number;
+  up: number;
+  down: number;
+  blend: number;
+}
+
+function growAxial(pts: Point[], ux: number, uy: number, g: Growth): Point[] {
   const vx = -uy,
     vy = ux;
   let cx = 0,
@@ -101,12 +92,12 @@ function growAxial(pts, ux, uy, g) {
 }
 
 // Returns polygons (arrays of {x,y}) to carve out of the treatable mask.
-export function guardContours(points, faceWidth) {
+export function guardContours(points: Point[], faceWidth: number): Point[][] {
   const P = points,
     angle = Math.atan2(P[263].y - P[33].y, P[263].x - P[33].x),
     ux = Math.cos(angle),
     uy = Math.sin(angle),
-    out = [];
+    out: Point[][] = [];
   for (const loop of [RIGHT_EYE, LEFT_EYE]) {
     const ew = Math.hypot(
       P[loop[0]].x - P[loop[8]].x,
@@ -146,14 +137,21 @@ export function guardContours(points, faceWidth) {
 // ------------------------------------------------------------------ 3. refine
 // mask, source: RGBA arrays. Returns a new RGBA mask with hair/brow/shadow pixels removed from
 // the boundary band (`band` px wide) of the skin region.
+export interface RefineOptions {
+  darkRatio?: number;
+  chromaRatio?: number;
+  radius?: number;
+  passes?: number;
+}
+
 export function refineSkinMask(
-  mask,
-  source,
-  width,
-  height,
+  mask: Uint8ClampedArray,
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
   band = 4,
-  opt = {},
-) {
+  opt: RefineOptions = {},
+): Uint8ClampedArray {
   const {
     darkRatio = 0.72,
     chromaRatio = 0.5,
@@ -161,31 +159,16 @@ export function refineSkinMask(
     passes = 3,
   } = opt;
   const n = width * height,
-    BIG = 1e6,
-    dist = new Float32Array(n),
     inside = new Uint8Array(n);
   for (let p = 0; p < n; p++) inside[p] = mask[p * 4 + 3] >= 128 ? 1 : 0;
-  // Chamfer distance (4-neighbour) to the nearest non-skin pixel; image border counts as non-skin.
-  for (let y = 0; y < height; y++)
-    for (let x = 0; x < width; x++) {
-      const p = y * width + x;
-      dist[p] =
-        inside[p] && x && y && x < width - 1 && y < height - 1 ? BIG : 0;
-      if (x) dist[p] = Math.min(dist[p], dist[p - 1] + 1);
-      if (y) dist[p] = Math.min(dist[p], dist[p - width] + 1);
-    }
-  for (let y = height - 1; y >= 0; y--)
-    for (let x = width - 1; x >= 0; x--) {
-      const p = y * width + x;
-      if (x < width - 1) dist[p] = Math.min(dist[p], dist[p + 1] + 1);
-      if (y < height - 1) dist[p] = Math.min(dist[p], dist[p + width] + 1);
-    }
+  // Chamfer distance to the nearest non-skin pixel; the image border counts as non-skin.
+  const dist = distanceToOutside(mask, width, height, 128);
   // Integral images of luminance and redness (r-g) over the RELIABLE interior only.
   const W = width + 1,
     L = new Float64Array(W * (height + 1)),
     C = new Float64Array(W * (height + 1)),
     N = new Float64Array(W * (height + 1));
-  const lumAt = (i) =>
+  const lumAt = (i: number) =>
     source[i] * 0.2126 + source[i + 1] * 0.7152 + source[i + 2] * 0.0722;
   for (let y = 0; y < height; y++) {
     let rl = 0,
@@ -205,7 +188,7 @@ export function refineSkinMask(
       N[q] = N[q - W] + rn;
     }
   }
-  const sum = (S, x0, y0, x1, y1) =>
+  const sum = (S: Float64Array, x0: number, y0: number, x1: number, y1: number) =>
     S[(y1 + 1) * W + x1 + 1] -
     S[y0 * W + x1 + 1] -
     S[(y1 + 1) * W + x0] +
