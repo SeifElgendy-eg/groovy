@@ -44,6 +44,9 @@ const scenarios = [
   { name: "wrinkles-100", module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn", steps: [] },
   { name: "skin-brightness-60", hiddenEntry: true, module: "#chooseSkinBtn", sample: "#sampleBtn", steps: ["set:#brightnessSlider=60"] },
   { name: "acne-pores-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#poresSlider=100"] },
+  // A real photo with acne scars and enlarged pores (tests/golden/fixtures), loaded as an upload.
+  { name: "acne-real-scars-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#scarsSlider=100"] },
+  { name: "acne-real-pores-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#poresSlider=100"] },
   { name: "acne-scars-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#scarsSlider=100"] },
   ...[50, 80, 100].map((p) => ({
     name: `acne-${p}`, module: "#chooseAcneBtn", sample: "#acneSampleBtn",
@@ -64,7 +67,8 @@ for (const s of scenarios) {
   // The skin service has no visible entry button (hidden in index.html), so click it by script.
   if (s.hiddenEntry) await page.evaluate((sel) => document.querySelector(sel).click(), s.module);
   else await page.click(s.module);
-  await page.click(s.sample);
+  if (s.upload) await page.setInputFiles("#fileInput", path.join(here, "fixtures", s.upload));
+  else await page.click(s.sample);
   await page.waitForFunction(
     () => document.getElementById("perfBadge").textContent === "PHOTO READY" &&
           document.getElementById("faceBadge").classList.contains("detected"),

@@ -165,10 +165,8 @@ export class AcneEffect {
     crop.canvas.height = ch;
     crop.ctx.translate(-x, -y);
     input.drawFrame(crop.ctx, w, h);
-    // Texture is measured on the picture with the spots already repaired, so pimples (and their
-    // edges) do not show up as "pits" and leave rings around the repairs.
-    crop.ctx.imageSmoothingEnabled = true;
-    crop.ctx.drawImage(this.out.canvas, 0, 0, w, h);
+    // Texture is measured on the real photo. (Where spots get repaired, draw() removes the texture
+    // correction under the repair, in proportion to the spot slider.)
     const pixels = crop.ctx.getImageData(0, 0, cw, ch).data;
     // The acne mask (analysis resolution, already feathered and with features carved out),
     // scaled up onto the crop.
@@ -205,12 +203,38 @@ export class AcneEffect {
         if (strength <= 0) continue;
         target.globalAlpha = strength;
         target.globalCompositeOperation = "multiply";
-        target.drawImage(layer.mul, t.x, t.y);
+        target.drawImage(this.withoutSpots(layer.mul, t.x, t.y, w, h, amount), t.x, t.y);
         target.globalCompositeOperation = "lighter";
-        target.drawImage(layer.add, t.x, t.y);
+        target.drawImage(this.withoutSpots(layer.add, t.x, t.y, w, h, amount), t.x, t.y);
         target.globalCompositeOperation = "source-over";
       }
     }
     target.restore();
+  }
+
+  private holes = scratch();
+
+  /**
+   * The texture layer with holes where spots are being repaired (the repair already replaces those
+   * pixels; texture computed from the pimple would leave rings). Transparent pixels change nothing
+   * under both multiply and lighter compositing.
+   */
+  private withoutSpots(layer: HTMLCanvasElement, x: number, y: number, w: number, h: number, amount: number): HTMLCanvasElement {
+    if (amount <= 0) return layer;
+    const { canvas, ctx } = this.holes;
+    if (canvas.width !== layer.width || canvas.height !== layer.height) {
+      canvas.width = layer.width;
+      canvas.height = layer.height;
+    }
+    ctx.globalCompositeOperation = "copy";
+    ctx.globalAlpha = 1;
+    ctx.drawImage(layer, 0, 0);
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.globalAlpha = amount;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.out.canvas, -x, -y, w, h);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    return canvas;
   }
 }

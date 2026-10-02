@@ -5,3 +5,5 @@ acne-80
 acne-100
 acne-pores-100
 acne-scars-100
+acne-real-scars-100
+acne-real-pores-100
