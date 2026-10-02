@@ -1,0 +1,66 @@
+name: golden-images
+
+# A/B regression check: build the base ref and the head ref on the SAME runner, render the sample
+# photos with the base to create baselines, then compare the head against them. Machine- and
+# browser-version differences cancel out because both sides run in this one job.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Reference commit/branch (the known-good code)"
+        default: "73f13e8"
+      head:
+        description: "Commit/branch under test"
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base }}
+      HEAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.head }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.HEAD_REF }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # The base may predate the harness, so always run the head's harness against both sides.
+      - name: Render baselines from the base ref
+        run: |
+          git worktree add ../base "$BASE_REF"
+          mkdir -p ../base/tests/golden
+          cp tests/golden/run.mjs ../base/tests/golden/run.mjs
+          ln -s "$PWD/node_modules" ../base/node_modules
+          cd ../base
+          npm run build
+          npm run golden:update
+
+      - name: Compare the head ref against them
+        run: |
+          mkdir -p tests/golden/golden-images
+          cp ../base/tests/golden/golden-images/*.png tests/golden/golden-images/
+          npm run build
+          npm run golden
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-renders
+          path: |
+            tests/golden/out
+            ../base/tests/golden/out
+          if-no-files-found: ignore
