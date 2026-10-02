@@ -10,6 +10,7 @@ import {
 } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { mountFaceGuide } from "../ui/faceGuide";
+import { mountCameraPanel } from "../ui/cameraPanel";
 import { mountStatusToast, setStatus } from "../ui/status";
 import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
@@ -181,6 +182,7 @@ export function start(): void {
   mountFaceGuide();
   mountStatusToast();
   mountCaptureButton();
+  mountCameraPanel();
   bindControls();
   setStatus("Loading models…");
   dom.stageWrap.classList.add("camera-mode");

@@ -11,6 +11,7 @@ import { startCameraLoop } from "./loop";
 import { clearFace, processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { state } from "./state";
+import { cameraTuning } from "./cameraTuning";
 
 let stream: MediaStream | null = null;
 let cameraStarting = false;
@@ -37,6 +38,7 @@ export async function startCamera(): Promise<void> {
     video.srcObject = stream;
     await metadata;
     await video.play();
+    void cameraTuning.attach(stream);
 
     const { w, h } = getSourceDims();
     ensureSizes(w, h);
@@ -49,6 +51,7 @@ export async function startCamera(): Promise<void> {
     console.error(err);
     stopStream(stream);
     stream = null;
+    cameraTuning.detach();
     setStatus(describeCameraError(err), "error");
   } finally {
     cameraStarting = false;

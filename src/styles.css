@@ -771,3 +771,63 @@ body:not(.home-screen) .stage-wrap {
 .status-toast[hidden] {
   display: none;
 }
+
+/* Staff camera panel (Ctrl+Shift+C). */
+.camera-panel {
+  position: absolute;
+  z-index: 21;
+  top: 12px;
+  right: 12px;
+  width: min(340px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1c1124f2;
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+}
+.camera-panel[hidden] {
+  display: none;
+}
+.camera-panel .cam-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+.camera-panel .bad {
+  color: var(--bad);
+}
+.camera-panel .cam-meter {
+  font-variant-numeric: tabular-nums;
+}
+.camera-panel .cam-controls {
+  display: grid;
+  gap: 10px;
+}
+.camera-panel .cam-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+.camera-panel .cam-range input {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.camera-panel small {
+  color: var(--muted);
+}
+.camera-panel .cam-select {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 6px;
+}
