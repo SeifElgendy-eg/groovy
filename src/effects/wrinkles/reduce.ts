@@ -75,9 +75,9 @@ export interface WrinkleOptions {
 
 export interface WrinkleCorrection {
   /** Per-channel gain <= 1 (255 = no change). */
-  mul: Uint8ClampedArray;
+  mul: Uint8ClampedArray<ArrayBuffer>;
   /** Per-channel light to add (0 = no change). */
-  add: Uint8ClampedArray;
+  add: Uint8ClampedArray<ArrayBuffer>;
 }
 
 export function reduceWrinkles(

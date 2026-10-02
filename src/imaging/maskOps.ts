@@ -40,7 +40,7 @@ export function insetSkinMask(
   height: number,
   margin: number,
   feather: number = Math.max(2, margin * 0.4),
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const distance = distanceToOutside(mask, width, height, 246);
   const out = new Uint8ClampedArray(mask.length);
   for (let p = 0; p < width * height; p++) {

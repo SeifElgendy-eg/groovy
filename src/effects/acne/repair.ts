@@ -7,7 +7,7 @@ export function repairBlemishes(
   width: number,
   height: number,
   radius: number,
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const output=new Uint8ClampedArray(source.length),seed=new Uint8Array(width*height),seen=new Uint8Array(width*height);
   const red=(r: number,g: number,b: number)=>(r-(g+b)/2)/Math.max(30,r+g+b);
   for(let p=0;p<seed.length;p++){

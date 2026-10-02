@@ -1,20 +1,9 @@
-import { reduceWrinkles } from "../effects/wrinkles/reduce";
-import { wrinkleRegions } from "../effects/wrinkles/regions";
-import { faceOval, guardContours, refineSkinMask } from "../face/mask";
-import { repairBlemishes } from "../effects/acne/repair";
-import { insetSkinMask } from "../imaging/maskOps";
-import {
-  addClosedContour,
-  carveContours,
-} from "../imaging/contours";
+import { AcneEffect } from "../effects/acne/effect";
+import { WrinklesEffect } from "../effects/wrinkles/effect";
 import { metaOf } from "../effects/registry";
 import { buildLipData } from "../effects/lips/geometry";
 import { LipRenderer, needsWarp } from "../effects/lips/renderer";
-import {
-  ACNE_EXCLUSION_CONTOURS,
-  OUTER_LIP,
-  WRINKLE_EXCLUSION_CONTOURS,
-} from "../core/landmarks";
+import { insetSkinMask } from "../imaging/maskOps";
 import {
   FilesetResolver,
   ImageSegmenter,
@@ -33,31 +22,13 @@ const acneSection = document.getElementById("acneSection");
 const acneSlider = document.getElementById("acneSlider");
 const acneValue = document.getElementById("acneValue");
 const acneStatus = document.getElementById("acneStatus");
-const acneCanvas = document.createElement("canvas"),
-  acneWork = document.createElement("canvas"),
-  acneBlur = document.createElement("canvas"),
-  acneMask = document.createElement("canvas");
-const acneCtx = acneCanvas.getContext("2d"),
-  acneWorkCtx = acneWork.getContext("2d", { willReadFrequently: true }),
-  acneBlurCtx = acneBlur.getContext("2d", { willReadFrequently: true }),
-  acneMaskCtx = acneMask.getContext("2d", { willReadFrequently: true });
+const acne = new AcneEffect();
+const wrinkles = new WrinklesEffect();
 let facePoints = null,
-  photoKind = "upload",
-  acneDirty = true,
-  acneLastFrame = 0;
+  photoKind = "upload";
 const wrinklesSection = document.getElementById("wrinklesSection"),
   wrinklesSlider = document.getElementById("wrinklesSlider"),
   wrinklesValue = document.getElementById("wrinklesValue");
-const wrinklesCanvas = document.createElement("canvas"),
-  wrinklesMulCanvas = document.createElement("canvas"),
-  wrinklesWork = document.createElement("canvas"),
-  wrinklesMask = document.createElement("canvas");
-const wrinklesCtx = wrinklesCanvas.getContext("2d"),
-  wrinklesMulCtx = wrinklesMulCanvas.getContext("2d"),
-  wrinklesWorkCtx = wrinklesWork.getContext("2d", { willReadFrequently: true }),
-  wrinklesMaskCtx = wrinklesMask.getContext("2d", { willReadFrequently: true });
-let wrinklesDirty = true,
-  wrinklesLastFrame = 0;
 function sampleKind() {
   return metaOf(currentModule).sampleKind;
 }
@@ -338,8 +309,8 @@ function setModule(moduleName) {
   sampleBtn.textContent = meta.sampleButtonLabel;
   showBefore = false;
   syncBefore();
-  acneDirty = true;
-  wrinklesDirty = true;
+  acne.dirty = true;
+  wrinkles.dirty = true;
   if (
     moduleName !== "home" &&
     sourceMode === "photo" &&
@@ -541,8 +512,8 @@ async function handlePhoto(file) {
   photoKind = "upload";
   facePoints = null;
   lipData = null;
-  acneDirty = true;
-  wrinklesDirty = true;
+  acne.dirty = true;
+  wrinkles.dirty = true;
   const url = URL.createObjectURL(file);
   photo.onload = async () => {
     setSourceMode("photo");
@@ -572,8 +543,8 @@ async function loadSamplePhoto() {
   photoKind = sampleKind();
   facePoints = null;
   lipData = null;
-  acneDirty = true;
-  wrinklesDirty = true;
+  acne.dirty = true;
+  wrinkles.dirty = true;
   photo.onload = async () => {
     setSourceMode("photo");
     updateFaceGuide(null);
@@ -613,8 +584,8 @@ function pointForDisplay(lm, w, h) {
 
 function updateLipData(landmarks, w, h) {
   facePoints = landmarks;
-  acneDirty = true;
-  wrinklesDirty = true;
+  acne.dirty = true;
+  wrinkles.dirty = true;
   updateFaceGuide(landmarks);
   lipData = buildLipData(landmarks, w, h, sourceMode === "camera");
   faceBadge.textContent = "Face detected";
@@ -685,8 +656,8 @@ async function processCurrentSource() {
       );
       mask.close();
       skinMaskReady = true;
-      acneDirty = true;
-      wrinklesDirty = true;
+      acne.dirty = true;
+      wrinkles.dirty = true;
     }
     const faceRes =
       modelMode === "VIDEO"
@@ -697,8 +668,8 @@ async function processCurrentSource() {
     } else {
       lipData = null;
       facePoints = null;
-      acneDirty = true;
-      wrinklesDirty = true;
+      acne.dirty = true;
+      wrinkles.dirty = true;
       updateFaceGuide(null);
       faceBadge.textContent = "No face — try a clearer front-facing photo";
       faceBadge.classList.remove("detected");
@@ -728,8 +699,8 @@ function startCameraLoop() {
   lastCameraTime = -1;
   facePoints = null;
   lipData = null;
-  acneDirty = true;
-  wrinklesDirty = true;
+  acne.dirty = true;
+  wrinkles.dirty = true;
   const { w, h } = getSourceDims();
   ensureSizes(w, h);
   cameraFrameRequest = requestAnimationFrame(renderLoop);
@@ -774,213 +745,6 @@ function renderSkin(w, h) {
   ctx.drawImage(skinCanvas, 0, 0);
 }
 
-function prepareAcne(w, h) {
-  const scale = Math.min(
-    1,
-    (sourceMode === "camera" ? 640 : 1024) / Math.max(w, h),
-  );
-  const aw = Math.round(w * scale),
-    ah = Math.round(h * scale);
-  for (const canvas of [acneCanvas, acneWork, acneBlur, acneMask]) {
-    canvas.width = aw;
-    canvas.height = ah;
-  }
-  drawForDisplay(acneWorkCtx, aw, ah);
-  acneMaskCtx.save();
-  if (sourceMode === "camera") {
-    acneMaskCtx.translate(aw, 0);
-    acneMaskCtx.scale(-1, 1);
-  }
-  acneMaskCtx.drawImage(maskCanvas, 0, 0, aw, ah);
-  acneMaskCtx.restore();
-  const points = facePoints.map((p) => pointForDisplay(p, aw, ah));
-  const faceWidth = Math.hypot(
-    points[234].x - points[454].x,
-    points[234].y - points[454].y,
-  );
-  const radius = Math.max(5, faceWidth * 0.035);
-  // Tight feature contours leave the forehead, under-eye skin, nose and chin
-  // available for blemish repair, rather than excluding large bounding ellipses.
-  acneMaskCtx.save();
-  acneMaskCtx.globalCompositeOperation = "destination-out";
-  carveContours(
-    acneMaskCtx,
-    ACNE_EXCLUSION_CONTOURS,
-    points,
-    Math.max(1, faceWidth * 0.005),
-  );
-  // Protect lip corners and the natural dark crease beside the mouth.
-  // Expand in the mouth's local axes, so protection follows head rotation.
-  const mouth = OUTER_LIP.map((i) => points[i]);
-  const mx = (mouth[0].x + mouth[10].x) / 2,
-    my = (mouth[0].y + mouth[10].y) / 2;
-  const angle = Math.atan2(mouth[10].y - mouth[0].y, mouth[10].x - mouth[0].x);
-  const ux = Math.cos(angle),
-    uy = Math.sin(angle);
-  const protectedMouth = mouth.map((p) => {
-    const dx = p.x - mx,
-      dy = p.y - my,
-      u = (dx * ux + dy * uy) * 1.3,
-      v = (-dx * uy + dy * ux) * 1.35;
-    return { x: mx + u * ux - v * uy, y: my + u * uy + v * ux };
-  });
-  acneMaskCtx.beginPath();
-  addClosedContour(acneMaskCtx, protectedMouth);
-  acneMaskCtx.fill();
-  acneMaskCtx.lineWidth = Math.max(2, faceWidth * 0.012);
-  acneMaskCtx.stroke();
-  acneMaskCtx.restore();
-  acneBlurCtx.filter = `blur(${radius * 0.65}px)`;
-  acneBlurCtx.drawImage(acneWork, 0, 0);
-  acneBlurCtx.filter = "none";
-  const inset = insetSkinMask(
-    acneMaskCtx.getImageData(0, 0, aw, ah).data,
-    aw,
-    ah,
-    Math.max(2, Math.ceil(faceWidth * 0.007)),
-  );
-  acneMaskCtx.putImageData(new ImageData(inset, aw, ah), 0, 0);
-  const corrected = repairBlemishes(
-    acneWorkCtx.getImageData(0, 0, aw, ah).data,
-    acneBlurCtx.getImageData(0, 0, aw, ah).data,
-    acneMaskCtx.getImageData(0, 0, aw, ah).data,
-    aw,
-    ah,
-    radius,
-  );
-  // Fade the correction inward from every protected boundary, without
-  // expanding the correction into hair, eyes or lips.
-  const faded = insetSkinMask(inset, aw, ah, 0, Math.max(4, faceWidth * 0.035));
-  for (let i = 3; i < corrected.length; i += 4)
-    corrected[i] = (corrected[i] * faded[i]) / 255;
-  acneMaskCtx.putImageData(new ImageData(faded, aw, ah), 0, 0);
-  acneCtx.putImageData(new ImageData(corrected, aw, ah), 0, 0);
-  acneDirty = false;
-  acneLastFrame = performance.now();
-}
-
-function prepareWrinkles(w, h) {
-  const scale = Math.min(
-    1,
-    (sourceMode === "camera" ? 640 : 1024) / Math.max(w, h),
-  );
-  const aw = Math.round(w * scale),
-    ah = Math.round(h * scale);
-  for (const canvas of [
-    wrinklesCanvas,
-    wrinklesMulCanvas,
-    wrinklesWork,
-    wrinklesMask,
-  ]) {
-    canvas.width = aw;
-    canvas.height = ah;
-  }
-  drawForDisplay(wrinklesWorkCtx, aw, ah);
-  wrinklesMaskCtx.save();
-  if (sourceMode === "camera") {
-    wrinklesMaskCtx.translate(aw, 0);
-    wrinklesMaskCtx.scale(-1, 1);
-  }
-  wrinklesMaskCtx.drawImage(maskCanvas, 0, 0, aw, ah);
-  wrinklesMaskCtx.restore();
-  const points = facePoints.map((p) => pointForDisplay(p, aw, ah));
-  const faceWidth = Math.hypot(
-    points[234].x - points[454].x,
-    points[234].y - points[454].y,
-  );
-
-  // 1. Face only: clip to the landmark oval so ears (and anything else the segmenter calls
-  //    skin outside the face) can never be treated.
-  wrinklesMaskCtx.save();
-  wrinklesMaskCtx.globalCompositeOperation = "destination-in";
-  wrinklesMaskCtx.fillStyle = "#fff";
-  wrinklesMaskCtx.beginPath();
-  addClosedContour(wrinklesMaskCtx, faceOval(points, faceWidth));
-  wrinklesMaskCtx.fill();
-  wrinklesMaskCtx.restore();
-
-  wrinklesMaskCtx.save();
-  wrinklesMaskCtx.globalCompositeOperation = "destination-out";
-  carveContours(
-    wrinklesMaskCtx,
-    WRINKLE_EXCLUSION_CONTOURS,
-    points,
-    Math.max(1, faceWidth * 0.005),
-  );
-  // 2. Lashes and eyebrows: full loops grown outward, with a rounded edge.
-  wrinklesMaskCtx.lineJoin = "round";
-  wrinklesMaskCtx.lineWidth = Math.max(1.5, faceWidth * 0.008);
-  for (const poly of guardContours(points, faceWidth)) {
-    wrinklesMaskCtx.beginPath();
-    addClosedContour(wrinklesMaskCtx, poly);
-    wrinklesMaskCtx.fill();
-    wrinklesMaskCtx.stroke();
-  }
-  // The bridge and sidewalls are facial shape, not wrinkle creases.
-  // Protect the complete nose, with an inward feather below.
-  const noseTop = points[6],
-    noseBottom = points[2];
-  const nx = (noseTop.x + noseBottom.x) / 2,
-    ny = (noseTop.y + noseBottom.y) / 2;
-  const noseHeight = Math.hypot(
-    noseBottom.x - noseTop.x,
-    noseBottom.y - noseTop.y,
-  );
-  const noseWidth = Math.hypot(
-    points[98].x - points[327].x,
-    points[98].y - points[327].y,
-  );
-  wrinklesMaskCtx.beginPath();
-  wrinklesMaskCtx.ellipse(
-    nx,
-    ny,
-    Math.max(4, noseWidth * 0.8),
-    Math.max(6, noseHeight * 0.68),
-    -Math.atan2(noseBottom.x - noseTop.x, noseBottom.y - noseTop.y),
-    0,
-    Math.PI * 2,
-  );
-  wrinklesMaskCtx.fill();
-  wrinklesMaskCtx.restore();
-  const original = wrinklesWorkCtx.getImageData(0, 0, aw, ah).data;
-  // 3. Snap the soft 256px segmentation edge to the real hairline using the photo's own
-  //    colours, then fade inward. Small margin/feather = treatment runs close to the hair.
-  const refined = refineSkinMask(
-    wrinklesMaskCtx.getImageData(0, 0, aw, ah).data,
-    original,
-    aw,
-    ah,
-    Math.max(3, Math.round(faceWidth * 0.02)),
-  );
-  const faded = insetSkinMask(
-    refined,
-    aw,
-    ah,
-    1,
-    Math.max(3, faceWidth * 0.01),
-  );
-  wrinklesMaskCtx.putImageData(new ImageData(faded, aw, ah), 0, 0);
-  const regions = wrinkleRegions(points, faceWidth);
-  // reduceWrinkles returns a signed correction: `mul` (gain <= 1) and `add` (light).
-  // Only these smooth maps are upscaled, never a downsampled copy of the skin, so the
-  // full-resolution photo keeps its own texture inside and outside the treated areas.
-  const { add, mul } = reduceWrinkles(
-    original,
-    faded,
-    aw,
-    ah,
-    Math.max(2, Math.round(faceWidth * 0.012)),
-    regions,
-    // Smoothing strength. smoothing: how big a fold the filter flattens (default 1, max ~2.2).
-    // lines: removal of faint thin lines (default 1). texture: pore detail kept (default 0.9;
-    // lower = smoother but more "plastic").
-    { smoothing: 1.25, lines: 1.3, texture: 0.82 },
-  );
-  wrinklesCtx.putImageData(new ImageData(add, aw, ah), 0, 0);
-  wrinklesMulCtx.putImageData(new ImageData(mul, aw, ah), 0, 0);
-  wrinklesDirty = false;
-  wrinklesLastFrame = performance.now();
-}
 function renderWrinkles(w, h) {
   if (currentModule !== "wrinkles" || !skinMaskReady) return;
   const status = document.getElementById("wrinklesStatus");
@@ -993,20 +757,15 @@ function renderWrinkles(w, h) {
   status.textContent = "Compare Before and After to preview smoother skin.";
   const amount = Number(wrinklesSlider.value) / 100;
   if (amount <= 0 && !skinDebug.checked) return;
-  if (wrinklesDirty) prepareWrinkles(w, h);
-  ctx.save();
+  if (wrinkles.dirty) wrinkles.prepare(skinInput(w, h));
   // Photos: draw the native photo first. Camera frames are already on the stage.
   if (sourceMode === "photo") {
+    ctx.save();
     ctx.globalAlpha = 1;
     drawForDisplay(ctx, w, h);
+    ctx.restore();
   }
-  ctx.globalAlpha = amount;
-  ctx.imageSmoothingEnabled = true;
-  ctx.globalCompositeOperation = "multiply";
-  ctx.drawImage(wrinklesMulCanvas, 0, 0, w, h); // darken ridges
-  ctx.globalCompositeOperation = "lighter";
-  ctx.drawImage(wrinklesCanvas, 0, 0, w, h); // fill creases
-  ctx.restore();
+  wrinkles.draw(ctx, w, h, amount);
 }
 
 function renderAcne(w, h) {
@@ -1021,12 +780,20 @@ function renderAcne(w, h) {
     "Compare Before and After to preview reduced blemishes and redness";
   const amount = Number(acneSlider.value) / 100;
   if (amount <= 0 && !skinDebug.checked) return;
-  if (acneDirty) prepareAcne(w, h);
-  ctx.save();
-  ctx.globalAlpha = amount;
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(acneCanvas, 0, 0, w, h);
-  ctx.restore();
+  if (acne.dirty) acne.prepare(skinInput(w, h));
+  acne.draw(ctx, w, h, amount);
+}
+
+// Everything the skin effects need from this app, as plain data.
+function skinInput(w, h) {
+  return {
+    drawFrame: (c, aw, ah) => drawForDisplay(c, aw, ah),
+    segMask: maskCanvas,
+    landmarks: facePoints,
+    mirrored: sourceMode === "camera",
+    w,
+    h,
+  };
 }
 
 function renderSkinDebug(w, h) {
@@ -1101,8 +868,8 @@ const effectActive = {
     lipDebug.checked,
 };
 const debugMasks = {
-  acne: () => acneMask,
-  wrinkles: () => wrinklesMask,
+  acne: () => acne.maskCanvas,
+  wrinkles: () => wrinkles.maskCanvas,
   skin: () => skinEffectMask,
 };
 
