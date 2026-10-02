@@ -39,15 +39,23 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   await page.click(choose);
   await page.click(sample);
   await page.waitForFunction(() => document.getElementById("perfBadge").textContent === "PHOTO READY" && document.getElementById("faceBadge").classList.contains("detected"), null, { timeout: 120000 });
-  await page.waitForTimeout(800);
+  const settled = async () => {
+    await page.waitForTimeout(300);
+    await page.waitForFunction(() => !document.body.dataset.effectsBusy, null, { timeout: 60000 });
+    await page.waitForTimeout(200);
+  };
+  await settled();
   const off = await page.evaluate(() => stage.toDataURL());
   await page.evaluate(() => { skinDebug.checked = true; skinDebug.dispatchEvent(new Event("change")); });
-  await page.waitForTimeout(800);
+  await settled();
   const on = await page.evaluate(() => stage.toDataURL());
   const ok = on !== off;
   console.log(ok ? "ok  " : "FAIL", choose, "debug mask overlay draws");
   if (!ok) bad++;
   await page.evaluate(() => { skinDebug.checked = false; });
+  const where = await page.evaluate(() => document.body.dataset.skinCompute);
+  console.log(where === "worker" ? "ok  " : "FAIL", choose, "skin effect computed in the Web Worker:", where);
+  if (where !== "worker") bad++;
 }
 // Live camera path: start the (fake) camera, pick a service, the capture guide must appear.
 {

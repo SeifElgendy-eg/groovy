@@ -49,6 +49,32 @@ function renderSkin(w: number, h: number): void {
   );
 }
 
+interface AsyncEffect {
+  dirty: boolean;
+  busy: boolean;
+  ready: boolean;
+  prepare(input: SkinInput): Promise<boolean>;
+}
+
+/**
+ * Start the effect's (worker-side) preparation if its input changed. Returns whether a prepared
+ * result for the current input is ready to draw; when one arrives later the stage redraws itself.
+ * `body[data-effects-busy]` is set meanwhile, so tests can wait for the final picture.
+ */
+function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
+  if (effect.dirty && !effect.busy) {
+    document.body.dataset.effectsBusy = "1";
+    void effect
+      .prepare(skinInput(w, h))
+      .catch((err) => console.error("effect preparation failed", err))
+      .finally(() => {
+        if (!acne.busy && !wrinkles.busy) delete document.body.dataset.effectsBusy;
+        renderAll();
+      });
+  }
+  return effect.ready;
+}
+
 function renderWrinkles(w: number, h: number): void {
   if (!state.skinMaskReady) return;
   const status = dom.wrinklesStatus;
@@ -61,7 +87,7 @@ function renderWrinkles(w: number, h: number): void {
   status.textContent = "Compare Before and After to preview smoother skin.";
   const amount = Number(dom.wrinklesSlider.value) / 100;
   if (amount <= 0 && !dom.skinDebug.checked) return;
-  if (wrinkles.dirty) wrinkles.prepare(skinInput(w, h));
+  const ready = ensurePrepared(wrinkles, w, h);
   // Photos: draw the native photo first. Camera frames are already on the stage.
   if (state.sourceMode === "photo") {
     ctx.save();
@@ -69,7 +95,7 @@ function renderWrinkles(w: number, h: number): void {
     drawForDisplay(ctx, w, h);
     ctx.restore();
   }
-  wrinkles.draw(ctx, w, h, amount);
+  if (ready) wrinkles.draw(ctx, w, h, amount);
 }
 
 function renderAcne(w: number, h: number): void {
@@ -84,8 +110,7 @@ function renderAcne(w: number, h: number): void {
     "Compare Before and After to preview reduced blemishes and redness";
   const amount = Number(dom.acneSlider.value) / 100;
   if (amount <= 0 && !dom.skinDebug.checked) return;
-  if (acne.dirty) acne.prepare(skinInput(w, h));
-  acne.draw(ctx, w, h, amount);
+  if (ensurePrepared(acne, w, h)) acne.draw(ctx, w, h, amount);
 }
 
 const effectRender: Partial<Record<ModuleId, Draw>> = {
@@ -105,9 +130,9 @@ const effectActive: Record<ServiceId, () => boolean> = {
     dom.lipDebug.checked,
 };
 
-const debugMasks: Partial<Record<ModuleId, () => HTMLCanvasElement>> = {
-  acne: () => acne.maskCanvas,
-  wrinkles: () => wrinkles.maskCanvas,
+const debugMasks: Partial<Record<ModuleId, () => HTMLCanvasElement | null>> = {
+  acne: () => (acne.ready ? acne.maskCanvas : null),
+  wrinkles: () => (wrinkles.ready ? wrinkles.maskCanvas : null),
   skin: () => skinEffectMask.canvas,
 };
 
