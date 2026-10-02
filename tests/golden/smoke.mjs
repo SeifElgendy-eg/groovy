@@ -68,6 +68,17 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   const ok = state.guideShown && state.capture && state.source.includes("CAMERA") && state.label === "Position your face inside the oval";
   console.log(ok ? "ok  " : "FAIL", "live camera shows the capture guide", JSON.stringify(state));
   if (!ok) bad++;
+
+  // Staff camera panel: opens with Ctrl+Shift+C and reports the granted stream resolution.
+  await cam.keyboard.press("Control+Shift+C");
+  await cam.waitForTimeout(300);
+  const panel = await cam.evaluate(() => {
+    const p = document.querySelector(".camera-panel");
+    return { shown: !!p && !p.hidden, res: p?.querySelector("[data-res]")?.textContent ?? "" };
+  });
+  const panelOk = panel.shown && /\d+×\d+ @ \d+ fps/.test(panel.res);
+  console.log(panelOk ? "ok  " : "FAIL", "camera panel shows the stream", JSON.stringify(panel));
+  if (!panelOk) bad++;
   await cam.close();
 }
 // Camera failures must be visible to the user (they used to be swallowed silently).

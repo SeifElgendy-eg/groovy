@@ -4,6 +4,8 @@ import { ensureSizes, getSourceDims } from "./frames";
 import { perf, clearFace, processCurrentSource } from "./pipeline";
 import { cameraNeedsEffect, renderAll } from "./render";
 import { state } from "./state";
+import { cameraTuning } from "./cameraTuning";
+import { sourceCtx } from "./frames";
 
 let frameRequest = 0;
 let lastCameraTime = -1;
@@ -28,7 +30,11 @@ async function tick(now: number): Promise<void> {
   const { video, perfBadge } = dom;
   if (video.readyState >= 2 && video.currentTime !== lastCameraTime) {
     lastCameraTime = video.currentTime;
-    if (state.module !== "home") await processCurrentSource();
+    if (state.module !== "home") {
+      await processCurrentSource();
+      const { w, h } = getSourceDims();
+      cameraTuning.observe(sourceCtx, w, h, state.facePoints);
+    }
     if (!state.running || state.sourceMode !== "camera") return;
     renderAll();
   }
