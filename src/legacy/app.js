@@ -194,9 +194,20 @@ const sourceCtx = sourceCanvas.getContext("2d");
 
 const lipRenderer = new LipRenderer();
 
-function setStatus(_text, _type = "loading") {
-  // Status UI has been removed; keep this function as a no-op
-  // so existing loading/camera flow remains unchanged.
+// Only problems are shown to the user. Progress messages stay silent, but any newer status
+// (loading, ready) replaces a previous error, so a retry starts from a clean screen.
+const statusToast = document.createElement("div");
+statusToast.className = "status-toast";
+statusToast.setAttribute("role", "alert");
+statusToast.hidden = true;
+stageWrap.append(statusToast);
+function setStatus(text, type = "loading") {
+  if (type === "error") {
+    statusToast.textContent = text;
+    statusToast.hidden = false;
+  } else {
+    statusToast.hidden = true;
+  }
 }
 
 function setSourceMode(mode) {
