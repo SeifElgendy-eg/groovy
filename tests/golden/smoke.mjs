@@ -2,7 +2,11 @@
 import { chromium } from "playwright";
 import { preview } from "vite";
 const server = await preview({ preview: { host: "127.0.0.1", port: 0, open: false } });
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH || undefined,
+  // Fake camera so the live-camera path (permission, stream, guide, capture button) is exercised.
+  args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+});
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
@@ -44,6 +48,27 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   console.log(ok ? "ok  " : "FAIL", choose, "debug mask overlay draws");
   if (!ok) bad++;
   await page.evaluate(() => { skinDebug.checked = false; });
+}
+// Live camera path: start the (fake) camera, pick a service, the capture guide must appear.
+{
+  const cam = await browser.newPage();
+  cam.on("pageerror", (e) => errors.push(e.message));
+  await cam.goto(server.resolvedUrls.local[0]);
+  await cam.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await cam.click("#chooseLipsBtn"); // the viewer is hidden on the home screen
+  await cam.click("#startBtn");
+  await cam.waitForFunction(() => document.getElementById("overlay").classList.contains("hidden"), null, { timeout: 30000 });
+  await cam.waitForTimeout(800);
+  const state = await cam.evaluate(() => ({
+    guideShown: !document.querySelector(".face-guide").hidden,
+    label: document.querySelector(".face-guide-label").textContent,
+    source: document.getElementById("sourceBadge").textContent,
+    capture: !!document.querySelector(".capture-photo"),
+  }));
+  const ok = state.guideShown && state.capture && state.source.includes("CAMERA") && state.label === "Position your face inside the oval";
+  console.log(ok ? "ok  " : "FAIL", "live camera shows the capture guide", JSON.stringify(state));
+  if (!ok) bad++;
+  await cam.close();
 }
 if (errors.length) { console.log("page errors:", errors); bad++; }
 await browser.close(); await server.close();
