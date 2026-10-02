@@ -1,5 +1,5 @@
 # Golden scenarios this PR changes on purpose, one per line. CI only honours this file when the
 # PR itself edits it, so an entry never silently carries over to later PRs. Clear it after merging.
-acne-50
-acne-80
-acne-100
+lips-preset-16
+lips-preset-28
+lips-preset-50

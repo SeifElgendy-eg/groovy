@@ -4,6 +4,8 @@ import type { Point } from "../../core/types";
 import { addClosedContour, boundsOfPoints } from "../../imaging/contours";
 import { computeLipTargets, type LipData, type LipParams } from "./geometry";
 import { colorLips } from "./color";
+import { cpuWarp, GlWarp } from "./glWarp";
+import { buildMesh, sampleGrid, warpRoi } from "./warpField";
 
 function scratch(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -15,11 +17,15 @@ export const needsWarp = (p: LipParams): boolean => p.amount > 0.001;
 
 export class LipRenderer {
   private mask = scratch();
-  private warped = scratch();
   private feather = scratch();
+  /** The frame's warp ROI (input), and the CPU fallback's output. */
+  private roiFrame = scratch();
+  private warped = scratch();
+  /** Created on first use; null when WebGL2 is unavailable. */
+  private gl: GlWarp | null | undefined;
 
   resize(w: number, h: number): void {
-    for (const { canvas } of [this.mask, this.warped, this.feather]) {
+    for (const { canvas } of [this.mask, this.feather]) {
       canvas.width = w;
       canvas.height = h;
     }
@@ -39,36 +45,7 @@ export class LipRenderer {
   ): void {
     const { targetOuter, targetInner } = computeLipTargets(lip, p);
 
-    if (needsWarp(p)) {
-      this.warped.ctx.clearRect(0, 0, w, h);
-      // A fixed surrounding ring joins the expanded lips back to nearby skin.
-      const rim = lip.outerPts.map((pt) => ({
-        x: lip.outer.cx + (pt.x - lip.outer.cx) * 2.2,
-        y: lip.cy + (pt.y - lip.cy) * 2.8,
-      }));
-      // Nonlinear cross-section rolls the tissue outward instead of stretching it flat.
-      let previousSource = lip.innerPts,
-        previousTarget = targetInner;
-      const steps = 6;
-      for (let band = 1; band <= steps; band++) {
-        const t = band / steps;
-        const roll = Math.max(0, Math.min(1, (p.roll - 0.2) / 0.8));
-        const rolled = t + p.amount * (0.04 + roll * 0.44) * Math.sin(Math.PI * t);
-        const sourceRing = lip.outerPts.map((pt, i) => ({
-          x: lip.innerPts[i].x + (pt.x - lip.innerPts[i].x) * t,
-          y: lip.innerPts[i].y + (pt.y - lip.innerPts[i].y) * t,
-        }));
-        const targetRing = targetOuter.map((pt, i) => ({
-          x: targetInner[i].x + (pt.x - targetInner[i].x) * rolled,
-          y: targetInner[i].y + (pt.y - targetInner[i].y) * rolled,
-        }));
-        this.warpRing(frame, previousSource, sourceRing, previousTarget, targetRing);
-        previousSource = sourceRing;
-        previousTarget = targetRing;
-      }
-      this.warpRing(frame, lip.outerPts, rim, targetOuter, rim);
-      target.drawImage(this.warped.canvas, 0, 0);
-    }
+    if (needsWarp(p)) this.warp(target, frame, lip, targetOuter, p, w, h);
 
     this.renderColor(target, targetOuter, targetInner, p, w, h);
     // Preserve the photographed lighting; do not add synthetic reflections.
@@ -88,46 +65,49 @@ export class LipRenderer {
     }
   }
 
-  // Affine texture mapping makes the actual lip tissue follow its new contour.
-  private warpTriangle(frame: HTMLCanvasElement, source: Point[], target: Point[]): void {
-    const [a, b, c] = source,
-      [u, v, z] = target;
-    const det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-    if (Math.abs(det) < 0.001) return;
-    const A = ((v.x - u.x) * (c.y - a.y) - (z.x - u.x) * (b.y - a.y)) / det;
-    const C = ((z.x - u.x) * (b.x - a.x) - (v.x - u.x) * (c.x - a.x)) / det;
-    const B = ((v.y - u.y) * (c.y - a.y) - (z.y - u.y) * (b.y - a.y)) / det;
-    const D = ((z.y - u.y) * (b.x - a.x) - (v.y - u.y) * (c.x - a.x)) / det;
-    const ctx = this.warped.ctx;
-    ctx.save();
-    ctx.beginPath();
-    addClosedContour(ctx, target);
-    ctx.clip();
-    ctx.setTransform(A, B, C, D, u.x - A * a.x - C * a.y, u.y - B * a.x - D * a.y);
-    ctx.drawImage(frame, 0, 0);
-    ctx.restore();
+  /** Create the WebGL context and compile the shader now, not on the customer's first move. */
+  warmUp(): void {
+    if (this.gl === undefined) this.gl = GlWarp.create();
+    if (!this.gl) return;
+    const tiny = scratch();
+    tiny.canvas.width = tiny.canvas.height = 4;
+    this.gl.render(tiny.canvas, { roi: { x: 0, y: 0, w: 4, h: 4 }, cols: 2, rows: 2, sx: 4, sy: 4, data: new Float32Array(8) });
   }
 
-  private warpRing(
+  /**
+   * Grow the lips: one continuous warp of the lip region (see warpField.ts), drawn by the GPU when
+   * WebGL2 is available, else on the CPU. Only the warp's ROI is read and redrawn.
+   */
+  private warp(
+    target: CanvasRenderingContext2D,
     frame: HTMLCanvasElement,
-    inner: Point[],
-    outer: Point[],
-    targetInner: Point[],
+    lip: LipData,
     targetOuter: Point[],
+    p: LipParams,
+    w: number,
+    h: number,
   ): void {
-    for (let i = 0; i < outer.length; i++) {
-      const j = (i + 1) % outer.length;
-      this.warpTriangle(
-        frame,
-        [inner[i], outer[i], outer[j]],
-        [targetInner[i], targetOuter[i], targetOuter[j]],
-      );
-      this.warpTriangle(
-        frame,
-        [inner[i], outer[j], inner[j]],
-        [targetInner[i], targetOuter[j], targetInner[j]],
-      );
+    const mesh = buildMesh(lip, targetOuter, p);
+    const roi = warpRoi(mesh, w, h);
+    if (roi.w < 2 || roi.h < 2) return;
+    const grid = sampleGrid(mesh, roi);
+    const { canvas: roiCanvas, ctx: roiCtx } = this.roiFrame;
+    if (roiCanvas.width !== roi.w || roiCanvas.height !== roi.h) {
+      roiCanvas.width = roi.w;
+      roiCanvas.height = roi.h;
     }
+    roiCtx.clearRect(0, 0, roi.w, roi.h);
+    roiCtx.drawImage(frame, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h);
+    if (this.gl === undefined) this.gl = GlWarp.create();
+    let patch: HTMLCanvasElement;
+    if (this.gl && !this.gl.lost) {
+      patch = this.gl.render(roiCanvas, grid);
+      document.body.dataset.lipWarp = "webgl";
+    } else {
+      patch = cpuWarp(roiCanvas, grid, this.warped.canvas);
+      document.body.dataset.lipWarp = "cpu";
+    }
+    target.drawImage(patch, roi.x, roi.y);
   }
 
   private buildFeather(targetOuter: Point[], targetInner: Point[], blend: number, w: number, h: number): void {
