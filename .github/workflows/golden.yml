@@ -60,7 +60,12 @@ jobs:
       - name: Compare the head ref against them
         run: |
           npm run build
-          npm run golden
+          # Intentional visual changes: honoured only when this PR edits the list itself.
+          if git diff --name-only "$BASE_REF" "$HEAD_REF" -- tests/golden/expected-changes.txt | grep -q .; then
+            node tests/golden/run.mjs --allow-changes tests/golden/expected-changes.txt
+          else
+            npm run golden
+          fi
 
       - name: Unit tests
         run: npm test
