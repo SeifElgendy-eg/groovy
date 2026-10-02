@@ -109,3 +109,14 @@ export interface ExposureTarget {
 // Skin always has some specular shine (forehead, nose tip, glasses), so a few blown pixels are
 // normal: only a clearly blown face (>5% of the sampled skin) counts as over-exposed.
 export const DEFAULT_TARGET: ExposureTarget = { mean: 120, maxClipped: 0.05 };
+
+/**
+ * Software lift for a face the camera cannot make bright enough: the gamma (< 1 brightens) that
+ * maps the face's mean to the target. Gamma lifts shadows and mid-tones while leaving white at
+ * white, so unlike a plain brightness gain it cannot blow out highlights. 1 = no change.
+ */
+export function liftGamma(mean: number, target = DEFAULT_TARGET.mean, minGamma = 0.55): number {
+  if (mean >= target * 0.92 || mean < 4) return 1;
+  const g = Math.log(target / 255) / Math.log(mean / 255);
+  return Math.max(minGamma, Math.min(1, g));
+}

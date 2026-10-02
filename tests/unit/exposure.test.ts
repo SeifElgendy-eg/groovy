@@ -47,3 +47,21 @@ describe("frame safety net", () => {
     expect(isUnusableFrame(meterFrame(frame(64, 64, 120), 64, 64))).toBe(false);
   });
 });
+
+import { liftGamma } from "../../src/face/exposure";
+
+describe("liftGamma (software lift)", () => {
+  it("maps a dark face mean onto the target and leaves white at white", () => {
+    const g = liftGamma(70);
+    expect(g).toBeLessThan(1);
+    expect(255 * Math.pow(70 / 255, g)).toBeCloseTo(120, 0);
+    expect(255 * Math.pow(1, g)).toBe(255);
+  });
+  it("does nothing for a face that is already bright enough", () => {
+    expect(liftGamma(118)).toBe(1);
+    expect(liftGamma(200)).toBe(1);
+  });
+  it("is limited, so a nearly black frame is not stretched into noise", () => {
+    expect(liftGamma(10)).toBe(0.55);
+  });
+});
