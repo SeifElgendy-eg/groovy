@@ -1,0 +1,14 @@
+{
+  "name": "groovy",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "golden": "node tests/golden/run.mjs",
+    "golden:update": "node tests/golden/run.mjs --update"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "sharp": "^0.35.5"
+  }
+}
