@@ -23,8 +23,8 @@ let modelMode: "IMAGE" | "VIDEO" = "IMAGE";
 let processing = false;
 let processingPending = false;
 
-/** Frames processed since the perf badge was last refreshed. */
-export const perf = { frames: 0 };
+/** Live-analysis counters: frames since the last badge refresh, last second's rate, avg cost. */
+export const perf = { frames: 0, fps: 0, avgMs: 0 };
 
 export async function initModels(): Promise<void> {
   try {
