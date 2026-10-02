@@ -14,10 +14,9 @@ import {
   faceMeterBox,
   isUnusableFrame,
   meterPixels,
-  nextExposure,
-  nextOffset,
   type FaceMeter,
 } from "../face/exposure";
+import { calibrate, type CalibrationResult } from "../face/calibrate";
 import type { NormalizedLandmark } from "../effects/skin/input";
 
 const STORAGE_KEY = "groovy.camera.v1";
@@ -63,10 +62,13 @@ class CameraTuning {
   private track: MediaStreamTrack | null = null;
   private saved = load();
   private lastMeterAt = 0;
-  private lastAdjustAt = 0;
-  private adjusting = false;
-  /** Last step landed in the dead band: hold until the face drifts clearly off target. */
-  private onTarget = false;
+  /** A calibration run is in progress. */
+  calibrating = false;
+  private lastCalibratedAt = -Infinity;
+  /** When the face first drifted off target (0 = on target). */
+  private driftSince = 0;
+  /** Calibration waits for readings taken after the camera has had time to apply a value. */
+  private waiters: { after: number; frames: number; resolve: (m: FaceMeter | null) => void }[] = [];
   /** The staff panel is open (it shows the live reading). */
   panelOpen = false;
   private listeners = new Set<Listener>();
@@ -131,7 +133,8 @@ class CameraTuning {
 
   setFaceAuto(on: boolean): void {
     this.saved.faceAuto = on;
-    this.autoNote = on ? "waiting for a face" : "";
+    this.autoNote = on ? "watching the face" : "";
+    if (on) void this.calibrateNow();
     // Switching off hands exposure back to the camera, so it cannot stay stuck at the last step.
     if (!on && this.track) {
       delete this.saved.values.exposureTime;
@@ -160,8 +163,8 @@ class CameraTuning {
   }
 
   /**
-   * Called with live frames the pipeline analysed (un-mirrored source canvas).
-   * Meters ~3x/s; adjusts at most every 800 ms so the camera can settle between steps.
+   * Called with live frames the pipeline analysed (un-mirrored source canvas). Meters ~3x/s
+   * normally, every frame while calibrating.
    */
   observe(
     src: CanvasImageSource,
@@ -169,73 +172,106 @@ class CameraTuning {
     h: number,
     landmarks: NormalizedLandmark[] | null,
   ): void {
-    if (!this.wantsFrames) return;
+    if (!this.wantsFrames && !this.calibrating) return;
     const now = performance.now();
-    if (now - this.lastMeterAt < 330) return;
+    if (!this.calibrating && now - this.lastMeterAt < 330) return;
     this.lastMeterAt = now;
     const box = landmarks ? faceMeterBox(landmarks, w, h, false) : null;
     this.meter = box ? meterPixels(readScaled(src, box.x, box.y, box.w, box.h), METER) : null;
+    // With no face (e.g. the picture is black or white), fall back to the whole frame, so a
+    // calibration can still tell "too dark" from "too bright" and recover.
+    const reading = this.meter ?? meterPixels(readScaled(src, 0, 0, w, h), METER);
     this.emit();
-    if (!this.saved.faceAuto || !this.track || this.adjusting) return;
-    if (now - this.lastAdjustAt < 800) return;
-    if (this.meter) {
-      const off = Math.abs(this.meter.mean - DEFAULT_TARGET.mean) / DEFAULT_TARGET.mean;
-      const blown = this.meter.clipped > DEFAULT_TARGET.maxClipped;
-      if (this.onTarget && off < 0.2 && !blown) return; // hysteresis: no needless camera calls
-      return void this.adjust(this.meter);
+
+    if (this.waiters.length) {
+      for (const wt of this.waiters) wt.frames++;
+      const ready = this.waiters.filter((wt) => now >= wt.after && wt.frames >= 2);
+      this.waiters = this.waiters.filter((wt) => !ready.includes(wt));
+      for (const wt of ready) wt.resolve(reading);
     }
-    // No face: only act if the whole frame is so dark/bright that a face could not be seen.
-    // (A black frame hides the face from the detector, which would otherwise stay stuck.)
-    const frame = meterPixels(readScaled(src, 0, 0, w, h), METER)!;
-    if (isUnusableFrame(frame)) void this.adjust(frame, "frame");
-    else this.autoNote = "waiting for a face";
+    if (!this.saved.faceAuto || !this.track || this.calibrating) return;
+
+    // Keep-right mode: recalibrate only when the face has been clearly off target for a moment.
+    const off = this.meter
+      ? Math.abs(this.meter.mean - DEFAULT_TARGET.mean) / DEFAULT_TARGET.mean > 0.25 ||
+        this.meter.clipped > DEFAULT_TARGET.maxClipped * 3
+      : !!reading && isUnusableFrame(reading);
+    if (!off) {
+      this.driftSince = 0;
+      return;
+    }
+    this.driftSince ||= now;
+    if (now - this.driftSince > 1200 && now - this.lastCalibratedAt > 3000) void this.calibrateNow();
   }
 
-  private async adjust(meter: FaceMeter, basis: "face" | "frame" = "face"): Promise<void> {
-    const track = this.track!;
-    this.adjusting = true;
+  /** A reading taken at least `settleMs` after now and two analysed frames later. */
+  private nextReading(settleMs = 350): Promise<FaceMeter | null> {
+    return new Promise((resolve) => {
+      const waiter = { after: performance.now() + settleMs, frames: 0, resolve };
+      this.waiters.push(waiter);
+      setTimeout(() => {
+        if (this.waiters.includes(waiter)) {
+          this.waiters = this.waiters.filter((x) => x !== waiter);
+          resolve(null); // no frames arrived (camera stopped, or on the home screen)
+        }
+      }, 3000);
+    });
+  }
+
+  /** Measure the face and set the camera so the face sits at the target brightness. */
+  async calibrateNow(): Promise<void> {
+    const track = this.track;
+    if (!track || this.calibrating) return;
+    this.calibrating = true;
+    this.autoNote = "calibrating…";
+    this.emit();
     try {
+      const fps = this.info?.frameRate || 30;
+      const settings = track.getSettings() as Record<string, unknown>;
+      const run = (name: "exposureTime" | "brightness", r: RangeControl, kind: "multiplicative" | "additive") =>
+        calibrate(
+          {
+            set: async (v) => void (await setControl(track, name, v)),
+            measure: () => this.nextReading(),
+          },
+          Number(this.saved.values[name] ?? settings[name] ?? r.value),
+          r,
+          kind,
+        );
+      let result: CalibrationResult | null = null;
+      let used: "exposureTime" | "brightness" | null = null;
       const time = this.range("exposureTime");
       if (time) {
-        // exposureTime is in 100 µs units; longer than one frame would drop the frame rate.
-        const fps = this.info?.frameRate || 30;
-        const current = Number((track.getSettings() as Record<string, unknown>).exposureTime ?? time.value);
-        // Never force the value below where the camera already is in one jump: the frame-time
-        // cap only stops us going LONGER than one frame, it must not slam a longer auto value down.
-        const max = Math.max(Math.min(time.max, 10000 / fps), current);
-        const next = nextExposure(current, meter, { min: time.min, max });
-        if (next !== null) {
-          const stepped = Math.max(time.min, Math.round(next / time.step) * time.step);
-          await setControl(track, "exposureTime", stepped);
-          this.autoNote = `${basis === "frame" ? "dark/bright frame, " : ""}exposure ${current.toFixed(0)} → ${stepped.toFixed(0)}`;
-          this.lastAdjustAt = performance.now();
-          this.onTarget = false;
-          this.refresh();
-        } else {
-          this.autoNote = "face exposure on target";
-          this.onTarget = true;
-        }
-        return;
+        result = await run("exposureTime", time, "multiplicative");
+        used = "exposureTime";
       }
       const brightness = this.range("brightness");
-      if (brightness) {
-        const current = Number((track.getSettings() as Record<string, unknown>).brightness ?? brightness.value);
-        const next = nextOffset(current, meter, brightness);
-        if (next !== null) {
-          await setControl(track, "brightness", next);
-          this.autoNote = `brightness ${current} → ${next}`;
-          this.lastAdjustAt = performance.now();
-          this.onTarget = false;
-          this.refresh();
-        } else {
-          this.autoNote = "face exposure on target";
-          this.onTarget = true;
-        }
+      if (brightness && (!result || result.reason === "ignored")) {
+        result = await run("brightness", brightness, "additive");
+        used = "brightness";
+      }
+      if (!result || !used) {
+        this.autoNote = "this camera exposes no exposure or brightness control";
         return;
       }
-      this.autoNote = "this camera exposes no exposure or brightness control";
+      console.info(`camera calibration (${used}): ${result.reason}\n  ` + result.log.join("\n  "));
+      this.saved.values[used] = result.value;
+      if (used === "exposureTime") this.saved.values.exposureMode = "manual";
+      save(this.saved);
+      const face = result.meter ? `face ${result.meter.mean.toFixed(0)}/255` : "no reading";
+      const slow = used === "exposureTime" && result.value > 10000 / fps ? " · longer than one frame: add light for full frame rate" : "";
+      this.autoNote = {
+        "on-target": `calibrated in ${result.steps} steps: ${face} (${used} ${result.value})${slow}`,
+        limit: `best possible: ${face} at the camera's ${used} limit${slow}`,
+        "max-steps": `stopped after ${result.steps} steps: ${face} (${used} ${result.value})`,
+        ignored: `the camera ignores ${used} changes from the browser`,
+        unreadable: "could not read the picture: start the camera inside a service",
+      }[result.reason];
     } finally {
-      this.adjusting = false;
+      this.calibrating = false;
+      this.lastCalibratedAt = performance.now();
+      this.driftSince = 0;
+      this.refresh();
     }
   }
 }
