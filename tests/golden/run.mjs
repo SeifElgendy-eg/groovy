@@ -34,6 +34,7 @@ const scenarios = [
   })),
   { name: "lips-color-28", module: "#chooseLipsBtn", sample: "#sampleBtn", steps: ['[data-shade="brightred"]'] },
   { name: "wrinkles-100", module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn", steps: [] },
+  { name: "skin-brightness-60", hiddenEntry: true, module: "#chooseSkinBtn", sample: "#sampleBtn", steps: ["set:#brightnessSlider=60"] },
   ...[50, 80, 100].map((p) => ({
     name: `acne-${p}`, module: "#chooseAcneBtn", sample: "#acneSampleBtn",
     steps: [`[data-acne-preset="${p}"]`],
@@ -47,13 +48,24 @@ for (const s of scenarios) {
   page.on("pageerror", (e) => console.log("  pageerror:", e.message));
   await page.goto(URL_);
   await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
-  await page.click(s.module);
+  // The skin service has no visible entry button (hidden in index.html), so click it by script.
+  if (s.hiddenEntry) await page.evaluate((sel) => document.querySelector(sel).click(), s.module);
+  else await page.click(s.module);
   await page.click(s.sample);
   await page.waitForFunction(
     () => document.getElementById("perfBadge").textContent === "PHOTO READY" &&
           document.getElementById("faceBadge").classList.contains("detected"),
     null, { timeout: 120000 });
-  for (const sel of s.steps) await page.click(sel);
+  for (const sel of s.steps) {
+    if (sel.startsWith("set:")) {
+      const [id, value] = sel.slice(4).split("=");
+      await page.evaluate(([id, value]) => {
+        const el = document.querySelector(id);
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }, [id, value]);
+    } else await page.click(sel);
+  }
   await page.waitForTimeout(1500); // let prepare*/render settle
   const dataUrl = await page.evaluate(() => document.getElementById("stage").toDataURL("image/png"));
   const buf = Buffer.from(dataUrl.split(",")[1], "base64");

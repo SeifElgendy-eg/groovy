@@ -1,0 +1,66 @@
+// The stage canvas and the frame buffers: which source is visible, how big it is, and how to
+// draw it for display (mirrored for the camera).
+import { dom } from "../ui/dom";
+import { lipRenderer, skinBrightness } from "./effects";
+import { state } from "./state";
+
+export const stageCtx = dom.stage.getContext("2d")!;
+/** Frozen copy of the camera frame the models analysed, so effects draw over exactly that. */
+export const cameraSnapshot = document.createElement("canvas");
+const cameraSnapshotCtx = cameraSnapshot.getContext("2d")!;
+/** Un-mirrored frame handed to the models (and sampled by the lip warp). */
+export const sourceCanvas = document.createElement("canvas");
+export const sourceCtx = sourceCanvas.getContext("2d")!;
+
+function getVisibleSource(): HTMLImageElement | HTMLVideoElement {
+  return state.sourceMode === "photo" ? dom.photo : dom.video;
+}
+
+export function getSourceDims(): { w: number; h: number } {
+  const { photo, video } = dom;
+  if (state.sourceMode === "photo" && photo.naturalWidth) {
+    return { w: photo.naturalWidth, h: photo.naturalHeight };
+  }
+  const vw = video.videoWidth || 1280,
+    vh = video.videoHeight || 720;
+  const scale = Math.min(1, 640 / Math.max(vw, vh));
+  return { w: Math.round(vw * scale), h: Math.round(vh * scale) };
+}
+
+export function ensureSizes(w: number, h: number): void {
+  for (const c of [dom.stage, skinBrightness.canvas, sourceCanvas]) {
+    c.width = w;
+    c.height = h;
+  }
+  lipRenderer.resize(w, h);
+}
+
+/** Copy the current camera frame into the snapshot (camera mode only). */
+export function snapshotCamera(w: number, h: number): void {
+  cameraSnapshot.width = w;
+  cameraSnapshot.height = h;
+  cameraSnapshotCtx.drawImage(dom.video, 0, 0, w, h);
+}
+
+/** The frame the models analyse: the snapshot for the camera, the photo otherwise. */
+export function analysisSource(): CanvasImageSource {
+  return state.sourceMode === "camera" ? cameraSnapshot : getVisibleSource();
+}
+
+export function drawForDisplay(
+  targetCtx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  filter = "none",
+): void {
+  const mirrored = state.sourceMode === "camera";
+  targetCtx.save();
+  targetCtx.filter = filter;
+  if (mirrored) {
+    targetCtx.translate(w, 0);
+    targetCtx.scale(-1, 1);
+  }
+  targetCtx.drawImage(analysisSource(), 0, 0, w, h);
+  targetCtx.restore();
+  targetCtx.filter = "none";
+}
