@@ -3,6 +3,7 @@
 import type { Point } from "../../core/types";
 import { addClosedContour, boundsOfPoints } from "../../imaging/contours";
 import { computeLipTargets, type LipData, type LipParams } from "./geometry";
+import { colorLips } from "./color";
 
 function scratch(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -168,32 +169,7 @@ export class LipRenderer {
     if (rw <= 0 || rh <= 0) return;
     const pixels = target.getImageData(x, y, rw, rh);
     const mask = this.feather.ctx.getImageData(x, y, rw, rh).data;
-    const rgb = [1, 3, 5].map((start) =>
-      parseInt(p.shadeHex.slice(start, start + 2), 16),
-    );
-    const targetLuma = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
-    // Change chroma only: keep each pixel's photographed luminance exactly.
-    // Partial coverage retains natural lip variation even at maximum strength.
-    const chroma = rgb.map((v) => v - targetLuma);
-    for (let i = 0; i < pixels.data.length; i += 4) {
-      const lum =
-        pixels.data[i] * 0.2126 +
-        pixels.data[i + 1] * 0.7152 +
-        pixels.data[i + 2] * 0.0722;
-      const highlight = 1 - Math.max(0, Math.min(0.75, (lum - 150) / 100));
-      const shadow = Math.min(1, lum / 65);
-      const alpha =
-        Math.pow(mask[i + 3] / 255, 1.5) * intensity * 0.62 * highlight * shadow;
-      if (alpha < 0.001) continue;
-      let gamut = 1;
-      for (const delta of chroma) {
-        if (delta > 0) gamut = Math.min(gamut, (255 - lum) / delta);
-        if (delta < 0) gamut = Math.min(gamut, lum / -delta);
-      }
-      for (let ch = 0; ch < 3; ch++)
-        pixels.data[i + ch] =
-          pixels.data[i + ch] * (1 - alpha) + (lum + chroma[ch] * gamut) * alpha;
-    }
+    colorLips(pixels.data, mask, p.shadeHex, intensity, p.finish);
     target.putImageData(pixels, x, y);
   }
 }

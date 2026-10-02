@@ -67,6 +67,7 @@ export const dom = {
   // Groups selected by class / attribute rather than id.
   lipPresetButtons: [...document.querySelectorAll<HTMLButtonElement>(".preset-btn")],
   shadeButtons: [...document.querySelectorAll<HTMLButtonElement>(".shade-btn")],
+  finishButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-finish]")],
   acnePresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-acne-preset]")],
   wrinklesPresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-wrinkles-preset]")],
 };

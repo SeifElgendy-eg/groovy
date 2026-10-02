@@ -28,6 +28,7 @@ export const state = {
   capturedPhoto: false,
   selectedShade: "off",
   selectedShadeHex: "",
+  lipFinish: "natural" as "natural" | "matte" | "gloss",
 };
 
 export function resetAlignment(): void {

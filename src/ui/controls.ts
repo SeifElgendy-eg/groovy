@@ -58,6 +58,14 @@ export function syncLipPreset(): void {
   }
 }
 
+export function syncFinishButtons(): void {
+  for (const btn of dom.finishButtons) {
+    const active = btn.dataset.finish === state.lipFinish;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  }
+}
+
 export function syncShadeButtons(): void {
   for (const btn of dom.shadeButtons) {
     btn.classList.toggle("active", btn.dataset.shade === state.selectedShade);
@@ -71,6 +79,7 @@ export function readLipParams(): LipParams {
     blend: Number(dom.blendSlider.value) / 100,
     colorIntensity: Number(dom.colorSlider.value) / 100,
     shadeHex: state.selectedShadeHex,
+    finish: state.lipFinish,
     showOutline: dom.lipDebug.checked,
   };
 }

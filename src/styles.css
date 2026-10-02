@@ -831,3 +831,11 @@ body:not(.home-screen) .stage-wrap {
   border-radius: 8px;
   padding: 4px 6px;
 }
+
+/* Lip colour finish (Natural / Matte / Gloss) */
+.finish-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 12px 0 4px;
+}

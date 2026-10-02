@@ -21,6 +21,8 @@ export interface LipParams {
   blend: number;
   colorIntensity: number;
   shadeHex: string;
+  /** Lipstick finish: how the lip's own highlights are shown. */
+  finish: "natural" | "matte" | "gloss";
   showOutline: boolean;
 }
 

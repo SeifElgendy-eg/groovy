@@ -5,6 +5,7 @@ import {
   syncAcnePreset,
   syncBefore,
   syncLipPreset,
+  syncFinishButtons,
   syncShadeButtons,
   syncWrinklesPreset,
 } from "../ui/controls";
@@ -87,6 +88,8 @@ function resetAll(): void {
   dom.lipDebug.checked = false;
   state.selectedShade = "off";
   state.selectedShadeHex = "";
+  state.lipFinish = "natural";
+  syncFinishButtons();
   state.showBefore = metaOf(state.module).resetShowsBefore;
   syncBefore();
   syncLipPreset();
@@ -161,6 +164,12 @@ function bindControls(): void {
     btn.addEventListener("click", () =>
       setShade(btn.dataset.shade!, btn.dataset.hex!),
     );
+  for (const btn of dom.finishButtons)
+    btn.addEventListener("click", () => {
+      state.lipFinish = btn.dataset.finish as typeof state.lipFinish;
+      syncFinishButtons();
+      userChanged();
+    });
   bindSlider(dom.lipSlider, dom.lipValue, syncLipPreset);
   bindSlider(dom.verticalSlider, dom.verticalValue);
   bindSlider(dom.blendSlider, dom.blendValue);
