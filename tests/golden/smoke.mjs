@@ -70,6 +70,39 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   if (!ok) bad++;
   await cam.close();
 }
+// Camera failures must be visible to the user (they used to be swallowed silently).
+for (const [errName, expectedText] of [
+  ["NotAllowedError", "Allow camera access in your browser settings."],
+  ["NotFoundError", "No camera found. Connect a camera and try again."],
+  ["NotReadableError", "Camera is busy. Close other camera apps and try again."],
+]) {
+  const bad_ = await browser.newPage();
+  bad_.on("pageerror", (e) => errors.push(e.message));
+  await bad_.addInitScript((name) => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("x", name));
+  }, errName);
+  await bad_.goto(server.resolvedUrls.local[0]);
+  await bad_.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await bad_.click("#chooseLipsBtn");
+  await bad_.click("#startBtn");
+  await bad_.waitForTimeout(500);
+  const toast = await bad_.evaluate(() => {
+    const t = document.querySelector(".status-toast");
+    return { hidden: t.hidden, text: t.textContent, overlayStillUp: !document.getElementById("overlay").classList.contains("hidden") };
+  });
+  const ok = !toast.hidden && toast.text === expectedText && toast.overlayStillUp;
+  console.log(ok ? "ok  " : "FAIL", `${errName} shows: ${toast.text}`);
+  if (!ok) bad++;
+  // A retry clears the old message.
+  await bad_.addInitScript(() => {});
+  await bad_.evaluate(() => { navigator.mediaDevices.getUserMedia = () => new Promise(() => {}); });
+  await bad_.click("#startBtn");
+  await bad_.waitForTimeout(300);
+  const cleared = await bad_.evaluate(() => document.querySelector(".status-toast").hidden);
+  console.log(cleared ? "ok  " : "FAIL", `${errName}: message clears when the user retries`);
+  if (!cleared) bad++;
+  await bad_.close();
+}
 if (errors.length) { console.log("page errors:", errors); bad++; }
 await browser.close(); await server.close();
 process.exit(bad ? 1 : 0);

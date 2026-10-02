@@ -749,3 +749,25 @@ body:not(.home-screen) .stage-wrap {
     border-radius: 0 0 18px 18px;
   }
 }
+
+/* Errors only (camera blocked, model/photo failed). Above the start overlay so it is never hidden. */
+.status-toast {
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  width: max-content;
+  border-radius: 14px;
+  padding: 11px 18px;
+  background: #3a1a22f2;
+  border: 1px solid var(--bad);
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.status-toast[hidden] {
+  display: none;
+}
