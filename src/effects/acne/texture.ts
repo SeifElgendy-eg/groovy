@@ -13,6 +13,8 @@
 //   mul: multiply layer (gain <= 1, darkens) - RGB = 255 * gain, white where unchanged
 //   add: lighter layer (adds light)            - RGB = amount added, black where unchanged
 
+import { oklabToSrgb, srgbToOklab } from "../lips/color";
+
 type Pixels = Uint8ClampedArray<ArrayBuffer>;
 
 export interface TextureJob {
@@ -33,6 +35,7 @@ export interface Layers {
 export interface TextureResult {
   pores: Layers;
   scars: Layers;
+  redness: Layers;
 }
 
 /** How strongly each band is reduced at full strength: [dark parts, light parts]. */
@@ -250,5 +253,64 @@ export function textureCompute(j: TextureJob): TextureResult {
   return {
     pores: toLayers(pixels, lum, reduceBand(fine, PORE_REDUCTION, w, h, poreSigma * 2), j.mask),
     scars: scarLayers(pixels, lum, b1, j.mask, w, h, j.faceWidth),
+    redness: rednessLayers(pixels, j.mask, w, h, j.faceWidth),
   };
+}
+
+/** Share of the excess redness removed at full strength (a little is kept: skin is never grey). */
+export const REDNESS_REDUCTION = 0.85;
+
+/**
+ * Redness: inflamed patches and post-acne red marks are skin that is redder (OKLab a, the
+ * red-green axis) than this face's normal tone. The excess over the face's typical value is
+ * smoothed (so pores and fine texture are not recoloured one by one) and mostly removed, leaving
+ * lightness and the yellow-blue axis untouched: brightness and texture stay exactly as they were.
+ */
+function rednessLayers(pixels: Pixels, mask: Pixels, w: number, h: number, faceWidth: number): Layers {
+  const n = w * h;
+  const L = new Float32Array(n),
+    A = new Float32Array(n),
+    B = new Float32Array(n);
+  const skinA: number[] = [],
+    skinB: number[] = [];
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    const lab = srgbToOklab(pixels[i], pixels[i + 1], pixels[i + 2]);
+    L[p] = lab.L;
+    A[p] = lab.a;
+    B[p] = lab.b;
+    if (mask[i + 3] > 200 && (p & 3) === 0) {
+      skinA.push(lab.a);
+      skinB.push(lab.b);
+    }
+  }
+  const mul = new Uint8ClampedArray(n * 4).fill(255);
+  const add = new Uint8ClampedArray(n * 4);
+  for (let p = 0; p < n; p++) add[p * 4 + 3] = 255;
+  if (!skinA.length) return { mul, add };
+  // This face's normal tone: the median over its skin, on both colour axes.
+  skinA.sort((x, y) => x - y);
+  skinB.sort((x, y) => x - y);
+  const normal = skinA[skinA.length >> 1];
+  const normalB = skinB[skinB.length >> 1];
+  // Excess redness, smoothed at about pore-to-small-spot scale.
+  const excess = new Float32Array(n);
+  for (let p = 0; p < n; p++) excess[p] = Math.max(0, A[p] - normal);
+  const smooth = blurLike(excess, w, h, Math.max(1, faceWidth * 0.004));
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    const cut = Math.min(smooth[p], excess[p] + 0.004) * REDNESS_REDUCTION * (mask[i + 3] / 255);
+    if (cut < 0.002) continue;
+    // The share of this pixel's excess redness being removed; its yellow-blue tone moves toward
+    // the normal skin by the same share (removing red alone turns red patches lilac).
+    const share = Math.min(1, cut / Math.max(1e-4, A[p] - normal));
+    const rgb = oklabToSrgb(L[p], A[p] - cut, B[p] + (normalB - B[p]) * share * 0.8);
+    for (let c = 0; c < 3; c++) {
+      const v = pixels[i + c];
+      const d = rgb[c] - v;
+      if (d < 0) mul[i + c] = Math.round((255 * (v + d)) / Math.max(1, v));
+      else add[i + c] = d;
+    }
+  }
+  return { mul, add };
 }

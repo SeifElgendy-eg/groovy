@@ -17,6 +17,8 @@ export const dom = {
   scarsValue: el<HTMLElement>("scarsValue"),
   poresSlider: el<HTMLInputElement>("poresSlider"),
   poresValue: el<HTMLElement>("poresValue"),
+  rednessSlider: el<HTMLInputElement>("rednessSlider"),
+  rednessValue: el<HTMLElement>("rednessValue"),
   backHomeBtn: el<HTMLButtonElement>("backHomeBtn"),
   beforeBtn: el<HTMLButtonElement>("beforeBtn"),
   blendSlider: el<HTMLInputElement>("blendSlider"),

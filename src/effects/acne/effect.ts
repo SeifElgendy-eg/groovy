@@ -44,6 +44,7 @@ export class AcneEffect {
     y: number;
     pores: { mul: HTMLCanvasElement; add: HTMLCanvasElement };
     scars: { mul: HTMLCanvasElement; add: HTMLCanvasElement };
+    redness: { mul: HTMLCanvasElement; add: HTMLCanvasElement };
   } | null = null;
 
   /** The correction layer's final feathered mask, for the "show face mask" debug view. */
@@ -183,14 +184,14 @@ export class AcneEffect {
       return c;
     };
     const layers = (l: Layers) => ({ mul: toCanvas(l.mul), add: toCanvas(l.add) });
-    return { x, y, pores: layers(r.pores), scars: layers(r.scars) };
+    return { x, y, pores: layers(r.pores), scars: layers(r.scars), redness: layers(r.redness) };
   }
 
   /**
    * Composite the prepared corrections over `target`: spots at `amount`, then scars and pores at
    * their own strengths (all 0..1).
    */
-  draw(target: CanvasRenderingContext2D, w: number, h: number, amount: number, scars = 0, pores = 0): void {
+  draw(target: CanvasRenderingContext2D, w: number, h: number, amount: number, scars = 0, pores = 0, redness = 0): void {
     target.save();
     target.imageSmoothingEnabled = true;
     if (amount > 0) {
@@ -199,7 +200,7 @@ export class AcneEffect {
     }
     const t = this.texture;
     if (t) {
-      for (const [layer, strength] of [[t.scars, scars], [t.pores, pores]] as const) {
+      for (const [layer, strength] of [[t.scars, scars], [t.pores, pores], [t.redness, redness]] as const) {
         if (strength <= 0) continue;
         target.globalAlpha = strength;
         target.globalCompositeOperation = "multiply";

@@ -11,7 +11,7 @@ const api = {
   },
   texture(job: TextureJob) {
     const r = textureCompute(job);
-    return transfer(r, [r.pores.mul.buffer, r.pores.add.buffer, r.scars.mul.buffer, r.scars.add.buffer]);
+    return transfer(r, [r.pores.mul.buffer, r.pores.add.buffer, r.scars.mul.buffer, r.scars.add.buffer, r.redness.mul.buffer, r.redness.add.buffer]);
   },
   wrinkles(job: WrinklesJob) {
     const r = wrinklesCompute(job);

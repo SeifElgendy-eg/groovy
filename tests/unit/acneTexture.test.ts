@@ -113,3 +113,40 @@ describe("fast sliding min/max", () => {
     }
   });
 });
+
+import { srgbToOklab } from "../../src/effects/lips/color";
+
+describe("redness", () => {
+  // Normal skin with a red, inflamed patch in the middle.
+  const size = 80;
+  const px = new Uint8ClampedArray(size * size * 4);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const red = Math.hypot(x - 40, y - 40) < 14;
+      px.set(red ? [214, 140, 132, 255] : [210, 160, 140, 255], (y * size + x) * 4);
+    }
+  const mask = new Uint8ClampedArray(px.length).fill(255);
+  const r = textureCompute({ pixels: px, mask, width: size, height: size, faceWidth: 400 });
+  const centre = (40 * size + 40) * 4, normal = (5 * size + 5) * 4;
+
+  it("moves a red patch toward the face's normal tone", () => {
+    const out = apply(px, r.redness, 1);
+    const before = srgbToOklab(px[centre], px[centre + 1], px[centre + 2]).a;
+    const after = srgbToOklab(Math.round(out[centre]), Math.round(out[centre + 1]), Math.round(out[centre + 2])).a;
+    const skin = srgbToOklab(px[normal], px[normal + 1], px[normal + 2]).a;
+    expect(after).toBeLessThan(before);
+    expect(after - skin).toBeLessThan((before - skin) * 0.35);
+  });
+
+  it("keeps brightness (texture) unchanged", () => {
+    const out = apply(px, r.redness, 1);
+    const Lb = srgbToOklab(px[centre], px[centre + 1], px[centre + 2]).L;
+    const La = srgbToOklab(Math.round(out[centre]), Math.round(out[centre + 1]), Math.round(out[centre + 2])).L;
+    expect(Math.abs(La - Lb)).toBeLessThan(0.01);
+  });
+
+  it("leaves normal skin alone", () => {
+    const out = apply(px, r.redness, 1);
+    for (let c = 0; c < 3; c++) expect(Math.abs(out[normal + c] - px[normal + c])).toBeLessThan(1.5);
+  });
+});

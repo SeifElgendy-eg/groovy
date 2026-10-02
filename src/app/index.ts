@@ -75,7 +75,11 @@ function resetAll(): void {
   dom.acneSlider.value = "0";
   dom.acneValue.textContent = "0%";
   syncAcnePreset();
-  for (const [slider, label] of [[dom.scarsSlider, dom.scarsValue], [dom.poresSlider, dom.poresValue]] as const) {
+  for (const [slider, label] of [
+    [dom.scarsSlider, dom.scarsValue],
+    [dom.poresSlider, dom.poresValue],
+    [dom.rednessSlider, dom.rednessValue],
+  ] as const) {
     slider.value = "0";
     label.textContent = "0%";
   }
@@ -149,6 +153,7 @@ function bindControls(): void {
   // Acne scars and pores
   bindSlider(dom.scarsSlider, dom.scarsValue);
   bindSlider(dom.poresSlider, dom.poresValue);
+  bindSlider(dom.rednessSlider, dom.rednessValue);
 
   // Skin brightness
   bindSlider(dom.brightnessSlider, dom.brightnessValue);

@@ -47,6 +47,7 @@ const scenarios = [
   // A real photo with acne scars and enlarged pores (tests/golden/fixtures), loaded as an upload.
   { name: "acne-real-scars-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#scarsSlider=100"] },
   { name: "acne-real-pores-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#poresSlider=100"] },
+  { name: "acne-real-redness-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#rednessSlider=100"] },
   { name: "acne-scars-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#scarsSlider=100"] },
   ...[50, 80, 100].map((p) => ({
     name: `acne-${p}`, module: "#chooseAcneBtn", sample: "#acneSampleBtn",

@@ -7,3 +7,4 @@ acne-pores-100
 acne-scars-100
 acne-real-scars-100
 acne-real-pores-100
+acne-real-redness-100
