@@ -20,6 +20,12 @@ export const BROWS = [
 ];
 
 // Eyes, brows, outer lips and nose underside: never corrected by acne.
+/** Outer edge of each nostril wing, top to bottom (where the wing creases into the cheek). */
+export const NOSE_WING_EDGES = [
+  [209, 49, 129, 48, 64],
+  [429, 279, 358, 278, 294],
+];
+
 export const ACNE_EXCLUSION_CONTOURS = [
   EYE_RIGHT_CONTOUR,
   EYE_LEFT_CONTOUR,
