@@ -56,11 +56,18 @@ jobs:
           npm run build
           npm run golden
 
+      # upload-artifact can only read inside the workspace, so bring the base renders in first.
+      - name: Collect renders
+        if: always()
+        run: |
+          mkdir -p tests/golden/out-base
+          cp ../base/tests/golden/out/*.png tests/golden/out-base/ || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: golden-renders
           path: |
             tests/golden/out
-            ../base/tests/golden/out
+            tests/golden/out-base
           if-no-files-found: ignore
