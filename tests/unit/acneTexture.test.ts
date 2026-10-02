@@ -82,3 +82,34 @@ describe("acne texture keeps the overall tone", () => {
     }
   });
 });
+
+import { blurLike } from "../../src/effects/acne/texture";
+
+describe("scar relief helpers", () => {
+  it("blurLike keeps a flat image flat", () => {
+    const v = new Float32Array(100).fill(7);
+    for (const x of blurLike(v, 10, 10, 2)) expect(x).toBeCloseTo(7, 5);
+  });
+});
+
+import { slide } from "../../src/effects/acne/texture";
+
+describe("fast sliding min/max", () => {
+  it("matches a brute-force window min/max in both directions, any window", () => {
+    const w = 13, h = 9;
+    const v = new Float32Array(w * h).map((_, i) => ((i * 7919) % 101) - 50);
+    for (const k of [1, 2, 3, 6, 15]) for (const isMax of [true, false]) for (const vertical of [false, true]) {
+      const got = slide(v, w, h, k, isMax, vertical);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let best = isMax ? -Infinity : Infinity;
+        for (let d = -k; d <= k; d++) {
+          const xx = vertical ? x : x + d, yy = vertical ? y + d : y;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          const val = v[yy * w + xx];
+          best = isMax ? Math.max(best, val) : Math.min(best, val);
+        }
+        expect(got[y * w + x]).toBe(best);
+      }
+    }
+  });
+});
