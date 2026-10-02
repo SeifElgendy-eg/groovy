@@ -11,93 +11,94 @@ import {
   stopStream,
 } from "../io/camera";
 import { loadModels } from "../ml/models";
+import { dom } from "../ui/dom";
 
-const skinDebug = document.getElementById("skinDebug");
-const skinDebugSection = document.getElementById("skinDebugSection");
+const {
+  acneSection,
+  acneSlider,
+  acneStatus,
+  acneValue,
+  backHomeBtn,
+  beforeBtn,
+  blendSlider,
+  blendValue,
+  brightnessSlider,
+  brightnessValue,
+  cameraBtn,
+  chooseLipsBtn,
+  chooseSkinBtn,
+  colorSection,
+  colorSlider,
+  colorValue,
+  compareSection,
+  faceBadge,
+  fileInput,
+  fileInputOverlay,
+  lipDebug,
+  lipSlider,
+  lipValue,
+  lipsSection,
+  liveBadge,
+  moduleEyebrow,
+  moduleHeader,
+  moduleHome,
+  moduleTitle,
+  overlay,
+  perfBadge,
+  photo,
+  resetBtn,
+  resetSection,
+  sampleBtn,
+  sampleBtnOverlay,
+  skinDebug,
+  skinDebugSection,
+  skinSection,
+  sourceBadge,
+  stage,
+  stageWrap,
+  startBtn,
+  verticalSlider,
+  verticalValue,
+  video,
+} = dom;
 const debugCanvas = document.createElement("canvas"),
   debugCtx = debugCanvas.getContext("2d");
-const acneSection = document.getElementById("acneSection");
-const acneSlider = document.getElementById("acneSlider");
-const acneValue = document.getElementById("acneValue");
-const acneStatus = document.getElementById("acneStatus");
 const acne = new AcneEffect();
 const wrinkles = new WrinklesEffect();
 let facePoints = null,
   photoKind = "upload";
-const wrinklesSection = document.getElementById("wrinklesSection"),
-  wrinklesSlider = document.getElementById("wrinklesSlider"),
-  wrinklesValue = document.getElementById("wrinklesValue");
+const { wrinklesSection, wrinklesSlider, wrinklesValue } = dom;
 function sampleKind() {
   return metaOf(currentModule).sampleKind;
 }
 function syncWrinklesPreset() {
   const value = Number(wrinklesSlider.value);
   let label = "Custom";
-  document.querySelectorAll("[data-wrinkles-preset]").forEach((btn) => {
+  dom.wrinklesPresetButtons.forEach((btn) => {
     const active = Number(btn.dataset.wrinklesPreset) === value;
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-pressed", String(active));
     if (active) label = btn.textContent;
   });
   wrinklesValue.textContent = `${value}%`;
-  document.getElementById("wrinklesSelection").textContent =
+  dom.wrinklesSelection.textContent =
     `Selected: ${label} · ${value}%`;
 }
-const skinSection = document.getElementById("skinSection");
-const chooseSkinBtn = document.getElementById("chooseSkinBtn");
-const brightnessSlider = document.getElementById("brightnessSlider");
-const brightnessValue = document.getElementById("brightnessValue");
 const skinEffectMask = document.createElement("canvas");
 const skinEffectMaskCtx = skinEffectMask.getContext("2d");
 const maskCanvas = document.createElement("canvas");
 const maskCtx = maskCanvas.getContext("2d");
 const skinCanvas = document.createElement("canvas");
 const skinCtx = skinCanvas.getContext("2d");
-const video = document.getElementById("video");
-const photo = document.getElementById("photo");
-const stage = document.getElementById("stage");
 const ctx = stage.getContext("2d");
 
-const cameraBtn = document.getElementById("cameraBtn");
-const fileInput = document.getElementById("fileInput");
-const fileInputOverlay = document.getElementById("fileInputOverlay");
-const sampleBtn = document.getElementById("sampleBtn");
-const sampleBtnOverlay = document.getElementById("sampleBtnOverlay");
-const stageWrap = document.getElementById("stageWrap");
-const liveBadge = document.getElementById("liveBadge");
-const startBtn = document.getElementById("startBtn");
-const overlay = document.getElementById("overlay");
 
-const sourceBadge = document.getElementById("sourceBadge");
-const faceBadge = document.getElementById("faceBadge");
-const perfBadge = document.getElementById("perfBadge");
 
-const beforeBtn = document.getElementById("beforeBtn");
-const resetBtn = document.getElementById("resetBtn");
-const chooseLipsBtn = document.getElementById("chooseLipsBtn");
-const backHomeBtn = document.getElementById("backHomeBtn");
-const moduleHome = document.getElementById("moduleHome");
-const moduleHeader = document.getElementById("moduleHeader");
-const compareSection = document.getElementById("compareSection");
-const lipsSection = document.getElementById("lipsSection");
-const colorSection = document.getElementById("colorSection");
-const resetSection = document.getElementById("resetSection");
-const moduleTitle = document.getElementById("moduleTitle");
-const moduleEyebrow = document.getElementById("moduleEyebrow");
 
-const lipSlider = document.getElementById("lipSlider");
-const verticalSlider = document.getElementById("verticalSlider");
-const blendSlider = document.getElementById("blendSlider");
-const colorSlider = document.getElementById("colorSlider");
 
-const lipValue = document.getElementById("lipValue");
-const verticalValue = document.getElementById("verticalValue");
-const blendValue = document.getElementById("blendValue");
-const colorValue = document.getElementById("colorValue");
 
-const lipDebug = document.getElementById("lipDebug");
-const presetBtns = [...document.querySelectorAll(".preset-btn")];
-const shadeBtns = [...document.querySelectorAll(".shade-btn")];
+const presetBtns = dom.lipPresetButtons;
+const shadeBtns = dom.shadeButtons;
 
 let segmenter = null,
   faceLandmarker = null,
@@ -238,13 +239,13 @@ function syncBefore() {
 function syncAcnePreset() {
   const value = Number(acneSlider.value);
   let label = "Custom";
-  document.querySelectorAll("[data-acne-preset]").forEach((btn) => {
+  dom.acnePresetButtons.forEach((btn) => {
     const selected = Number(btn.dataset.acnePreset) === value;
     btn.classList.toggle("active", selected);
     btn.setAttribute("aria-pressed", String(selected));
     if (selected) label = btn.textContent;
   });
-  document.getElementById("acneSelection").textContent =
+  dom.acneSelection.textContent =
     `Selected: ${label} · ${value}%`;
 }
 
@@ -674,7 +675,7 @@ function renderSkin(w, h) {
 
 function renderWrinkles(w, h) {
   if (currentModule !== "wrinkles" || !skinMaskReady) return;
-  const status = document.getElementById("wrinklesStatus");
+  const status = dom.wrinklesStatus;
   if (!facePoints) {
     status.textContent = modelReady
       ? "Face forward or choose a clear photo"
@@ -825,60 +826,31 @@ async function renderLoop(now) {
   cameraFrameRequest = requestAnimationFrame(renderLoop);
 }
 
-document
-  .getElementById("chooseWrinklesBtn")
-  .addEventListener("click", () => setModule("wrinkles"));
-document
-  .getElementById("wrinklesSampleBtn")
-  .addEventListener("click", loadSamplePhoto);
-function updateWrinkles() {
-  syncWrinklesPreset();
+// A user edit of any control leaves "Before" mode and redraws.
+function userChanged() {
   showBefore = false;
   syncBefore();
   renderAll();
 }
-wrinklesSlider.addEventListener("input", updateWrinkles);
-document.querySelectorAll("[data-wrinkles-preset]").forEach((btn) =>
-  btn.addEventListener("click", () => {
-    wrinklesSlider.value = btn.dataset.wrinklesPreset;
-    updateWrinkles();
-  }),
-);
-skinDebug.addEventListener("change", () => {
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
-document
-  .getElementById("chooseAcneBtn")
-  .addEventListener("click", () => setModule("acne"));
-document
-  .getElementById("acneSampleBtn")
-  .addEventListener("click", loadSamplePhoto);
-acneSlider.addEventListener("input", () => {
-  syncAcnePreset();
-  acneValue.textContent = `${acneSlider.value}%`;
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
-document.querySelectorAll("[data-acne-preset]").forEach((btn) =>
-  btn.addEventListener("click", () => {
-    acneSlider.value = btn.dataset.acnePreset;
-    acneValue.textContent = `${acneSlider.value}%`;
-    syncAcnePreset();
-    showBefore = false;
-    syncBefore();
-    renderAll();
-  }),
-);
+
+function showPercent(label, slider) {
+  label.textContent = `${slider.value}%`;
+}
+
+/** Slider -> label + optional extra sync, then redraw. */
+function bindSlider(slider, label, extra) {
+  slider.addEventListener("input", () => {
+    if (label) showPercent(label, slider);
+    extra?.();
+    userChanged();
+  });
+}
+
+dom.chooseWrinklesBtn.addEventListener("click", () => setModule("wrinkles"));
+dom.wrinklesSampleBtn.addEventListener("click", loadSamplePhoto);
+dom.chooseAcneBtn.addEventListener("click", () => setModule("acne"));
+dom.acneSampleBtn.addEventListener("click", loadSamplePhoto);
 chooseSkinBtn.addEventListener("click", () => setModule("skin"));
-brightnessSlider.addEventListener("input", () => {
-  brightnessValue.textContent = `${brightnessSlider.value}%`;
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
 chooseLipsBtn.addEventListener("click", () => setModule("lips"));
 backHomeBtn.addEventListener("click", () => setModule("home"));
 cameraBtn.addEventListener("click", () => useCameraAgain());
@@ -889,13 +861,38 @@ fileInputOverlay.addEventListener("change", (e) =>
 );
 sampleBtn.addEventListener("click", loadSamplePhoto);
 sampleBtnOverlay.addEventListener("click", loadSamplePhoto);
-
 beforeBtn.addEventListener("click", () => {
   showBefore = !showBefore;
   syncBefore();
   renderAll();
 });
 
+// Wrinkles
+bindSlider(wrinklesSlider, null, syncWrinklesPreset);
+dom.wrinklesPresetButtons.forEach((btn) =>
+  btn.addEventListener("click", () => {
+    wrinklesSlider.value = btn.dataset.wrinklesPreset;
+    syncWrinklesPreset();
+    userChanged();
+  }),
+);
+skinDebug.addEventListener("change", userChanged);
+
+// Acne
+bindSlider(acneSlider, acneValue, syncAcnePreset);
+dom.acnePresetButtons.forEach((btn) =>
+  btn.addEventListener("click", () => {
+    acneSlider.value = btn.dataset.acnePreset;
+    showPercent(acneValue, acneSlider);
+    syncAcnePreset();
+    userChanged();
+  }),
+);
+
+// Skin brightness
+bindSlider(brightnessSlider, brightnessValue);
+
+// Lips
 const lipPresetDefaults = {
   16: { roll: 60, blend: 55 },
   28: { roll: 84, blend: 57 },
@@ -904,26 +901,32 @@ const lipPresetDefaults = {
 presetBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     lipSlider.value = btn.dataset.lipPreset;
-    lipValue.textContent = `${lipSlider.value}%`;
+    showPercent(lipValue, lipSlider);
     const defaults = lipPresetDefaults[btn.dataset.lipPreset];
     if (defaults) {
       verticalSlider.value = defaults.roll;
       blendSlider.value = defaults.blend;
-      verticalValue.textContent = `${defaults.roll}%`;
-      blendValue.textContent = `${defaults.blend}%`;
+      showPercent(verticalValue, verticalSlider);
+      showPercent(blendValue, blendSlider);
     }
-    showBefore = false;
-    syncBefore();
     syncPreset();
-    renderAll();
+    userChanged();
   });
 });
-
 shadeBtns.forEach((btn) => {
   btn.addEventListener("click", () =>
     setShade(btn.dataset.shade, btn.dataset.hex),
   );
 });
+bindSlider(lipSlider, lipValue, syncPreset);
+bindSlider(verticalSlider, verticalValue);
+bindSlider(blendSlider, blendValue);
+bindSlider(colorSlider, colorValue, () => {
+  selectedShade = Number(colorSlider.value) > 0 ? "brightred" : "off";
+  selectedShadeHex = selectedShade === "off" ? "" : "#DE4B50";
+  syncShadeButtons();
+});
+lipDebug.addEventListener("change", renderAll);
 
 resetBtn.addEventListener("click", () => {
   skinDebug.checked = false;
@@ -952,35 +955,6 @@ resetBtn.addEventListener("click", () => {
   renderAll();
 });
 
-lipSlider.addEventListener("input", () => {
-  lipValue.textContent = `${lipSlider.value}%`;
-  showBefore = false;
-  syncBefore();
-  syncPreset();
-  renderAll();
-});
-verticalSlider.addEventListener("input", () => {
-  verticalValue.textContent = `${verticalSlider.value}%`;
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
-blendSlider.addEventListener("input", () => {
-  blendValue.textContent = `${blendSlider.value}%`;
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
-colorSlider.addEventListener("input", () => {
-  colorValue.textContent = `${colorSlider.value}%`;
-  selectedShade = Number(colorSlider.value) > 0 ? "brightred" : "off";
-  selectedShadeHex = selectedShade === "off" ? "" : "#DE4B50";
-  syncShadeButtons();
-  showBefore = false;
-  syncBefore();
-  renderAll();
-});
-lipDebug.addEventListener("change", renderAll);
 
 window.addEventListener("beforeunload", () => {
   cancelAnimationFrame(cameraFrameRequest);
