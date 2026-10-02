@@ -17,7 +17,7 @@ import {
   type FaceMeter,
 } from "../face/exposure";
 import { calibrate, verdict, type CalibrationResult } from "../face/calibrate";
-import { liftGamma } from "../face/exposure";
+import { frameTimeCap, liftGamma } from "../face/exposure";
 import { previewFilter } from "../io/softwareLift";
 import { dom } from "../ui/dom";
 import { tracked } from "./activity";
@@ -50,6 +50,7 @@ function save(s: Saved): void {
 
 type Listener = () => void;
 
+
 // Metering reads a tiny downscaled copy, never the full frame: a full-frame getImageData forces
 // the GPU to hand the whole picture back to the CPU, which stalls the live preview.
 const METER = 48;
@@ -72,6 +73,11 @@ class CameraTuning {
   private atBrightest = false;
   /** Software exposure lift (gamma; 1 = none), applied to the captured photo and the preview. */
   lift = 1;
+  /** Frames per second the camera is actually delivering (0 = unknown). */
+  deliveredFps = 0;
+  private fpsCount = 0;
+  private fpsWindow = 0;
+  private fpsLoop = 0;
   private lastCalibratedAt = -Infinity;
   /** When the face first drifted off target (0 = on target). */
   private driftSince = 0;
@@ -98,9 +104,55 @@ class CameraTuning {
     for (const fn of this.listeners) fn();
   }
 
+  /** Count the frames the camera really delivers (a dim room can drop it to a few per second). */
+  private watchFrameRate(): void {
+    const video = dom.video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      cancelVideoFrameCallback?: (h: number) => void;
+    };
+    if (!video.requestVideoFrameCallback) return;
+    if (this.fpsLoop) video.cancelVideoFrameCallback?.(this.fpsLoop);
+    this.fpsCount = 0;
+    this.fpsWindow = performance.now();
+    const tick = () => {
+      if (!this.track) return;
+      this.fpsCount++;
+      const now = performance.now();
+      if (now - this.fpsWindow >= 1000) {
+        this.deliveredFps = Math.round((this.fpsCount * 1000) / (now - this.fpsWindow));
+        this.fpsCount = 0;
+        this.fpsWindow = now;
+        this.emit();
+      }
+      this.fpsLoop = video.requestVideoFrameCallback!(tick);
+    };
+    this.fpsLoop = video.requestVideoFrameCallback(tick);
+  }
+
+  /**
+   * Why the live view is slower than the camera's frame rate, if it is:
+   * - "exposure": each frame is exposed longer than one frame time (automatic exposure in dim
+   *   light); fixable by capping the exposure
+   * - "busy": exposure is fine, so the computer is not keeping up
+   */
+  get slowdown(): "exposure" | "busy" | null {
+    const want = this.info?.frameRate || 30;
+    if (!(this.deliveredFps > 0 && this.deliveredFps < want * 0.6)) return null;
+    const time = this.range("exposureTime");
+    const current = Number((this.track?.getSettings() as Record<string, unknown> | undefined)?.exposureTime);
+    if (time && Number.isFinite(current) && current > frameTimeCap(time, want) * 1.2) return "exposure";
+    return "busy";
+  }
+
+  /** The camera has slowed down because of long exposures (the case calibration can fix). */
+  get frameRateDropped(): boolean {
+    return this.slowdown === "exposure";
+  }
+
   /** A new camera stream started: report it and restore the saved settings. */
   async attach(stream: MediaStream): Promise<void> {
     this.track = stream.getVideoTracks()[0] ?? null;
+    this.watchFrameRate();
     this.info = cameraInfo(stream);
     if (this.info)
       console.info(
@@ -214,6 +266,7 @@ class CameraTuning {
       const far = Math.abs(m.mean - DEFAULT_TARGET.mean) / DEFAULT_TARGET.mean > 0.25 || m.clipped > DEFAULT_TARGET.maxClipped * 2;
       off = far && !(v === "dark" && this.atBrightest);
     } else off = !!reading && isUnusableFrame(reading) && !(reading.mean < 30 && this.atBrightest);
+    if (this.frameRateDropped && this.range("exposureTime")) off = true;
     if (!off) {
       this.driftSince = 0;
       return;
@@ -258,8 +311,10 @@ class CameraTuning {
    * Measure the face and bring it to the target brightness.
    * - Too bright: shorten the exposure (manual), never longer than one frame: longer values are
    *   either ignored by webcams or drop the frame rate, and searching them only wastes time.
-   * - Too dark: hand exposure back to the camera's automatic mode (it can also raise gain, which
-   *   the browser cannot), then the brightness control, then the software lift on the photo.
+   * - Too dark: the longest exposure that still fits one frame (manual), then the brightness
+   *   control, then the software lift on the photo. NOT the camera's automatic mode: in a dim room
+   *   webcams lengthen each frame (e.g. 250 ms), which drops the live view to a few frames a
+   *   second and feels like freezing.
    */
   async calibrateNow(): Promise<void> {
     const track = this.track;
@@ -286,9 +341,20 @@ class CameraTuning {
         this.autoNote = "could not read the picture: start the camera inside a service";
         return;
       }
+      // First restore the frame rate if long automatic exposures have slowed the camera down.
+      const timeRange = this.range("exposureTime");
+      if (this.frameRateDropped && timeRange) {
+        const cap = frameTimeCap(timeRange, fps);
+        await this.setTracked("exposureTime", cap);
+        this.saved.values.exposureMode = "manual";
+        this.saved.values.exposureTime = cap;
+        save(this.saved);
+        m = (await this.nextReading(800)) ?? m;
+        steps.push(`exposure ${cap} to restore the frame rate`);
+      }
       let v = verdict(m);
       if (v === "ok") {
-        this.autoNote = `already on target: face ${m.mean.toFixed(0)}/255`;
+        this.autoNote = `on target: face ${m.mean.toFixed(0)}/255${steps.length ? ` (${steps.join(", ")})` : ""}`;
         return;
       }
 
@@ -296,7 +362,7 @@ class CameraTuning {
         this.atBrightest = false;
         const time = this.range("exposureTime");
         if (time) {
-          const cap = Math.max(time.min, Math.min(time.max, 10000 / fps));
+          const cap = frameTimeCap(time, fps);
           const current = Number(this.saved.values.exposureTime ?? settings().exposureTime ?? cap);
           const r = await run("exposureTime", { min: time.min, max: cap, step: time.step }, "multiplicative", Math.min(current, cap));
           log("exposureTime", r);
@@ -320,15 +386,17 @@ class CameraTuning {
           v = m ? verdict(m) : v;
         }
       } else {
-        // Too dark. 1) a manual exposure we set earlier is the likely cause: back to auto.
-        if (settings().exposureMode === "manual" || this.saved.values.exposureMode === "manual") {
-          await this.setTracked("exposureMode", "continuous");
-          delete this.saved.values.exposureMode;
-          delete this.saved.values.exposureTime;
+        // Too dark. 1) the longest exposure that keeps the full frame rate.
+        const time = this.range("exposureTime");
+        if (time) {
+          const cap = frameTimeCap(time, fps);
+          await this.setTracked("exposureTime", cap);
+          this.saved.values.exposureMode = "manual";
+          this.saved.values.exposureTime = cap;
           save(this.saved);
           m = (await this.nextReading(600)) ?? m;
           v = verdict(m);
-          steps.push("camera auto exposure");
+          steps.push(`exposure ${cap} (one frame)`);
         }
         // 2) the brightness control (works alongside auto exposure).
         const brightness = this.range("brightness");

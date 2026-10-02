@@ -66,13 +66,19 @@ function render(): void {
   const info = cameraTuning.info;
   const m = cameraTuning.meter;
   const res = panel.querySelector<HTMLElement>("[data-res]")!;
+  const delivered = cameraTuning.deliveredFps;
   res.textContent = info
-    ? `${info.width}×${info.height} @ ${info.frameRate} fps`
+    ? `${info.width}×${info.height} @ ${info.frameRate} fps${delivered ? ` · delivering ${delivered} fps` : ""}`
     : "Camera not started";
-  res.classList.toggle("bad", !!info?.below4k);
-  panel.querySelector<HTMLElement>("[data-res-note]")!.textContent = info?.below4k
-    ? "Below 4K: check the USB 3 port/cable and that no other app holds the camera."
-    : "";
+  const slow = cameraTuning.slowdown;
+  res.classList.toggle("bad", !!info?.below4k || !!slow);
+  panel.querySelector<HTMLElement>("[data-res-note]")!.textContent = slow === "exposure"
+    ? "The camera has slowed down: in dim light its automatic exposure makes each frame longer. Press Calibrate (or keep face exposure right on) to hold the full frame rate."
+    : slow === "busy"
+      ? "The computer is not keeping up with the camera (see the freeze line below for what is busy)."
+      : info?.below4k
+      ? "Below 4K: check the USB 3 port/cable and that no other app holds the camera."
+      : "";
   const meter = panel.querySelector<HTMLElement>("[data-meter]")!;
   meter.textContent = m
     ? `face ${m.mean.toFixed(0)}/255 (target ${DEFAULT_TARGET.mean}) · blown ${(m.clipped * 100).toFixed(1)}% · crushed ${(m.crushed * 100).toFixed(1)}%`
