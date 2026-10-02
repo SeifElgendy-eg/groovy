@@ -83,6 +83,9 @@ function render(): void {
   const auto = panel.querySelector<HTMLInputElement>("[data-auto]")!;
   auto.checked = cameraTuning.faceAuto;
   panel.querySelector<HTMLElement>("[data-auto-note]")!.textContent = cameraTuning.autoNote;
+  const cal = panel.querySelector<HTMLButtonElement>("[data-calibrate]")!;
+  cal.disabled = cameraTuning.calibrating || !cameraTuning.info;
+  cal.textContent = cameraTuning.calibrating ? "Calibrating…" : "Calibrate to face now";
 
   // Rows are rebuilt only when the SET of controls changes. Value changes (e.g. each auto-exposure
   // step) are written into the existing inputs, and never into one the user is dragging.
@@ -118,6 +121,9 @@ export function mountCameraPanel(): void {
   const auto = el("input", { type: "checkbox" });
   auto.dataset.auto = "";
   auto.addEventListener("change", () => cameraTuning.setFaceAuto(auto.checked));
+  const calibrateBtn = el("button", { className: "ghost-btn", type: "button" }, "Calibrate to face now");
+  calibrateBtn.dataset.calibrate = "";
+  calibrateBtn.addEventListener("click", () => void cameraTuning.calibrateNow());
   const reset = el("button", { className: "ghost-btn", type: "button" }, "Camera auto (reset)");
   reset.addEventListener("click", () => void cameraTuning.resetToCameraAuto());
   const close = el("button", { className: "ghost-btn", type: "button", title: "Close (Ctrl+Shift+C)" }, "✕");
@@ -140,7 +146,8 @@ export function mountCameraPanel(): void {
     resNote,
     meter,
     perfLine,
-    el("label", { className: "check-row" }, el("span", {}, "Face-metered auto exposure"), auto),
+    calibrateBtn,
+    el("label", { className: "check-row" }, el("span", {}, "Keep face exposure right"), auto),
     autoNote,
     controls,
     reset,

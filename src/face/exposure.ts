@@ -106,54 +106,6 @@ export interface ExposureTarget {
   maxClipped: number;
 }
 
-export const DEFAULT_TARGET: ExposureTarget = { mean: 120, maxClipped: 0.01 };
-
-/**
- * Next value for a multiplicative exposure control (exposure time) given a meter reading.
- * Returns null when the current value is close enough (avoids hunting).
- */
-export function nextExposure(
-  current: number,
-  meter: FaceMeter,
-  range: { min: number; max: number },
-  target: ExposureTarget = DEFAULT_TARGET,
-): number | null {
-  let ratio: number;
-  if (meter.clipped > target.maxClipped) {
-    // Blown highlights carry no information about how far over we are: step down firmly.
-    ratio = 0.75;
-  } else {
-    const err = target.mean / Math.max(1, meter.mean);
-    if (Math.abs(err - 1) < 0.08) return null; // dead band
-    // Damped: move ~60% of the way in log space, at most x1.5 / x0.67 per step.
-    ratio = Math.min(1.5, Math.max(0.67, Math.pow(err, 0.6)));
-  }
-  const next = Math.min(range.max, Math.max(range.min, current * ratio));
-  return Math.abs(next - current) / Math.max(current, 1e-6) < 0.03 ? null : next;
-}
-
-/**
- * Next value for an additive control (UVC brightness offset), used when the camera has no
- * exposure-time control.
- */
-export function nextOffset(
-  current: number,
-  meter: FaceMeter,
-  range: { min: number; max: number; step: number },
-  target: ExposureTarget = DEFAULT_TARGET,
-): number | null {
-  const span = range.max - range.min;
-  let delta: number;
-  if (meter.clipped > target.maxClipped) delta = -0.06 * span;
-  else {
-    const err = target.mean - meter.mean;
-    if (Math.abs(err) < 10) return null;
-    delta = Math.max(-0.08, Math.min(0.08, err / 255)) * span;
-  }
-  const step = range.step || 1;
-  const next = Math.min(
-    range.max,
-    Math.max(range.min, Math.round((current + delta) / step) * step),
-  );
-  return next === current ? null : next;
-}
+// Skin always has some specular shine (forehead, nose tip, glasses), so a few blown pixels are
+// normal: only a clearly blown face (>5% of the sampled skin) counts as over-exposed.
+export const DEFAULT_TARGET: ExposureTarget = { mean: 120, maxClipped: 0.05 };
