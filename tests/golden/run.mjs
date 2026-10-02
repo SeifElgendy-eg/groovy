@@ -20,6 +20,14 @@ if (!URL_) {
   URL_ = previewServer.resolvedUrls.local[0];
 }
 const UPDATE = args.includes("--update");
+// Scenarios a PR changes on purpose (listed one per line in the file given with --allow-changes).
+// They are still rendered and reported, but do not fail the run.
+const allowFile = arg("--allow-changes", "");
+const ALLOWED = new Set(
+  allowFile && fs.existsSync(allowFile)
+    ? fs.readFileSync(allowFile, "utf8").split("\n").map((l) => l.replace(/#.*/, "").trim()).filter(Boolean)
+    : [],
+);
 const GOLD = path.join(here, "golden-images");
 const OUT = path.join(here, "out");
 const MAX_MEAN_DIFF = Number(arg("--mean", 0.01)); // mean abs channel diff (0..255)
@@ -87,8 +95,9 @@ for (const s of scenarios) {
   for (let i = 0; i < a.data.length; i++) { const d = Math.abs(a.data[i] - b.data[i]); sum += d; if (d > max) max = d; }
   const mean = sum / a.data.length;
   const ok = mean <= MAX_MEAN_DIFF;
-  console.log(ok ? "ok  " : "FAIL", s.name, `mean=${mean.toFixed(4)} max=${max}`);
-  if (!ok) failed++;
+  const expected = !ok && ALLOWED.has(s.name);
+  console.log(ok ? "ok  " : expected ? "CHANGED (expected)" : "FAIL", s.name, `mean=${mean.toFixed(4)} max=${max}`);
+  if (!ok && !expected) failed++;
 }
 await browser.close();
 await previewServer?.close();

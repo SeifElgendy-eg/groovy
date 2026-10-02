@@ -1,0 +1,3 @@
+# Golden scenarios this PR changes on purpose, one per line. CI only honours this file when the
+# PR itself edits it, so an entry never silently carries over to later PRs. Clear it after merging.
+lips-color-28
