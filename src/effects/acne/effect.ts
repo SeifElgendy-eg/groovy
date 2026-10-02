@@ -2,7 +2,7 @@
 // surrounding skin. Runs on a reduced analysis copy; the caller scales the result to the display.
 import { carveContours, addClosedContour } from "../../imaging/contours";
 import { guardContours } from "../../face/mask";
-import { ACNE_EXCLUSION_CONTOURS, OUTER_LIP } from "../../core/landmarks";
+import { ACNE_EXCLUSION_CONTOURS, NOSE_WING_EDGES, OUTER_LIP } from "../../core/landmarks";
 import {
   analysisSize,
   drawSegMask,
@@ -99,6 +99,16 @@ export class AcneEffect {
     mask.ctx.beginPath();
     addClosedContour(mask.ctx, poly);
     mask.ctx.fill();
+  }
+  // Nostril wings and the crease where they meet the cheek: a facial contour, slightly red by
+  // nature, not a blemish. A band along each wing's outer edge (landmarks plotted and checked).
+  mask.ctx.lineCap = "round";
+  mask.ctx.lineJoin = "round";
+  mask.ctx.lineWidth = Math.max(3, faceWidth * 0.06);
+  for (const wing of NOSE_WING_EDGES) {
+    mask.ctx.beginPath();
+    wing.forEach((i, k) => (k ? mask.ctx.lineTo(points[i].x, points[i].y) : mask.ctx.moveTo(points[i].x, points[i].y)));
+    mask.ctx.stroke();
   }
   mask.ctx.lineWidth = Math.max(2, faceWidth * 0.012);
   mask.ctx.stroke();

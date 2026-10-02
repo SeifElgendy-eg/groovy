@@ -91,3 +91,19 @@ describe("acne detection adapts to the skin", () => {
     expect(total(detectSeeds(src, blur, skin, W, H))).toBe(0);
   });
 });
+
+import { donorTextureSpread } from "../../src/effects/acne/repair";
+
+describe("donor ring check", () => {
+  const ring = (lum: (x: number, y: number, k: number) => number) =>
+    Array.from({ length: 32 }, (_, k) => {
+      const a = (k * Math.PI) / 16, x = Math.cos(a), y = Math.sin(a), v = lum(x, y, k);
+      return [v, v, v, x, y];
+    });
+  it("accepts a smooth shadow across the ring (e.g. beside the nose)", () => {
+    expect(donorTextureSpread(ring((x) => 150 + 40 * x))).toBeLessThan(5);
+  });
+  it("still rejects hair-like irregular dark strands", () => {
+    expect(donorTextureSpread(ring((_x, _y, k) => (k % 3 === 0 ? 70 : 160)))).toBeGreaterThan(40);
+  });
+});

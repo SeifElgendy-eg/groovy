@@ -52,9 +52,10 @@ export function repairBlemishes(
       samples.push([source[i],source[i+1],source[i+2],(x-cx)/ring,(y-cy)/ring]);
     }
     if(samples.length<16)continue;
-    // Hair/skin mixtures are unsuitable donors: replacing them paints over a beard.
-    const light=samples.map(v=>v[0]*.2126+v[1]*.7152+v[2]*.0722).sort((a,b)=>a-b);
-    if(light[Math.floor(light.length*.85)]-light[Math.floor(light.length*.15)]>40)continue;
+    // Hair/skin mixtures are unsuitable donors: replacing them paints over a beard. A smooth
+    // light gradient across the ring (e.g. the shadow beside the nose) is not hair and is already
+    // modelled by the plane fit below, so the spread is measured after removing that gradient.
+    if(donorTextureSpread(samples)>40)continue;
     // Trim extremes, retaining a consistent local skin colour for each spot.
     const target=[0,1,2].map((ch: number)=>{
       const vals=samples.map(v=>v[ch]).sort((a,b)=>a-b),trim=Math.floor(vals.length*.2);
@@ -101,4 +102,19 @@ export function repairBlemishes(
     }
   }
   return output;
+}
+
+/** Brightness spread of the donor ring once its linear light gradient is removed. */
+export function donorTextureSpread(samples: number[][]): number {
+  const lum=samples.map(v=>v[0]*.2126+v[1]*.7152+v[2]*.0722);
+  let n=0,sx=0,sy=0,sz=0,sxx=0,syy=0,sxy=0,sxz=0,syz=0;
+  for(let k=0;k<samples.length;k++){
+    const x=samples[k][3],y=samples[k][4],z=lum[k];
+    n++;sx+=x;sy+=y;sz+=z;sxx+=x*x;syy+=y*y;sxy+=x*y;sxz+=x*z;syz+=y*z;
+  }
+  const a=sxx-sx*sx/n,b=sxy-sx*sy/n,c=syy-sy*sy/n,u=sxz-sx*sz/n,v=syz-sy*sz/n,det=a*c-b*b;
+  const gx=det>1e-6?(u*c-v*b)/det:0,gy=det>1e-6?(v*a-u*b)/det:0;
+  const mx=sx/n,my=sy/n,mz=sz/n;
+  const residual=lum.map((z,k)=>z-(mz+gx*(samples[k][3]-mx)+gy*(samples[k][4]-my))).sort((p,q)=>p-q);
+  return residual[Math.floor(residual.length*.85)]-residual[Math.floor(residual.length*.15)];
 }
