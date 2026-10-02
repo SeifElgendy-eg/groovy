@@ -38,21 +38,27 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      # The base may predate the harness, so always run the head's harness against both sides.
-      - name: Render baselines from the base ref
+      # The base is built with ITS OWN dependencies (the two sides can differ, e.g. a package added
+      # on main), then rendered by the head's harness against a server for the base build, so
+      # both sides are measured by the same harness and the same browser.
+      - name: Build the base ref
         run: |
           git worktree add ../base "$BASE_REF"
-          mkdir -p ../base/tests/golden
-          cp tests/golden/run.mjs ../base/tests/golden/run.mjs
-          ln -s "$PWD/node_modules" ../base/node_modules
           cd ../base
+          npm ci --no-audit --no-fund
           npm run build
-          npm run golden:update
+
+      - name: Render baselines from the base build
+        run: |
+          npx vite preview --outDir ../base/dist --host 127.0.0.1 --port 4180 --strictPort &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4180/ >/dev/null && break; sleep 1; done
+          node tests/golden/run.mjs --update --url http://127.0.0.1:4180/
+          mkdir -p tests/golden/out-base
+          cp tests/golden/out/*.png tests/golden/out-base/
+          kill %1 || true
 
       - name: Compare the head ref against them
         run: |
-          mkdir -p tests/golden/golden-images
-          cp ../base/tests/golden/golden-images/*.png tests/golden/golden-images/
           npm run build
           npm run golden
 
@@ -61,13 +67,6 @@ jobs:
 
       - name: UI smoke test (services, reset, debug overlay, live camera)
         run: npm run smoke
-
-      # upload-artifact can only read inside the workspace, so bring the base renders in first.
-      - name: Collect renders
-        if: always()
-        run: |
-          mkdir -p tests/golden/out-base
-          cp ../base/tests/golden/out/*.png tests/golden/out-base/ || true
 
       - uses: actions/upload-artifact@v4
         if: always()

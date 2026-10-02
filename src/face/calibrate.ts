@@ -40,7 +40,7 @@ function quantize(v: number, r: CalibrationRange): number {
   return Math.min(r.max, Math.max(r.min, q));
 }
 
-function verdict(m: FaceMeter, t: ExposureTarget): "bright" | "dark" | "ok" {
+export function verdict(m: FaceMeter, t: ExposureTarget = DEFAULT_TARGET): "bright" | "dark" | "ok" {
   if (m.mean > t.mean * (1 + TOLERANCE)) return "bright";
   // Blown highlights only override a face that is not already dark overall.
   if (m.clipped > t.maxClipped && m.mean > t.mean * (1 - TOLERANCE)) return "bright";
