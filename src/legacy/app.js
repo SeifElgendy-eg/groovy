@@ -1,11 +1,11 @@
-import { reduceWrinkles, wrinkleRegions } from "./wrinkles.js?v=95";
-import { faceOval, guardContours, refineSkinMask } from "./facemask.js?v=1";
-import { repairBlemishes, insetSkinMask } from "./acne.js?v=78";
+import { reduceWrinkles, wrinkleRegions } from "./wrinkles.js";
+import { faceOval, guardContours, refineSkinMask } from "./facemask.js";
+import { repairBlemishes, insetSkinMask } from "./acne.js";
 import {
   FilesetResolver,
   ImageSegmenter,
   FaceLandmarker,
-} from "./vendor/mediapipe/vision_bundle.mjs";
+} from "@mediapipe/tasks-vision";
 
 const MP_BASE = "./vendor/mediapipe";
 const FACE_MODEL = "./models/face_landmarker.task";
