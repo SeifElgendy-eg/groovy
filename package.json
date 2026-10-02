@@ -11,10 +11,12 @@
     "golden": "node tests/golden/run.mjs",
     "smoke": "node tests/golden/smoke.mjs",
     "golden:update": "node tests/golden/run.mjs --update",
-    "test": "vitest run"
+    "test": "vitest run",
+    "package:windows": "node scripts/package-windows.mjs"
   },
   "devDependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
+    "fflate": "^0.8.3",
     "playwright": "^1.63.0",
     "sharp": "^0.35.5",
     "typescript": "7.0.2",

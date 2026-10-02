@@ -60,6 +60,36 @@ export function meterFace(
   return { mean: sum / n, clipped: clipped / n, crushed: crushed / n };
 }
 
+/**
+ * Whole-frame reading, used only as a safety net when no face can be found. Without it a frame
+ * that went black (or white) hides the face from the detector, so nothing could ever correct it.
+ */
+export function meterFrame(data: Uint8ClampedArray, w: number, h: number): FaceMeter {
+  let n = 0,
+    sum = 0,
+    clipped = 0,
+    crushed = 0;
+  for (let y = 0; y < h; y += 8)
+    for (let x = 0; x < w; x += 8) {
+      const i = (y * w + x) * 4;
+      const r = data[i],
+        g = data[i + 1],
+        b = data[i + 2];
+      const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      sum += l;
+      if (r >= 250 || g >= 250 || b >= 250) clipped++;
+      if (l <= 12) crushed++;
+      n++;
+    }
+  return n
+    ? { mean: sum / n, clipped: clipped / n, crushed: crushed / n }
+    : { mean: 128, clipped: 0, crushed: 0 };
+}
+
+/** A frame so dark or so bright that no face can be read from it. */
+export const isUnusableFrame = (m: FaceMeter): boolean =>
+  m.mean < 30 || m.mean > 225 || m.clipped > 0.4;
+
 export interface ExposureTarget {
   /** Desired face luma (0..255). ~120 keeps detail in light and dark skin alike. */
   mean: number;

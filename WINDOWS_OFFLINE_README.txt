@@ -12,8 +12,8 @@ Requires Windows PowerShell 5.1, Windows Script Host, and a recent Edge or Chrom
 Managed laptops may restrict scripts; do not change company policy to bypass a block.
 The process-level execution-policy argument does not change your Windows policy.
 
-Keep ALL files and folders together, especially models and vendor.
-Do not open index.html directly. The shortcut starts a loopback-only local server.
+Keep ALL files and folders together, especially the app folder.
+Do not open app\index.html directly. The shortcut starts a loopback-only local server.
 Repeated launches reuse that server. It remains in the background until Windows
 sign-out/restart. Start the shortcut again after restarting the laptop.
 If the project folder is moved, recreate the Desktop shortcut.
@@ -26,5 +26,11 @@ HDMI alone does not connect the screen's camera to the laptop.
 All processing uses the local browser. Models, scripts, and test images are bundled.
 External page requests are blocked by the application's Content Security Policy.
 
-Validation: local browser/model and photo processing checked on macOS;
-Windows launcher still requires a first-run check on the actual Windows laptop.
+CAMERA SETTINGS (staff): press Ctrl+Alt+C in the app (or add ?camera to the address).
+It shows the real camera resolution (should be 3840x2160 for the EMEET S600) and the
+camera's exposure/focus controls. "Face-metered auto exposure" keeps the face evenly lit.
+"Camera auto (reset)" returns everything to the camera's own automatic mode.
+
+Validation: the launcher is started and checked on a Windows runner on every change
+(health check, page, WebAssembly and model files). Camera behaviour still needs a
+first-run check on the actual laptop and camera.

@@ -1,0 +1,69 @@
+name: windows-package
+
+# Builds the offline Windows package and then really starts the Windows launcher on a Windows
+# runner, so a broken launcher is caught before it reaches the kiosk laptop.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:windows
+
+      - name: Start the Windows launcher and check what it serves
+        shell: pwsh
+        env:
+          GROOVY_NO_BROWSER: "1"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Join-Path $PWD 'release/Groovy-Windows'
+          $ps = Join-Path $pkg 'launcher/start-windows.ps1'
+          $p = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps) -PassThru -WindowStyle Hidden
+          $base = $null
+          for ($i = 0; $i -lt 40 -and -not $base; $i++) {
+            Start-Sleep -Milliseconds 500
+            foreach ($port in 8019..8039) {
+              try { $r = Invoke-WebRequest "http://127.0.0.1:$port/__groovy_health" -UseBasicParsing -TimeoutSec 2; if ($r.Content -like 'groovy-*') { $base = "http://127.0.0.1:$port"; break } } catch {}
+            }
+          }
+          if (-not $base) { throw 'launcher did not start' }
+          "launcher on $base"
+          function Get-Bytes($path) { (Invoke-WebRequest "$base/$path" -UseBasicParsing -TimeoutSec 60) }
+          $index = Get-Bytes ''
+          if ($index.Content -notmatch 'Beauty Simulator') { throw 'index.html not served' }
+          $wasm = Get-Bytes 'vendor/mediapipe/wasm/vision_wasm_internal.wasm'
+          if ($wasm.Headers['Content-Type'] -notlike 'application/wasm*') { throw "wasm served as $($wasm.Headers['Content-Type'])" }
+          $expectedWasm = (Get-Item (Join-Path $pkg 'app/vendor/mediapipe/wasm/vision_wasm_internal.wasm')).Length
+          if ($wasm.RawContentLength -ne $expectedWasm) { throw 'wasm size mismatch' }
+          $model = Get-Bytes 'models/face_landmarker.task'
+          $expectedModel = (Get-Item (Join-Path $pkg 'app/models/face_landmarker.task')).Length
+          if ($model.RawContentLength -ne $expectedModel) { throw 'model size mismatch' }
+          foreach ($bad in @('launcher/start-windows.ps1','../launcher/start-windows.ps1','offline-assets.sha256.json','.git/config')) {
+            try { Invoke-WebRequest "$base/$bad" -UseBasicParsing -TimeoutSec 5 | Out-Null; throw "should be blocked: $bad" } catch { if ($_.Exception.Message -like 'should be blocked*') { throw } }
+          }
+          # A second start must reuse the running server and exit.
+          $second = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps) -PassThru -WindowStyle Hidden
+          if (-not $second.WaitForExit(15000)) { throw 'second launch did not reuse the running server' }
+          'launcher OK'
+          Stop-Process -Id $p.Id -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Groovy-Windows
+          path: release/Groovy-Windows.zip
+          if-no-files-found: error

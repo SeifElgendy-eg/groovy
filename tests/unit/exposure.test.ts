@@ -61,3 +61,24 @@ describe("nextOffset", () => {
     expect(nextOffset(0, { mean: 125, clipped: 0, crushed: 0 }, range)).toBeNull();
   });
 });
+
+import { isUnusableFrame, meterFrame } from "../../src/face/exposure";
+
+describe("frame safety net", () => {
+  it("flags a black frame so exposure can recover when no face is visible", () => {
+    const m = meterFrame(frame(64, 64, 2), 64, 64);
+    expect(isUnusableFrame(m)).toBe(true);
+    // and the step is upward, bounded
+    const next = nextExposure(333, m, { min: 1, max: 2500 })!;
+    expect(next).toBeGreaterThan(333);
+    expect(next).toBeLessThanOrEqual(333 * 1.5);
+  });
+  it("leaves a normal frame alone", () => {
+    expect(isUnusableFrame(meterFrame(frame(64, 64, 120), 64, 64))).toBe(false);
+  });
+  it("never slams a long auto exposure down in one step", () => {
+    // camera auto exposure 2500 with a bright face: at most x0.75 per step, not 2500 -> 333
+    const next = nextExposure(2500, { mean: 200, clipped: 0.3, crushed: 0 }, { min: 1, max: 2500 })!;
+    expect(next).toBe(1875);
+  });
+});

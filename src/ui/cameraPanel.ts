@@ -1,4 +1,4 @@
-// Staff-only camera panel (Ctrl+Shift+C, or open the page with ?camera). Shows the resolution the
+// Staff-only camera panel (Ctrl+Alt+C or Ctrl+Shift+C, or open the page with ?camera). Shows the resolution the
 // camera really delivers, a live face-exposure reading, and the camera's hardware controls.
 import { cameraTuning } from "../app/cameraTuning";
 import type { CameraControl } from "../io/cameraControls";
@@ -127,7 +127,7 @@ export function mountCameraPanel(): void {
   dom.stageWrap.append(panel);
   cameraTuning.onChange(render);
   window.addEventListener("keydown", (e) => {
-    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "c") {
+    if (e.ctrlKey && (e.shiftKey || e.altKey) && e.key.toLowerCase() === "c") {
       e.preventDefault();
       toggleCameraPanel();
     }
