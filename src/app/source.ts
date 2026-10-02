@@ -40,7 +40,7 @@ export async function startCamera(): Promise<void> {
     video.srcObject = stream;
     await metadata;
     await video.play();
-    void cameraTuning.attach(stream);
+    cameraTuning.attach(stream).catch((err) => console.error("camera settings could not be applied", err));
 
     const { w, h } = getSourceDims();
     ensureSizes(w, h);

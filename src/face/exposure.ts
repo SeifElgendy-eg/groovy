@@ -120,3 +120,14 @@ export function liftGamma(mean: number, target = DEFAULT_TARGET.mean, minGamma =
   const g = Math.log(target / 255) / Math.log(mean / 255);
   return Math.max(minGamma, Math.min(1, g));
 }
+
+/**
+ * The longest exposure (in the browser's 100 µs units) that fits in one frame, snapped to the
+ * camera's step. Longer exposures make webcams drop their frame rate.
+ */
+export function frameTimeCap(range: { min: number; max: number; step: number }, fps: number): number {
+  const frame = 10000 / Math.max(1, fps);
+  const step = range.step > 0 ? range.step : 1;
+  const snapped = range.min + Math.floor((frame - range.min) / step) * step;
+  return Math.max(range.min, Math.min(range.max, snapped));
+}

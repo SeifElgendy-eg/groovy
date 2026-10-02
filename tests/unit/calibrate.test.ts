@@ -111,3 +111,16 @@ describe("calibrate with natural skin shine", () => {
     expect(Math.abs(r.meter!.mean - 120)).toBeLessThan(15);
   });
 });
+
+import { frameTimeCap } from "../../src/face/exposure";
+
+describe("frameTimeCap", () => {
+  it("is the longest exposure that fits one frame, in 100 µs units", () => {
+    expect(frameTimeCap({ min: 1, max: 5000, step: 1 }, 30)).toBe(333);
+    expect(frameTimeCap({ min: 1, max: 5000, step: 1 }, 15)).toBe(666);
+  });
+  it("snaps down to the camera's step and stays in range", () => {
+    expect(frameTimeCap({ min: 3, max: 2047, step: 10 }, 30)).toBe(333); // 3 + 33 steps of 10
+    expect(frameTimeCap({ min: 1, max: 200, step: 1 }, 30)).toBe(200);
+  });
+});
