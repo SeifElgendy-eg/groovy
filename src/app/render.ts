@@ -8,6 +8,7 @@ import { dom } from "../ui/dom";
 import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
+import { tracked } from "./activity";
 
 type Draw = (w: number, h: number) => void;
 
@@ -157,6 +158,10 @@ function renderSkinDebug(w: number, h: number): void {
 }
 
 export function renderAll(): void {
+  tracked.sync("drawing the effect", drawStage);
+}
+
+function drawStage(): void {
   const { w, h } = getSourceDims();
   if (!w || !h) return;
   ctx.clearRect(0, 0, w, h);

@@ -16,8 +16,36 @@ export interface Models {
   segmenter: ImageSegmenter;
 }
 
+let fileset: ReturnType<typeof FilesetResolver.forVisionTasks> | null = null;
+const vision = () => (fileset ??= FilesetResolver.forVisionTasks(WASM_PATH));
+
+/**
+ * A second face landmarker in VIDEO mode for the live camera. Switching one instance between
+ * IMAGE and VIDEO rebuilds its whole graph (a ~1 s freeze on every photo capture and every return
+ * to the camera); keeping one instance per mode removes that.
+ */
+export async function loadVideoLandmarker(): Promise<FaceLandmarker> {
+  const options = {
+    baseOptions: { modelAssetPath: FACE_MODEL },
+    runningMode: "VIDEO" as const,
+    numFaces: 1,
+    minFaceDetectionConfidence: 0.5,
+    minFacePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  };
+  const fs = await vision();
+  try {
+    return await FaceLandmarker.createFromOptions(fs, {
+      ...options,
+      baseOptions: { ...options.baseOptions, delegate: "GPU" },
+    });
+  } catch {
+    return FaceLandmarker.createFromOptions(fs, options);
+  }
+}
+
 export async function loadModels(): Promise<Models> {
-  const vision = await FilesetResolver.forVisionTasks(WASM_PATH);
+  const vision_ = await vision();
 
   const faceCommon = {
     baseOptions: { modelAssetPath: FACE_MODEL },
@@ -29,12 +57,12 @@ export async function loadModels(): Promise<Models> {
   };
   let faceLandmarker: FaceLandmarker;
   try {
-    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision_, {
       ...faceCommon,
       baseOptions: { ...faceCommon.baseOptions, delegate: "GPU" },
     });
   } catch {
-    faceLandmarker = await FaceLandmarker.createFromOptions(vision, faceCommon);
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision_, faceCommon);
   }
 
   const segmentOptions = {
@@ -45,12 +73,12 @@ export async function loadModels(): Promise<Models> {
   };
   let segmenter: ImageSegmenter;
   try {
-    segmenter = await ImageSegmenter.createFromOptions(vision, {
+    segmenter = await ImageSegmenter.createFromOptions(vision_, {
       ...segmentOptions,
       baseOptions: { modelAssetPath: SEG_MODEL, delegate: "GPU" },
     });
   } catch {
-    segmenter = await ImageSegmenter.createFromOptions(vision, segmentOptions);
+    segmenter = await ImageSegmenter.createFromOptions(vision_, segmentOptions);
   }
   return { faceLandmarker, segmenter };
 }

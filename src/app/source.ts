@@ -12,6 +12,8 @@ import { clearFace, processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { state } from "./state";
 import { cameraTuning } from "./cameraTuning";
+import { tracked } from "./activity";
+import { drawLifted } from "../io/softwareLift";
 
 let stream: MediaStream | null = null;
 let cameraStarting = false;
@@ -76,6 +78,10 @@ export function stopCamera(): void {
 
 /** Shared tail of loading a photo: size the stage, run the models, draw. */
 async function onPhotoReady(loadedStatus: string): Promise<void> {
+  return tracked("analysing the photo", () => photoReady(loadedStatus));
+}
+
+async function photoReady(loadedStatus: string): Promise<void> {
   setSourceMode("photo");
   updateFaceGuide(null);
   const { w, h } = getSourceDims();
@@ -141,15 +147,19 @@ export function mountCaptureButton(): void {
     capture.busy = true;
     captureBtn.disabled = true;
     try {
-      const still = document.createElement("canvas");
-      still.width = video.videoWidth;
-      still.height = video.videoHeight;
-      const c = still.getContext("2d")!;
-      c.translate(still.width, 0);
-      c.scale(-1, 1);
-      c.drawImage(video, 0, 0);
-      const blob = await new Promise<Blob | null>((resolve) =>
-        still.toBlob(resolve, "image/png"),
+      const still = tracked.sync("taking the photo", () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const c = canvas.getContext("2d")!;
+        c.translate(canvas.width, 0);
+        c.scale(-1, 1);
+        // Software lift for a face the camera could not make bright enough (1 = untouched).
+        drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
+        return canvas;
+      });
+      const blob = await tracked("encoding the photo", () =>
+        new Promise<Blob | null>((resolve) => still.toBlob(resolve, "image/png")),
       );
       if (!blob) throw new Error("Unable to capture photo. Please try again.");
       state.showBefore = false;

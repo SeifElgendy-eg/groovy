@@ -3,7 +3,9 @@
 import { buildLipData } from "../effects/lips/geometry";
 import { metaOf } from "../effects/registry";
 import { insetSkinMask } from "../imaging/maskOps";
-import { loadModels, type Models } from "../ml/models";
+import type { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { loadModels, loadVideoLandmarker, type Models } from "../ml/models";
+import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
@@ -18,8 +20,11 @@ import {
 import { cameraNeedsEffect, renderAll } from "./render";
 import { state } from "./state";
 
+/** IMAGE-mode models for photos (landmarks + skin segmentation). */
 let models: Models | null = null;
-let modelMode: "IMAGE" | "VIDEO" = "IMAGE";
+/** VIDEO-mode landmarker for the live camera, created in the background after `models`. */
+let videoLandmarker: Promise<FaceLandmarker> | null = null;
+let liveLandmarker: FaceLandmarker | null = null;
 let processing = false;
 let processingPending = false;
 
@@ -29,8 +34,20 @@ export const perf = { frames: 0, fps: 0, avgMs: 0 };
 export async function initModels(): Promise<void> {
   try {
     setStatus("Loading models…");
-    models = await loadModels();
+    models = await tracked("loading the AI models", loadModels);
+    // Warm-up: the first real run compiles GPU shaders and allocates buffers (seconds on some
+    // laptops). Do it now, behind "Loading models", instead of on the customer's first photo.
+    await tracked("warming up the AI models", () => {
+      const warm = document.createElement("canvas");
+      warm.width = warm.height = 256;
+      const m = models!;
+      m.faceLandmarker.detect(warm);
+      m.segmenter.segment(warm).categoryMask?.close();
+    });
     state.modelReady = true;
+    // The live-camera model is built right after, in the background, so the first camera start
+    // does not wait for it and a photo capture never has to rebuild a model.
+    setTimeout(() => void liveModel(), 0);
     dom.startBtn.disabled = false;
     setStatus("Models ready", "ready");
     if (state.running) {
@@ -41,6 +58,17 @@ export async function initModels(): Promise<void> {
     console.error(err);
     setStatus("Model loading failed", "error");
   }
+}
+
+function liveModel(): Promise<FaceLandmarker> {
+  videoLandmarker ??= tracked("preparing the live-camera model", async () => {
+    const m = await loadVideoLandmarker();
+    const warm = document.createElement("canvas");
+    warm.width = warm.height = 256;
+    m.detectForVideo(warm, performance.now()); // warm-up, as for the photo models
+    return m;
+  }).then((m) => (liveLandmarker = m));
+  return videoLandmarker;
 }
 
 /** Forget the detected face (new photo, lost face, error). */
@@ -86,12 +114,7 @@ export async function processCurrentSource(): Promise<void> {
   try {
     const { faceLandmarker, segmenter } = models;
     const camera = state.sourceMode === "camera";
-    const nextMode = camera ? "VIDEO" : "IMAGE";
-    if (modelMode !== nextMode) {
-      await faceLandmarker.setOptions({ runningMode: nextMode });
-      await segmenter.setOptions({ runningMode: nextMode });
-      modelMode = nextMode;
-    }
+    const live = camera ? (liveLandmarker ?? (await liveModel())) : null;
     const timestamp = performance.now();
     const { w, h } = getSourceDims();
     if (camera) snapshotCamera(w, h);
@@ -103,17 +126,13 @@ export async function processCurrentSource(): Promise<void> {
     const wantsMask =
       (state.sourceMode === "photo" || cameraNeedsEffect()) &&
       metaOf(state.module).usesSkinMask;
-    const segmentation = wantsMask
-      ? modelMode === "VIDEO"
-        ? segmenter.segmentForVideo(sourceCanvas, timestamp)
-        : segmenter.segment(sourceCanvas)
-      : null;
+    // (Live camera frames never need the skin mask: effects run on the captured photo.)
+    const segmentation = wantsMask ? tracked.sync("skin segmentation", () => segmenter.segment(sourceCanvas)) : null;
     if (segmentation?.categoryMask) publishSkinMask(segmentation.categoryMask);
 
-    const faceRes =
-      modelMode === "VIDEO"
-        ? faceLandmarker.detectForVideo(sourceCanvas, timestamp)
-        : faceLandmarker.detect(sourceCanvas);
+    const faceRes = live
+      ? tracked.sync("live face tracking", () => live.detectForVideo(sourceCanvas, timestamp))
+      : tracked.sync("photo face detection", () => faceLandmarker.detect(sourceCanvas));
     if (faceRes.faceLandmarks?.length) {
       const landmarks = faceRes.faceLandmarks[0];
       state.facePoints = landmarks;
@@ -152,4 +171,5 @@ export async function processCurrentSource(): Promise<void> {
 export function closeModels(): void {
   models?.faceLandmarker.close();
   models?.segmenter.close();
+  liveLandmarker?.close();
 }

@@ -2,6 +2,7 @@
 // camera really delivers, a live face-exposure reading, and the camera's hardware controls.
 import { cameraTuning } from "../app/cameraTuning";
 import { perf } from "../app/pipeline";
+import { onFreeze, worstRecentFreeze } from "../app/activity";
 import type { CameraControl } from "../io/cameraControls";
 import { DEFAULT_TARGET } from "../face/exposure";
 import { dom } from "./dom";
@@ -80,6 +81,10 @@ function render(): void {
   panel.querySelector<HTMLElement>("[data-perf]")!.textContent = perf.fps
     ? `live analysis ${perf.fps}/s · ${perf.avgMs.toFixed(0)} ms each`
     : "";
+  const freeze = worstRecentFreeze();
+  const freezeLine = panel.querySelector<HTMLElement>("[data-freeze]")!;
+  freezeLine.textContent = freeze ? `longest freeze (30 s): ${freeze.ms} ms during ${freeze.label}` : "no freezes in the last 30 s";
+  freezeLine.classList.toggle("bad", !!freeze && freeze.ms >= 300);
   const auto = panel.querySelector<HTMLInputElement>("[data-auto]")!;
   auto.checked = cameraTuning.faceAuto;
   panel.querySelector<HTMLElement>("[data-auto-note]")!.textContent = cameraTuning.autoNote;
@@ -136,6 +141,8 @@ export function mountCameraPanel(): void {
   meter.dataset.meter = "";
   const perfLine = el("div", { className: "small-note" });
   perfLine.dataset.perf = "";
+  const freezeLine = el("div", { className: "small-note" });
+  freezeLine.dataset.freeze = "";
   const autoNote = el("div", { className: "small-note" });
   autoNote.dataset.autoNote = "";
   const controls = el("div", { className: "cam-controls" });
@@ -146,6 +153,7 @@ export function mountCameraPanel(): void {
     resNote,
     meter,
     perfLine,
+    freezeLine,
     calibrateBtn,
     el("label", { className: "check-row" }, el("span", {}, "Keep face exposure right"), auto),
     autoNote,
@@ -154,6 +162,7 @@ export function mountCameraPanel(): void {
   );
   dom.stageWrap.append(panel);
   cameraTuning.onChange(render);
+  onFreeze(render);
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey && (e.shiftKey || e.altKey) && e.key.toLowerCase() === "c") {
       e.preventDefault();
