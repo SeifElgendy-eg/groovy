@@ -1,7 +1,6 @@
 // Acne treatment: finds small red blemishes inside the skin mask and repairs them from the
 // surrounding skin. Runs on a reduced analysis copy; the caller scales the result to the display.
 import { carveContours, addClosedContour } from "../../imaging/contours";
-import { insetSkinMask } from "../../imaging/maskOps";
 import { ACNE_EXCLUSION_CONTOURS, OUTER_LIP } from "../../core/landmarks";
 import {
   analysisSize,
@@ -11,11 +10,27 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { repairBlemishes } from "./repair";
+import { runAcne } from "../skin/client";
 
 export class AcneEffect {
+  private stale = true;
+  private gen = 0;
+  /** A prepare() is running (its pixel work happens in a Web Worker). */
+  busy = false;
+  /** The prepared correction matches the current face, mask and source. */
+  ready = false;
+
   /** Set when the face, mask or source changed; the next render re-runs prepare(). */
-  dirty = true;
+  get dirty(): boolean {
+    return this.stale;
+  }
+  set dirty(v: boolean) {
+    this.stale = v;
+    if (v) {
+      this.ready = false;
+      this.gen++; // any prepare() still running is now out of date
+    }
+  }
   private out = scratch();
   private work = scratch(true);
   private blur = scratch(true);
@@ -26,7 +41,18 @@ export class AcneEffect {
     return this.mask.canvas;
   }
 
-  prepare(input: SkinInput): void {
+  /** Resolves true when the result was applied, false when the input changed meanwhile. */
+  async prepare(input: SkinInput): Promise<boolean> {
+    const gen = this.gen;
+    this.busy = true;
+    try {
+      return await this.run(input, gen);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async run(input: SkinInput, gen: number): Promise<boolean> {
     const { aw, ah } = analysisSize(input.w, input.h, input.mirrored);
     const { out, work, blur, mask } = this;
     for (const c of [out, work, blur, mask]) {
@@ -72,29 +98,21 @@ export class AcneEffect {
   blur.ctx.filter = `blur(${radius * 0.65}px)`;
   blur.ctx.drawImage(work.canvas, 0, 0);
   blur.ctx.filter = "none";
-  const inset = insetSkinMask(
-    mask.ctx.getImageData(0, 0, aw, ah).data,
+  const result = await runAcne({
+    work: work.ctx.getImageData(0, 0, aw, ah).data,
+    blur: blur.ctx.getImageData(0, 0, aw, ah).data,
+    mask: mask.ctx.getImageData(0, 0, aw, ah).data,
     aw,
     ah,
-    Math.max(2, Math.ceil(faceWidth * 0.007)),
-  );
-  mask.ctx.putImageData(new ImageData(inset, aw, ah), 0, 0);
-  const corrected = repairBlemishes(
-    work.ctx.getImageData(0, 0, aw, ah).data,
-    blur.ctx.getImageData(0, 0, aw, ah).data,
-    mask.ctx.getImageData(0, 0, aw, ah).data,
-    aw,
-    ah,
+    faceWidth,
     radius,
-  );
-  // Fade the correction inward from every protected boundary, without
-  // expanding the correction into hair, eyes or lips.
-  const faded = insetSkinMask(inset, aw, ah, 0, Math.max(4, faceWidth * 0.035));
-  for (let i = 3; i < corrected.length; i += 4)
-    corrected[i] = (corrected[i] * faded[i]) / 255;
-  mask.ctx.putImageData(new ImageData(faded, aw, ah), 0, 0);
-  out.ctx.putImageData(new ImageData(corrected, aw, ah), 0, 0);
-  this.dirty = false;
+  });
+  if (gen !== this.gen) return false;
+  mask.ctx.putImageData(new ImageData(result.faded, aw, ah), 0, 0);
+  out.ctx.putImageData(new ImageData(result.corrected, aw, ah), 0, 0);
+  this.stale = false;
+  this.ready = true;
+  return true;
   }
 
   /** Composite the prepared correction over `target` at the given strength (0..1). */
