@@ -1,9 +1,8 @@
 // Wrinkle ("botox") smoothing. Builds a face-only skin mask, finds the treatable regions, and
 // computes a signed correction (multiply + add layers) that the caller composites over the photo.
 import { addClosedContour, carveContours } from "../../imaging/contours";
-import { insetSkinMask } from "../../imaging/maskOps";
 import { WRINKLE_EXCLUSION_CONTOURS } from "../../core/landmarks";
-import { faceOval, guardContours, refineSkinMask } from "../../face/mask";
+import { faceOval, guardContours } from "../../face/mask";
 import {
   analysisSize,
   drawSegMask,
@@ -12,12 +11,27 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { reduceWrinkles } from "./reduce";
-import { wrinkleRegions } from "./regions";
+import { runWrinkles } from "../skin/client";
 
 export class WrinklesEffect {
+  private stale = true;
+  private gen = 0;
+  /** A prepare() is running (its pixel work happens in a Web Worker). */
+  busy = false;
+  /** The prepared correction matches the current face, mask and source. */
+  ready = false;
+
   /** Set when the face, mask or source changed; the next render re-runs prepare(). */
-  dirty = true;
+  get dirty(): boolean {
+    return this.stale;
+  }
+  set dirty(v: boolean) {
+    this.stale = v;
+    if (v) {
+      this.ready = false;
+      this.gen++; // any prepare() still running is now out of date
+    }
+  }
   /** "add" layer: light that fills creases. */
   private addLayer = scratch();
   /** "multiply" layer: gain that darkens ridges. */
@@ -30,7 +44,18 @@ export class WrinklesEffect {
     return this.mask.canvas;
   }
 
-  prepare(input: SkinInput): void {
+  /** Resolves true when the result was applied, false when the input changed meanwhile. */
+  async prepare(input: SkinInput): Promise<boolean> {
+    const gen = this.gen;
+    this.busy = true;
+    try {
+      return await this.run(input, gen);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async run(input: SkinInput, gen: number): Promise<boolean> {
     const { aw, ah } = analysisSize(input.w, input.h, input.mirrored);
     const { addLayer, mulLayer, work, mask } = this;
     for (const c of [addLayer, mulLayer, work, mask]) {
@@ -95,43 +120,21 @@ export class WrinklesEffect {
   );
   mask.ctx.fill();
   mask.ctx.restore();
-  const original = work.ctx.getImageData(0, 0, aw, ah).data;
-  // 3. Snap the soft 256px segmentation edge to the real hairline using the photo's own
-  //    colours, then fade inward. Small margin/feather = treatment runs close to the hair.
-  const refined = refineSkinMask(
-    mask.ctx.getImageData(0, 0, aw, ah).data,
-    original,
+  const result = await runWrinkles({
+    original: work.ctx.getImageData(0, 0, aw, ah).data,
+    mask: mask.ctx.getImageData(0, 0, aw, ah).data,
     aw,
     ah,
-    Math.max(3, Math.round(faceWidth * 0.02)),
-  );
-  const faded = insetSkinMask(
-    refined,
-    aw,
-    ah,
-    1,
-    Math.max(3, faceWidth * 0.01),
-  );
-  mask.ctx.putImageData(new ImageData(faded, aw, ah), 0, 0);
-  const regions = wrinkleRegions(points, faceWidth);
-  // reduceWrinkles returns a signed correction: `mul` (gain <= 1) and `add` (light).
-  // Only these smooth maps are upscaled, never a downsampled copy of the skin, so the
-  // full-resolution photo keeps its own texture inside and outside the treated areas.
-  const { add, mul } = reduceWrinkles(
-    original,
-    faded,
-    aw,
-    ah,
-    Math.max(2, Math.round(faceWidth * 0.012)),
-    regions,
-    // Smoothing strength. smoothing: how big a fold the filter flattens (default 1, max ~2.2).
-    // lines: removal of faint thin lines (default 1). texture: pore detail kept (default 0.9;
-    // lower = smoother but more "plastic").
-    { smoothing: 1.25, lines: 1.3, texture: 0.82 },
-  );
-  addLayer.ctx.putImageData(new ImageData(add, aw, ah), 0, 0);
-  mulLayer.ctx.putImageData(new ImageData(mul, aw, ah), 0, 0);
-  this.dirty = false;
+    points,
+    faceWidth,
+  });
+  if (gen !== this.gen) return false;
+  mask.ctx.putImageData(new ImageData(result.faded, aw, ah), 0, 0);
+  addLayer.ctx.putImageData(new ImageData(result.add, aw, ah), 0, 0);
+  mulLayer.ctx.putImageData(new ImageData(result.mul, aw, ah), 0, 0);
+  this.stale = false;
+  this.ready = true;
+  return true;
   }
 
   /**
