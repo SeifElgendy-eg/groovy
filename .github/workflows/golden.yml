@@ -56,6 +56,12 @@ jobs:
           npm run build
           npm run golden
 
+      - name: Unit tests
+        run: npm test
+
+      - name: UI smoke test (services, reset, debug overlay, live camera)
+        run: npm run smoke
+
       # upload-artifact can only read inside the workspace, so bring the base renders in first.
       - name: Collect renders
         if: always()

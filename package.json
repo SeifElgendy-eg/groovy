@@ -10,13 +10,15 @@
     "typecheck": "tsc --noEmit",
     "golden": "node tests/golden/run.mjs",
     "smoke": "node tests/golden/smoke.mjs",
-    "golden:update": "node tests/golden/run.mjs --update"
+    "golden:update": "node tests/golden/run.mjs --update",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
     "playwright": "^1.63.0",
     "sharp": "^0.35.5",
     "typescript": "7.0.2",
-    "vite": "8.3.2"
+    "vite": "8.3.2",
+    "vitest": "^5.0.3"
   }
 }

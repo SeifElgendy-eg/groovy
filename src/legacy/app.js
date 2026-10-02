@@ -4,16 +4,14 @@ import { metaOf } from "../effects/registry";
 import { buildLipData } from "../effects/lips/geometry";
 import { LipRenderer, needsWarp } from "../effects/lips/renderer";
 import { insetSkinMask } from "../imaging/maskOps";
+import { evaluateAlignment } from "../face/alignment";
 import {
-  FilesetResolver,
-  ImageSegmenter,
-  FaceLandmarker,
-} from "@mediapipe/tasks-vision";
+  describeCameraError,
+  openUserCamera,
+  stopStream,
+} from "../io/camera";
+import { loadModels } from "../ml/models";
 
-const MP_BASE = "./vendor/mediapipe";
-const FACE_MODEL = "./models/face_landmarker.task";
-
-const SEG_MODEL = "./models/selfie_multiclass_256x256.tflite";
 const skinDebug = document.getElementById("skinDebug");
 const skinDebugSection = document.getElementById("skinDebugSection");
 const debugCanvas = document.createElement("canvas"),
@@ -169,40 +167,15 @@ function updateFaceGuide(points) {
   faceGuide.style.height = `${dh * 0.82}px`;
   faceGuide.style.left = `${(stageWrap.clientWidth - dw) / 2 + dw * 0.28}px`;
   faceGuide.style.top = `${(stageWrap.clientHeight - dh) / 2 + dh * 0.07}px`;
-  let message = "Position your face inside the oval",
-    valid = false;
-  if (points) {
-    const left = points[234],
-      right = points[454],
-      top = points[10],
-      bottom = points[152];
-    const cx = (left.x + right.x) / 2,
-      cy = (top.y + bottom.y) / 2;
-    const fw = Math.hypot(left.x - right.x, left.y - right.y),
-      fh = Math.abs(bottom.y - top.y);
-    const moving =
-      lastAlignment &&
-      Math.hypot(cx - lastAlignment.cx, cy - lastAlignment.cy) > 0.025;
-    const turned =
-      Math.abs(points[1].x - cx) > fw * 0.19 ||
-      Math.abs(points[33].y - points[263].y) > fh * 0.12;
-    if (Math.abs(cx - 0.5) > 0.105 || Math.abs(cy - 0.48) > 0.13)
-      message = "Move to the center of the oval";
-    else if (fh < 0.46 || fw < 0.2) message = "Move closer";
-    else if (fh > 0.88 || fw > 0.53) message = "Move back slightly";
-    else if (turned) message = "Look straight ahead";
-    else if (moving) message = "Hold still for a moment";
-    else valid = true;
-    lastAlignment = { cx, cy };
-  } else lastAlignment = null;
-  alignmentFrames = valid ? alignmentFrames + 1 : 0;
-  faceAligned = valid && alignmentFrames >= 4;
+  const result = evaluateAlignment(points, {
+    last: lastAlignment,
+    frames: alignmentFrames,
+  });
+  lastAlignment = result.state.last;
+  alignmentFrames = result.state.frames;
+  faceAligned = result.aligned;
   faceGuide.classList.toggle("aligned", faceAligned);
-  faceGuideLabel.textContent = faceAligned
-    ? "Face aligned — take photo"
-    : valid
-      ? "Hold still for a moment"
-      : message;
+  faceGuideLabel.textContent = result.label;
 }
 window.addEventListener("resize", () => updateFaceGuide(facePoints));
 let processing = false,
@@ -389,46 +362,7 @@ function setShade(name, hex) {
 async function initModels() {
   try {
     setStatus("Loading models…");
-    const vision = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-
-    const faceCommon = {
-      baseOptions: { modelAssetPath: FACE_MODEL },
-      runningMode: "IMAGE",
-      numFaces: 1,
-      minFaceDetectionConfidence: 0.5,
-      minFacePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    };
-
-    try {
-      faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-        ...faceCommon,
-        baseOptions: { ...faceCommon.baseOptions, delegate: "GPU" },
-      });
-    } catch {
-      faceLandmarker = await FaceLandmarker.createFromOptions(
-        vision,
-        faceCommon,
-      );
-    }
-
-    const segmentOptions = {
-      baseOptions: { modelAssetPath: SEG_MODEL },
-      runningMode: "IMAGE",
-      outputCategoryMask: true,
-      outputConfidenceMasks: false,
-    };
-    try {
-      segmenter = await ImageSegmenter.createFromOptions(vision, {
-        ...segmentOptions,
-        baseOptions: { modelAssetPath: SEG_MODEL, delegate: "GPU" },
-      });
-    } catch {
-      segmenter = await ImageSegmenter.createFromOptions(
-        vision,
-        segmentOptions,
-      );
-    }
+    ({ faceLandmarker, segmenter } = await loadModels());
     modelReady = true;
     startBtn.disabled = false;
     setStatus("Models ready", "ready");
@@ -450,18 +384,8 @@ async function startCamera() {
   cameraStarting = true;
   try {
     setStatus("Opening camera…");
-    if (!navigator.mediaDevices?.getUserMedia)
-      throw new Error("Camera requires HTTPS or localhost.");
-    stream?.getTracks().forEach((track) => track.stop());
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 24, max: 30 },
-      },
-    });
+    stopStream(stream);
+    stream = await openUserCamera();
     const metadata = new Promise((r) => (video.onloadedmetadata = r));
     video.srcObject = stream;
     await metadata;
@@ -477,17 +401,9 @@ async function startCamera() {
     updateFaceGuide(null);
   } catch (err) {
     console.error(err);
-    stream?.getTracks().forEach((track) => track.stop());
+    stopStream(stream);
     stream = null;
-    const message =
-      err.name === "NotAllowedError"
-        ? "Allow camera access in your browser settings."
-        : err.name === "NotFoundError"
-          ? "No camera found. Connect a camera and try again."
-          : err.name === "NotReadableError"
-            ? "Camera is busy. Close other camera apps and try again."
-            : err.message || "Unable to start camera.";
-    setStatus(message, "error");
+    setStatus(describeCameraError(err), "error");
   } finally {
     cameraStarting = false;
   }
