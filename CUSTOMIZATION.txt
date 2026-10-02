@@ -1,4 +1,0 @@
-BACKGROUND: styles.css, line 3: --page-background: #24152f;
-LOGO: Replace images/groovy-logo.png with your transparent PNG.
-CARD COLORS: --card-purple and --card-rose at the top of styles.css.
-Upload index.html, app.js, styles.css and the images folder after this update.

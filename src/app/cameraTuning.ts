@@ -9,7 +9,14 @@ import {
   type RangeControl,
 } from "../io/cameraControls";
 import { cameraInfo, type CameraInfo } from "../io/camera";
-import { meterFace, nextExposure, nextOffset, type FaceMeter } from "../face/exposure";
+import {
+  isUnusableFrame,
+  meterFace,
+  meterFrame,
+  nextExposure,
+  nextOffset,
+  type FaceMeter,
+} from "../face/exposure";
 import type { NormalizedLandmark } from "../effects/skin/input";
 
 const STORAGE_KEY = "groovy.camera.v1";
@@ -108,6 +115,12 @@ class CameraTuning {
   setFaceAuto(on: boolean): void {
     this.saved.faceAuto = on;
     this.autoNote = on ? "waiting for a face" : "";
+    // Switching off hands exposure back to the camera, so it cannot stay stuck at the last step.
+    if (!on && this.track) {
+      delete this.saved.values.exposureTime;
+      delete this.saved.values.exposureMode;
+      void restoreAuto(this.track).then(() => this.refresh());
+    }
     save(this.saved);
     this.emit();
   }
@@ -137,16 +150,20 @@ class CameraTuning {
     const now = performance.now();
     if (now - this.lastMeterAt < 330) return;
     this.lastMeterAt = now;
-    this.meter = landmarks
-      ? meterFace(ctx.getImageData(0, 0, w, h).data, w, h, landmarks, false)
-      : null;
+    const pixels = ctx.getImageData(0, 0, w, h).data;
+    this.meter = landmarks ? meterFace(pixels, w, h, landmarks, false) : null;
     this.emit();
-    if (!this.saved.faceAuto || !this.meter || !this.track || this.adjusting) return;
+    if (!this.saved.faceAuto || !this.track || this.adjusting) return;
     if (now - this.lastAdjustAt < 600) return;
-    void this.adjust(this.meter);
+    if (this.meter) return void this.adjust(this.meter);
+    // No face: only act if the whole frame is so dark/bright that a face could not be seen.
+    // (A black frame hides the face from the detector, which would otherwise stay stuck.)
+    const frame = meterFrame(pixels, w, h);
+    if (isUnusableFrame(frame)) void this.adjust(frame, "frame");
+    else this.autoNote = "waiting for a face";
   }
 
-  private async adjust(meter: FaceMeter): Promise<void> {
+  private async adjust(meter: FaceMeter, basis: "face" | "frame" = "face"): Promise<void> {
     const track = this.track!;
     this.adjusting = true;
     try {
@@ -154,13 +171,15 @@ class CameraTuning {
       if (time) {
         // exposureTime is in 100 µs units; longer than one frame would drop the frame rate.
         const fps = this.info?.frameRate || 30;
-        const max = Math.min(time.max, 10000 / fps);
         const current = Number((track.getSettings() as Record<string, unknown>).exposureTime ?? time.value);
+        // Never force the value below where the camera already is in one jump: the frame-time
+        // cap only stops us going LONGER than one frame, it must not slam a longer auto value down.
+        const max = Math.max(Math.min(time.max, 10000 / fps), current);
         const next = nextExposure(current, meter, { min: time.min, max });
         if (next !== null) {
           const stepped = Math.max(time.min, Math.round(next / time.step) * time.step);
           await setControl(track, "exposureTime", stepped);
-          this.autoNote = `exposure ${current.toFixed(0)} → ${stepped.toFixed(0)}`;
+          this.autoNote = `${basis === "frame" ? "dark/bright frame, " : ""}exposure ${current.toFixed(0)} → ${stepped.toFixed(0)}`;
           this.lastAdjustAt = performance.now();
           this.refresh();
         } else this.autoNote = "face exposure on target";
