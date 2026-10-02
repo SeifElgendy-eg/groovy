@@ -5,13 +5,13 @@ import { repairBlemishes } from "../effects/acne/repair";
 import { insetSkinMask } from "../imaging/maskOps";
 import {
   addClosedContour,
-  boundsOfPoints,
   carveContours,
 } from "../imaging/contours";
 import { metaOf } from "../effects/registry";
+import { buildLipData } from "../effects/lips/geometry";
+import { LipRenderer, needsWarp } from "../effects/lips/renderer";
 import {
   ACNE_EXCLUSION_CONTOURS,
-  INNER_MOUTH,
   OUTER_LIP,
   WRINKLE_EXCLUSION_CONTOURS,
 } from "../core/landmarks";
@@ -248,14 +248,7 @@ const cameraSnapshotCtx = cameraSnapshot.getContext("2d");
 const sourceCanvas = document.createElement("canvas");
 const sourceCtx = sourceCanvas.getContext("2d");
 
-const lipMaskCanvas = document.createElement("canvas");
-const lipMaskCtx = lipMaskCanvas.getContext("2d");
-const lipSourceCanvas = document.createElement("canvas");
-const lipSourceCtx = lipSourceCanvas.getContext("2d");
-const lipFeatherCanvas = document.createElement("canvas");
-const lipFeatherCtx = lipFeatherCanvas.getContext("2d");
-const lipColorCanvas = document.createElement("canvas");
-const lipColorCtx = lipColorCanvas.getContext("2d");
+const lipRenderer = new LipRenderer();
 
 function setStatus(_text, _type = "loading") {
   // Status UI has been removed; keep this function as a no-op
@@ -385,14 +378,11 @@ function ensureSizes(w, h) {
     stage,
     skinCanvas,
     sourceCanvas,
-    lipMaskCanvas,
-    lipSourceCanvas,
-    lipFeatherCanvas,
-    lipColorCanvas,
   ]) {
     c.width = w;
     c.height = h;
   }
+  lipRenderer.resize(w, h);
 }
 
 function drawForDisplay(targetCtx, w, h, filter = "none") {
@@ -626,13 +616,7 @@ function updateLipData(landmarks, w, h) {
   acneDirty = true;
   wrinklesDirty = true;
   updateFaceGuide(landmarks);
-  const outerPts = OUTER_LIP.map((i) => pointForDisplay(landmarks[i], w, h));
-  const innerPts = INNER_MOUTH.map((i) => pointForDisplay(landmarks[i], w, h));
-
-  const outer = boundsOfPoints(outerPts);
-  const inner = boundsOfPoints(innerPts);
-
-  lipData = { outerPts, innerPts, outer, inner, cy: (outer.cy + inner.cy) / 2 };
+  lipData = buildLipData(landmarks, w, h, sourceMode === "camera");
   faceBadge.textContent = "Face detected";
   faceBadge.classList.add("detected");
 }
@@ -751,236 +735,26 @@ function startCameraLoop() {
   cameraFrameRequest = requestAnimationFrame(renderLoop);
 }
 
-// Work in the mouth's local coordinate system. Cap lower-lip growth by
-// mouth width, so a naturally thick lower lip is not multiplied into a droop.
-function transformOuterLip(pts, inner, amount, verticalBias) {
-  const left = pts[0],
-    right = pts[10];
-  const width = Math.hypot(right.x - left.x, right.y - left.y);
-  if (width < 1) return pts;
-  const ux = (right.x - left.x) / width,
-    uy = (right.y - left.y) / width;
-  let nx = -uy,
-    ny = ux;
-  if ((pts[15].x - inner[15].x) * nx + (pts[15].y - inner[15].y) * ny < 0) {
-    nx = -nx;
-    ny = -ny;
-  }
-  const level = amount / 0.4;
-  return pts.map((p, i) => {
-    if (i === 0 || i === 10) return { ...p };
-    const t = (i % 10) / 10;
-    const edge = Math.pow(Math.sin(Math.PI * t), 0.9);
-    const upper = i < 10;
-    const thickness = Math.abs(
-      (p.x - inner[i].x) * nx + (p.y - inner[i].y) * ny,
-    );
-    // Upper lobes lift; lower volume spreads across the shoulders with a
-    // restrained centre. The inner mouth and corners remain unchanged.
-    const lobes = upper
-      ? 0.62 + 0.38 * Math.pow(Math.sin(2 * Math.PI * t), 2)
-      : 0.55 + 0.45 * Math.pow(Math.sin(2 * Math.PI * t), 2);
-    const cap = width * (upper ? 0.052 : 0.026);
-    const growth =
-      Math.min(thickness * (upper ? 0.55 : 0.25), cap) *
-      level *
-      edge *
-      lobes *
-      (0.35 + 1.3 * Math.max(0, Math.min(1, (verticalBias - 0.2) / 0.8)));
-    const side = (t < 0.5 ? -1 : 1) * (upper ? 1 : -1);
-    const spread = width * level * 0.012 * edge * Math.abs(2 * t - 1) * side;
-    return {
-      x: p.x + nx * growth * (upper ? -1 : 1) + ux * spread,
-      y: p.y + ny * growth * (upper ? -1 : 1) + uy * spread,
-    };
-  });
-}
-
-// Affine texture mapping makes the actual lip tissue follow its new contour.
-function drawWarpTriangle(source, target) {
-  const [a, b, c] = source,
-    [u, v, z] = target;
-  const det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-  if (Math.abs(det) < 0.001) return;
-  const A = ((v.x - u.x) * (c.y - a.y) - (z.x - u.x) * (b.y - a.y)) / det;
-  const C = ((z.x - u.x) * (b.x - a.x) - (v.x - u.x) * (c.x - a.x)) / det;
-  const B = ((v.y - u.y) * (c.y - a.y) - (z.y - u.y) * (b.y - a.y)) / det;
-  const D = ((z.y - u.y) * (b.x - a.x) - (v.y - u.y) * (c.x - a.x)) / det;
-  lipSourceCtx.save();
-  lipSourceCtx.beginPath();
-  addClosedContour(lipSourceCtx, target);
-  lipSourceCtx.clip();
-  lipSourceCtx.setTransform(
-    A,
-    B,
-    C,
-    D,
-    u.x - A * a.x - C * a.y,
-    u.y - B * a.x - D * a.y,
-  );
-  lipSourceCtx.drawImage(sourceCanvas, 0, 0);
-  lipSourceCtx.restore();
-}
-
-function warpLipRing(inner, outer, targetInner, targetOuter) {
-  for (let i = 0; i < outer.length; i++) {
-    const j = (i + 1) % outer.length;
-    drawWarpTriangle(
-      [inner[i], outer[i], outer[j]],
-      [targetInner[i], targetOuter[i], targetOuter[j]],
-    );
-    drawWarpTriangle(
-      [inner[i], outer[j], inner[j]],
-      [targetInner[i], targetOuter[j], targetInner[j]],
-    );
-  }
-}
-
-function computeLipTargets() {
-  if (!lipData) return null;
-  const amount = Number(lipSlider.value) / 100;
-  const verticalBias = Number(verticalSlider.value) / 100;
-  const blend = Number(blendSlider.value) / 100;
-
-  const effectiveAmount = amount;
-
-  const targetOuter =
-    amount > 0.001
-      ? transformOuterLip(
-          lipData.outerPts,
-          lipData.innerPts,
-          effectiveAmount,
-          verticalBias,
-        )
-      : lipData.outerPts;
-  const targetInner = lipData.innerPts;
-
-  return { targetOuter, targetInner, amount, blend, effectiveAmount };
-}
-
-function buildLipFeather(targetOuter, targetInner, blend, w, h) {
-  lipMaskCtx.clearRect(0, 0, w, h);
-  lipMaskCtx.beginPath();
-  addClosedContour(lipMaskCtx, targetOuter);
-  addClosedContour(lipMaskCtx, targetInner);
-  lipMaskCtx.fillStyle = "white";
-  lipMaskCtx.fill("evenodd");
-
-  lipFeatherCtx.clearRect(0, 0, w, h);
-  lipFeatherCtx.save();
-  lipFeatherCtx.filter = `blur(${Math.max(0.35, boundsOfPoints(targetOuter).width * (0.002 + blend * 0.004))}px)`;
-  lipFeatherCtx.drawImage(lipMaskCanvas, 0, 0, w, h);
-  lipFeatherCtx.restore();
-  lipFeatherCtx.filter = "none";
-}
-
-function renderLipColor(targetOuter, targetInner, blend) {
-  const intensity = Number(colorSlider.value) / 100;
-  if (!selectedShadeHex || intensity <= 0.001) return;
-
-  const w = stage.width,
-    h = stage.height;
-  buildLipFeather(targetOuter, targetInner, blend, w, h);
-  const bounds = boundsOfPoints(targetOuter);
-  const pad = Math.ceil(bounds.width * 0.02 + 3);
-  const x = Math.max(0, Math.floor(bounds.minX - pad)),
-    y = Math.max(0, Math.floor(bounds.minY - pad));
-  const rw = Math.min(w - x, Math.ceil(bounds.maxX + pad) - x);
-  const rh = Math.min(h - y, Math.ceil(bounds.maxY + pad) - y);
-  if (rw <= 0 || rh <= 0) return;
-  const pixels = ctx.getImageData(x, y, rw, rh);
-  const mask = lipFeatherCtx.getImageData(x, y, rw, rh).data;
-  const rgb = [1, 3, 5].map((start) =>
-    parseInt(selectedShadeHex.slice(start, start + 2), 16),
-  );
-  const targetLuma = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
-  // Change chroma only: keep each pixel's photographed luminance exactly.
-  // Partial coverage retains natural lip variation even at maximum strength.
-  const chroma = rgb.map((v) => v - targetLuma);
-  for (let i = 0; i < pixels.data.length; i += 4) {
-    const lum =
-      pixels.data[i] * 0.2126 +
-      pixels.data[i + 1] * 0.7152 +
-      pixels.data[i + 2] * 0.0722;
-    const highlight = 1 - Math.max(0, Math.min(0.75, (lum - 150) / 100));
-    const shadow = Math.min(1, lum / 65);
-    const alpha =
-      Math.pow(mask[i + 3] / 255, 1.5) * intensity * 0.62 * highlight * shadow;
-    if (alpha < 0.001) continue;
-    let gamut = 1;
-    for (const delta of chroma) {
-      if (delta > 0) gamut = Math.min(gamut, (255 - lum) / delta);
-      if (delta < 0) gamut = Math.min(gamut, lum / -delta);
-    }
-    for (let ch = 0; ch < 3; ch++)
-      pixels.data[i + ch] =
-        pixels.data[i + ch] * (1 - alpha) + (lum + chroma[ch] * gamut) * alpha;
-  }
-  ctx.putImageData(pixels, x, y);
+function readLipParams() {
+  return {
+    amount: Number(lipSlider.value) / 100,
+    roll: Number(verticalSlider.value) / 100,
+    blend: Number(blendSlider.value) / 100,
+    colorIntensity: Number(colorSlider.value) / 100,
+    shadeHex: selectedShadeHex,
+    showOutline: lipDebug.checked,
+  };
 }
 
 function renderLips(w, h) {
-  if (currentModule !== "lips") return;
-  const lipTargets = computeLipTargets();
-  if (!lipTargets) return;
-
-  const { targetOuter, targetInner, amount, blend, effectiveAmount } =
-    lipTargets;
-  buildLipFeather(targetOuter, targetInner, blend, w, h);
-
-  if (amount > 0.001) {
+  if (currentModule !== "lips" || !lipData) return;
+  const params = readLipParams();
+  if (needsWarp(params)) {
+    // The warp samples the display-oriented frame (mirrored for the camera).
     sourceCtx.clearRect(0, 0, w, h);
     drawForDisplay(sourceCtx, w, h);
-    lipSourceCtx.clearRect(0, 0, w, h);
-    // A fixed surrounding ring joins the expanded lips back to nearby skin.
-    const rim = lipData.outerPts.map((p) => ({
-      x: lipData.outer.cx + (p.x - lipData.outer.cx) * 2.2,
-      y: lipData.cy + (p.y - lipData.cy) * 2.8,
-    }));
-    // Nonlinear cross-section rolls the tissue outward instead of stretching it flat.
-    let previousSource = lipData.innerPts,
-      previousTarget = targetInner;
-    const steps = 6;
-    for (let band = 1; band <= steps; band++) {
-      const t = band / steps;
-      const roll = Math.max(
-        0,
-        Math.min(1, (Number(verticalSlider.value) / 100 - 0.2) / 0.8),
-      );
-      const rolled = t + amount * (0.04 + roll * 0.44) * Math.sin(Math.PI * t);
-      const sourceRing = lipData.outerPts.map((p, i) => ({
-        x: lipData.innerPts[i].x + (p.x - lipData.innerPts[i].x) * t,
-        y: lipData.innerPts[i].y + (p.y - lipData.innerPts[i].y) * t,
-      }));
-      const targetRing = targetOuter.map((p, i) => ({
-        x: targetInner[i].x + (p.x - targetInner[i].x) * rolled,
-        y: targetInner[i].y + (p.y - targetInner[i].y) * rolled,
-      }));
-      warpLipRing(previousSource, sourceRing, previousTarget, targetRing);
-      previousSource = sourceRing;
-      previousTarget = targetRing;
-    }
-    warpLipRing(lipData.outerPts, rim, targetOuter, rim);
-    ctx.drawImage(lipSourceCanvas, 0, 0);
   }
-
-  renderLipColor(targetOuter, targetInner, blend);
-
-  // Preserve the photographed lighting; do not add synthetic reflections.
-
-  if (lipDebug.checked) {
-    ctx.save();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(214,255,93,.95)";
-    ctx.beginPath();
-    addClosedContour(ctx, targetOuter);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(80,220,255,.95)";
-    ctx.beginPath();
-    addClosedContour(ctx, targetInner);
-    ctx.stroke();
-    ctx.restore();
-  }
+  lipRenderer.render(ctx, sourceCanvas, lipData, params, w, h);
 }
 
 function renderSkin(w, h) {
