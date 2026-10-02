@@ -66,7 +66,11 @@ for (const s of scenarios) {
       }, [id, value]);
     } else await page.click(sel);
   }
-  await page.waitForTimeout(1500); // let prepare*/render settle
+  // Let render settle: effects prepare in a Web Worker and flag body[data-effects-busy] meanwhile
+  // (older builds compute synchronously and never set it).
+  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.body.dataset.effectsBusy, null, { timeout: 60000 });
+  await page.waitForTimeout(300);
   const dataUrl = await page.evaluate(() => document.getElementById("stage").toDataURL("image/png"));
   const buf = Buffer.from(dataUrl.split(",")[1], "base64");
   fs.writeFileSync(path.join(OUT, `${s.name}.png`), buf);
