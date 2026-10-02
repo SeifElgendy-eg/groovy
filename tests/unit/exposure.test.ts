@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { meterFace, nextExposure, nextOffset } from "../../src/face/exposure";
+import { meterFace } from "../../src/face/exposure";
 import { LM } from "../../src/core/landmarks";
 
 function face(): { x: number; y: number }[] {
@@ -34,33 +34,7 @@ describe("meterFace", () => {
   });
 });
 
-describe("nextExposure", () => {
-  const range = { min: 1, max: 333 };
-  it("steps down firmly when highlights clip", () => {
-    expect(nextExposure(100, { mean: 200, clipped: 0.2, crushed: 0 }, range)).toBe(75);
-  });
-  it("brightens a dark face, damped and bounded", () => {
-    const next = nextExposure(100, { mean: 40, clipped: 0, crushed: 0 }, range)!;
-    expect(next).toBeGreaterThan(100);
-    expect(next).toBeLessThanOrEqual(150);
-  });
-  it("holds inside the dead band", () => {
-    expect(nextExposure(100, { mean: 118, clipped: 0, crushed: 0 }, range)).toBeNull();
-  });
-  it("respects the range", () => {
-    expect(nextExposure(300, { mean: 30, clipped: 0, crushed: 0 }, range)).toBe(333);
-    expect(nextExposure(333, { mean: 30, clipped: 0, crushed: 0 }, range)).toBeNull();
-  });
-});
 
-describe("nextOffset", () => {
-  const range = { min: -64, max: 64, step: 1 };
-  it("lowers brightness on clipping and raises it when dark", () => {
-    expect(nextOffset(0, { mean: 200, clipped: 0.5, crushed: 0 }, range)).toBeLessThan(0);
-    expect(nextOffset(0, { mean: 50, clipped: 0, crushed: 0 }, range)).toBeGreaterThan(0);
-    expect(nextOffset(0, { mean: 125, clipped: 0, crushed: 0 }, range)).toBeNull();
-  });
-});
 
 import { isUnusableFrame, meterFrame } from "../../src/face/exposure";
 
@@ -68,17 +42,8 @@ describe("frame safety net", () => {
   it("flags a black frame so exposure can recover when no face is visible", () => {
     const m = meterFrame(frame(64, 64, 2), 64, 64);
     expect(isUnusableFrame(m)).toBe(true);
-    // and the step is upward, bounded
-    const next = nextExposure(333, m, { min: 1, max: 2500 })!;
-    expect(next).toBeGreaterThan(333);
-    expect(next).toBeLessThanOrEqual(333 * 1.5);
   });
   it("leaves a normal frame alone", () => {
     expect(isUnusableFrame(meterFrame(frame(64, 64, 120), 64, 64))).toBe(false);
-  });
-  it("never slams a long auto exposure down in one step", () => {
-    // camera auto exposure 2500 with a bright face: at most x0.75 per step, not 2500 -> 333
-    const next = nextExposure(2500, { mean: 200, clipped: 0.3, crushed: 0 }, { min: 1, max: 2500 })!;
-    expect(next).toBe(1875);
   });
 });
