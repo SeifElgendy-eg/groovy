@@ -43,15 +43,24 @@ const scenarios = [
   { name: "lips-color-28", module: "#chooseLipsBtn", sample: "#sampleBtn", steps: ['[data-shade="brightred"]'] },
   { name: "wrinkles-100", module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn", steps: [] },
   { name: "skin-brightness-60", hiddenEntry: true, module: "#chooseSkinBtn", sample: "#sampleBtn", steps: ["set:#brightnessSlider=60"] },
+  { name: "acne-pores-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#poresSlider=100"] },
+  // A real photo with acne scars and enlarged pores (tests/golden/fixtures), loaded as an upload.
+  { name: "acne-real-scars-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#scarsSlider=100"] },
+  { name: "acne-real-pores-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#poresSlider=100"] },
+  { name: "acne-real-redness-100", module: "#chooseAcneBtn", upload: "acne-scars-test.png", steps: ["set:#rednessSlider=100"] },
+  { name: "acne-scars-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#scarsSlider=100"] },
   ...[50, 80, 100].map((p) => ({
     name: `acne-${p}`, module: "#chooseAcneBtn", sample: "#acneSampleBtn",
     steps: [`[data-acne-preset="${p}"]`],
   })),
 ];
 
+// --only a,b : render just these scenarios (quick local checks).
+const ONLY = new Set(arg("--only", "").split(",").filter(Boolean));
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
 let failed = 0;
 for (const s of scenarios) {
+  if (ONLY.size && !ONLY.has(s.name)) continue;
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on("pageerror", (e) => console.log("  pageerror:", e.message));
   await page.goto(URL_);
@@ -59,7 +68,8 @@ for (const s of scenarios) {
   // The skin service has no visible entry button (hidden in index.html), so click it by script.
   if (s.hiddenEntry) await page.evaluate((sel) => document.querySelector(sel).click(), s.module);
   else await page.click(s.module);
-  await page.click(s.sample);
+  if (s.upload) await page.setInputFiles("#fileInput", path.join(here, "fixtures", s.upload));
+  else await page.click(s.sample);
   await page.waitForFunction(
     () => document.getElementById("perfBadge").textContent === "PHOTO READY" &&
           document.getElementById("faceBadge").classList.contains("detected"),
@@ -67,15 +77,20 @@ for (const s of scenarios) {
   for (const sel of s.steps) {
     if (sel.startsWith("set:")) {
       const [id, value] = sel.slice(4).split("=");
-      await page.evaluate(([id, value]) => {
+      const found = await page.evaluate(([id, value]) => {
         const el = document.querySelector(id);
+        if (!el) return false;
         el.value = value;
         el.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
       }, [id, value]);
+      // A control this build does not have yet (e.g. the base of a PR that adds it): skip.
+      if (!found) { s.unsupported = true; break; }
     } else await page.click(sel);
   }
   // Let render settle: effects prepare in a Web Worker and flag body[data-effects-busy] meanwhile
   // (older builds compute synchronously and never set it).
+  if (s.unsupported) { console.log("skip", s.name, "(not in this build)"); await page.close(); continue; }
   await page.waitForTimeout(300);
   await page.waitForFunction(() => !document.body.dataset.effectsBusy, null, { timeout: 60000 });
   await page.waitForTimeout(300);
@@ -85,7 +100,10 @@ for (const s of scenarios) {
   await page.close();
   const goldPath = path.join(GOLD, `${s.name}.png`);
   if (UPDATE) { fs.writeFileSync(goldPath, buf); console.log("wrote", s.name); continue; }
-  if (!fs.existsSync(goldPath)) { console.log("MISSING golden", s.name); failed++; continue; }
+  if (!fs.existsSync(goldPath)) {
+    if (ALLOWED.has(s.name)) { console.log("NEW (expected)", s.name); continue; }
+    console.log("MISSING golden", s.name); failed++; continue;
+  }
   const a = await sharp(goldPath).raw().toBuffer({ resolveWithObject: true });
   const b = await sharp(buf).raw().toBuffer({ resolveWithObject: true });
   if (a.info.width !== b.info.width || a.info.height !== b.info.height || a.info.channels !== b.info.channels) {
