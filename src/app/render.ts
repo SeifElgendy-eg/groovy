@@ -109,8 +109,14 @@ function renderAcne(w: number, h: number): void {
   dom.acneStatus.textContent =
     "Compare Before and After to preview reduced blemishes and redness";
   const amount = Number(dom.acneSlider.value) / 100;
-  if (amount <= 0 && !dom.skinDebug.checked) return;
-  if (ensurePrepared(acne, w, h)) acne.draw(ctx, w, h, amount);
+  const scars = Number(dom.scarsSlider.value) / 100;
+  const pores = Number(dom.poresSlider.value) / 100;
+  if (amount <= 0 && scars <= 0 && pores <= 0 && !dom.skinDebug.checked) return;
+  const ready = ensurePrepared(acne, w, h);
+  // Scars and pores are multiply/add layers: they need the photo itself on the stage underneath
+  // (spot repairs alone are opaque patches and can sit over the <img>).
+  if (state.sourceMode === "photo" && (scars > 0 || pores > 0)) drawForDisplay(ctx, w, h);
+  if (ready) acne.draw(ctx, w, h, amount, scars, pores);
 }
 
 const effectRender: Partial<Record<ModuleId, Draw>> = {
@@ -122,7 +128,8 @@ const effectRender: Partial<Record<ModuleId, Draw>> = {
 
 const effectActive: Record<ServiceId, () => boolean> = {
   wrinkles: () => Number(dom.wrinklesSlider.value) > 0,
-  acne: () => Number(dom.acneSlider.value) > 0,
+  acne: () =>
+    Number(dom.acneSlider.value) > 0 || Number(dom.scarsSlider.value) > 0 || Number(dom.poresSlider.value) > 0,
   skin: () => Number(dom.brightnessSlider.value) > 0,
   lips: () =>
     Number(dom.lipSlider.value) > 0 ||

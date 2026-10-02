@@ -3,3 +3,5 @@
 acne-50
 acne-80
 acne-100
+acne-pores-100
+acne-scars-100

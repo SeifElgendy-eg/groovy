@@ -11,7 +11,9 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { runAcne } from "../skin/client";
+import { runAcne, runTexture } from "../skin/client";
+import type { Layers } from "./texture";
+import { boundsOfPoints } from "../../imaging/contours";
 
 export class AcneEffect {
   private stale = true;
@@ -36,6 +38,13 @@ export class AcneEffect {
   private work = scratch(true);
   private blur = scratch(true);
   private mask = scratch(true);
+  /** Scars and pores: full-resolution layers for the face crop (see texture.ts). */
+  private texture: {
+    x: number;
+    y: number;
+    pores: { mul: HTMLCanvasElement; add: HTMLCanvasElement };
+    scars: { mul: HTMLCanvasElement; add: HTMLCanvasElement };
+  } | null = null;
 
   /** The correction layer's final feathered mask, for the "show face mask" debug view. */
   get maskCanvas(): HTMLCanvasElement {
@@ -128,17 +137,80 @@ export class AcneEffect {
   if (gen !== this.gen) return false;
   mask.ctx.putImageData(new ImageData(result.faded, aw, ah), 0, 0);
   out.ctx.putImageData(new ImageData(result.corrected, aw, ah), 0, 0);
+  const texture = await this.prepareTexture(input, mask.canvas, aw, ah);
+  if (gen !== this.gen) return false;
+  this.texture = texture;
   this.stale = false;
   this.ready = true;
   return true;
   }
 
-  /** Composite the prepared correction over `target` at the given strength (0..1). */
-  draw(target: CanvasRenderingContext2D, w: number, h: number, amount: number): void {
+  /**
+   * Scars and pores work on the photo's full resolution (pores are too small for the reduced
+   * analysis copy), limited to the face's bounding box to keep it fast.
+   */
+  private async prepareTexture(input: SkinInput, faded: HTMLCanvasElement, aw: number, ah: number) {
+    const { w, h } = input;
+    const points = toDisplayPoints(input.landmarks, w, h, input.mirrored);
+    const b = boundsOfPoints(points);
+    const padX = b.width * 0.08,
+      padY = b.height * 0.08;
+    const x = Math.max(0, Math.floor(b.minX - padX)),
+      y = Math.max(0, Math.floor(b.minY - padY));
+    const cw = Math.min(w, Math.ceil(b.maxX + padX)) - x,
+      ch = Math.min(h, Math.ceil(b.maxY + padY)) - y;
+    if (cw < 8 || ch < 8) return null;
+    const crop = scratch(true);
+    crop.canvas.width = cw;
+    crop.canvas.height = ch;
+    crop.ctx.translate(-x, -y);
+    input.drawFrame(crop.ctx, w, h);
+    // Texture is measured on the picture with the spots already repaired, so pimples (and their
+    // edges) do not show up as "pits" and leave rings around the repairs.
+    crop.ctx.imageSmoothingEnabled = true;
+    crop.ctx.drawImage(this.out.canvas, 0, 0, w, h);
+    const pixels = crop.ctx.getImageData(0, 0, cw, ch).data;
+    // The acne mask (analysis resolution, already feathered and with features carved out),
+    // scaled up onto the crop.
+    crop.ctx.clearRect(0, 0, w, h);
+    crop.ctx.imageSmoothingEnabled = true;
+    crop.ctx.drawImage(faded, 0, 0, aw, ah, 0, 0, w, h);
+    const maskPixels = crop.ctx.getImageData(0, 0, cw, ch).data;
+    const r = await runTexture({ pixels, mask: maskPixels, width: cw, height: ch, faceWidth: faceWidthOf(points) });
+    const toCanvas = (data: Uint8ClampedArray<ArrayBuffer>) => {
+      const c = document.createElement("canvas");
+      c.width = cw;
+      c.height = ch;
+      c.getContext("2d")!.putImageData(new ImageData(data, cw, ch), 0, 0);
+      return c;
+    };
+    const layers = (l: Layers) => ({ mul: toCanvas(l.mul), add: toCanvas(l.add) });
+    return { x, y, pores: layers(r.pores), scars: layers(r.scars) };
+  }
+
+  /**
+   * Composite the prepared corrections over `target`: spots at `amount`, then scars and pores at
+   * their own strengths (all 0..1).
+   */
+  draw(target: CanvasRenderingContext2D, w: number, h: number, amount: number, scars = 0, pores = 0): void {
     target.save();
-    target.globalAlpha = amount;
     target.imageSmoothingEnabled = true;
-    target.drawImage(this.out.canvas, 0, 0, w, h);
+    if (amount > 0) {
+      target.globalAlpha = amount;
+      target.drawImage(this.out.canvas, 0, 0, w, h);
+    }
+    const t = this.texture;
+    if (t) {
+      for (const [layer, strength] of [[t.scars, scars], [t.pores, pores]] as const) {
+        if (strength <= 0) continue;
+        target.globalAlpha = strength;
+        target.globalCompositeOperation = "multiply";
+        target.drawImage(layer.mul, t.x, t.y);
+        target.globalCompositeOperation = "lighter";
+        target.drawImage(layer.add, t.x, t.y);
+        target.globalCompositeOperation = "source-over";
+      }
+    }
     target.restore();
   }
 }

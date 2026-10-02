@@ -2,11 +2,16 @@
 // while a photo is processed.
 import { expose, transfer } from "comlink";
 import { acneCompute, wrinklesCompute, type AcneJob, type WrinklesJob } from "./compute";
+import { textureCompute, type TextureJob } from "../acne/texture";
 
 const api = {
   acne(job: AcneJob) {
     const r = acneCompute(job);
     return transfer(r, [r.corrected.buffer, r.faded.buffer]);
+  },
+  texture(job: TextureJob) {
+    const r = textureCompute(job);
+    return transfer(r, [r.pores.mul.buffer, r.pores.add.buffer, r.scars.mul.buffer, r.scars.add.buffer]);
   },
   wrinkles(job: WrinklesJob) {
     const r = wrinklesCompute(job);
