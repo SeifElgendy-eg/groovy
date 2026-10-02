@@ -6,7 +6,7 @@ import { dom } from "../ui/dom";
 import { capture, captureBtn, updateFaceGuide } from "../ui/faceGuide";
 import { setStatus } from "../ui/status";
 import { markEffectsDirty } from "./effects";
-import { ensureSizes, getSourceDims } from "./frames";
+import { ensureSizes, getSourceDims, setStill } from "./frames";
 import { startCameraLoop } from "./loop";
 import { clearFace, processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
@@ -105,6 +105,7 @@ function resetForNewPhoto(kind: typeof state.photoKind): void {
 
 export async function handlePhoto(file: File | undefined | null): Promise<void> {
   if (!file) return;
+  setStill(null);
   resetForNewPhoto("upload");
   const url = URL.createObjectURL(file);
   dom.photo.onload = async () => {
@@ -125,6 +126,7 @@ const SAMPLE_PATHS = {
 } as const;
 
 export async function loadSamplePhoto(): Promise<void> {
+  setStill(null);
   const kind = metaOf(state.module).sampleKind;
   resetForNewPhoto(kind);
   dom.photo.onload = () => onPhotoReady("Test photo loaded");
@@ -158,16 +160,13 @@ export function mountCaptureButton(): void {
         drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
         return canvas;
       });
-      const blob = await tracked("encoding the photo", () =>
-        new Promise<Blob | null>((resolve) => still.toBlob(resolve, "image/png")),
-      );
-      if (!blob) throw new Error("Unable to capture photo. Please try again.");
       state.showBefore = false;
       syncBefore();
       state.capturedPhoto = true;
-      await handlePhoto(
-        new File([blob], "camera-photo.png", { type: "image/png" }),
-      );
+      // Use the captured canvas directly as the photo: no PNG encode/decode round trip.
+      resetForNewPhoto("upload");
+      setStill(still);
+      await onPhotoReady("Photo taken");
     } catch (error) {
       setStatus((error as Error).message, "error");
     } finally {

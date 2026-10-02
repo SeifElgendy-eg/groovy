@@ -90,7 +90,10 @@ export function applySourceMode(): void {
   dom.cameraBtn.classList.toggle("active", cam);
   dom.sourceBadge.textContent = `SOURCE — ${cam ? "CAMERA" : "PHOTO"}`;
   dom.video.style.display = cam ? "block" : "none";
-  dom.photo.style.display = cam ? "none" : "block";
+  // A captured still (see app/frames.ts) is shown instead of the <img> while it exists.
+  const still = dom.stageWrap.querySelector<HTMLElement>(".captured-still");
+  dom.photo.style.display = cam || still ? "none" : "block";
+  if (still) still.style.display = cam ? "none" : "block";
   dom.stageWrap.classList.toggle("camera-mode", cam);
   dom.stageWrap.classList.toggle("photo-mode", !cam);
   dom.liveBadge.classList.toggle("hidden", !cam);

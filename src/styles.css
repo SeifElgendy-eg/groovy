@@ -839,3 +839,13 @@ body:not(.home-screen) .stage-wrap {
   gap: 8px;
   margin: 12px 0 4px;
 }
+
+/* A photo taken with the camera, shown directly from its canvas (same placement as #photo). */
+.stage-wrap .captured-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #08090b;
+}
