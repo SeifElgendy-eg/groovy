@@ -12,12 +12,34 @@ const cameraSnapshotCtx = cameraSnapshot.getContext("2d")!;
 export const sourceCanvas = document.createElement("canvas");
 export const sourceCtx = sourceCanvas.getContext("2d")!;
 
-function getVisibleSource(): HTMLImageElement | HTMLVideoElement {
-  return state.sourceMode === "photo" ? dom.photo : dom.video;
+/**
+ * A photo taken with the camera is kept as the canvas it was captured into and shown directly,
+ * instead of being saved as a PNG file and loaded back into the <img> (about 1.4 s for a 4K frame;
+ * the canvas route takes well under 0.1 s and gives the same pixels).
+ */
+let still: HTMLCanvasElement | null = null;
+
+/** Show `canvas` as the current photo (null: back to the <img>). */
+export function setStill(canvas: HTMLCanvasElement | null): void {
+  still?.remove();
+  still = canvas;
+  if (canvas) {
+    canvas.className = "captured-still";
+    dom.stage.before(canvas); // under the effect canvas, like the <img>
+  }
+}
+
+export function hasStill(): boolean {
+  return !!still;
+}
+
+function getVisibleSource(): HTMLImageElement | HTMLVideoElement | HTMLCanvasElement {
+  return state.sourceMode === "photo" ? (still ?? dom.photo) : dom.video;
 }
 
 export function getSourceDims(): { w: number; h: number } {
   const { photo, video } = dom;
+  if (state.sourceMode === "photo" && still) return { w: still.width, h: still.height };
   if (state.sourceMode === "photo" && photo.naturalWidth) {
     return { w: photo.naturalWidth, h: photo.naturalHeight };
   }

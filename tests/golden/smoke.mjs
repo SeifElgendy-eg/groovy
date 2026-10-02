@@ -77,6 +77,32 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   console.log(ok ? "ok  " : "FAIL", "live camera shows the capture guide", JSON.stringify(state));
   if (!ok) bad++;
 
+  // "Take photo": the frame is used directly (no PNG round trip) at the camera's full resolution,
+  // shown in place of the <img>.
+  {
+    const t0 = Date.now();
+    await cam.click(".capture-photo");
+    await cam.waitForFunction(() => document.getElementById("perfBadge").textContent === "PHOTO READY", null, { timeout: 120000 });
+    const shot = await cam.evaluate(() => {
+      const still = document.querySelector(".captured-still");
+      return {
+        still: !!still && getComputedStyle(still).display !== "none",
+        imgHidden: getComputedStyle(document.getElementById("photo")).display === "none",
+        size: still ? `${still.width}x${still.height}` : "",
+        video: `${document.getElementById("video").videoWidth}x${document.getElementById("video").videoHeight}`,
+        stage: `${document.getElementById("stage").width}x${document.getElementById("stage").height}`,
+      };
+    });
+    const okShot = shot.still && shot.imgHidden && shot.size === shot.video && shot.stage === shot.video;
+    console.log(okShot ? "ok  " : "FAIL", "take photo uses the full-resolution frame directly", JSON.stringify(shot), `${Date.now() - t0} ms`);
+    if (!okShot) bad++;
+    await cam.click("#cameraBtn"); // back to the live camera for the next checks
+    await cam.waitForTimeout(800);
+    const back = await cam.evaluate(() => getComputedStyle(document.querySelector(".captured-still")).display === "none" && getComputedStyle(document.getElementById("video")).display !== "none");
+    console.log(back ? "ok  " : "FAIL", "back to camera hides the captured photo");
+    if (!back) bad++;
+  }
+
   // Staff camera panel: opens with Ctrl+Shift+C and reports the granted stream resolution.
   await cam.keyboard.press("Control+Shift+C");
   await cam.waitForTimeout(300);
