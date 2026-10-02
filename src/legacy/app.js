@@ -8,6 +8,7 @@ import {
   boundsOfPoints,
   carveContours,
 } from "../imaging/contours";
+import { metaOf } from "../effects/registry";
 import {
   ACNE_EXCLUSION_CONTOURS,
   INNER_MOUTH,
@@ -58,11 +59,7 @@ const wrinklesCtx = wrinklesCanvas.getContext("2d"),
 let wrinklesDirty = true,
   wrinklesLastFrame = 0;
 function sampleKind() {
-  return currentModule === "acne"
-    ? "sample-acne"
-    : currentModule === "wrinkles"
-      ? "sample-wrinkles"
-      : "sample";
+  return metaOf(currentModule).sampleKind;
 }
 function syncWrinklesPreset() {
   const value = Number(wrinklesSlider.value);
@@ -328,45 +325,24 @@ function setModule(moduleName) {
   updateFaceGuide(null);
   document.body.classList.toggle("home-screen", moduleName === "home");
   const isHome = moduleName === "home";
-  const isLips = moduleName === "lips";
 
   showEl(moduleHome, isHome);
   showEl(moduleHeader, !isHome);
   showEl(backHomeBtn, !isHome);
   showEl(compareSection, !isHome);
   showEl(resetSection, !isHome);
-  showEl(skinDebugSection, ["skin", "acne", "wrinkles"].includes(moduleName));
-  showEl(wrinklesSection, moduleName === "wrinkles");
-  showEl(acneSection, moduleName === "acne");
-  showEl(skinSection, moduleName === "skin");
-  showEl(lipsSection, isLips);
-  showEl(colorSection, isLips);
+  const meta = metaOf(moduleName);
+  showEl(skinDebugSection, meta.usesSkinMask);
+  for (const [id, els] of Object.entries(serviceSections))
+    for (const el of els) showEl(el, moduleName === id);
 
   if (moduleName === "wrinkles") {
     wrinklesSlider.value = 100;
     syncWrinklesPreset();
-    moduleEyebrow.textContent = "WRINKLES";
-    moduleTitle.textContent = "Botox (wrinkles)";
-  } else if (moduleName === "acne") {
-    moduleEyebrow.textContent = "ACNE";
-    moduleTitle.textContent = "Acne Treatment";
-  } else if (moduleName === "skin") {
-    moduleEyebrow.textContent = "SKIN";
-    moduleTitle.textContent = "Skin Brightness";
-  } else if (isLips) {
-    moduleEyebrow.textContent = "LIPS";
-    moduleTitle.textContent = "Filler (lips)";
-  } else {
-    moduleEyebrow.textContent = "SERVICE";
-    moduleTitle.textContent = "Choose a service";
   }
-
-  sampleBtn.textContent =
-    moduleName === "acne"
-      ? "Test Photo · Acne"
-      : moduleName === "wrinkles"
-        ? "Test Photo · Wrinkles"
-        : "Test Photo";
+  moduleEyebrow.textContent = meta.eyebrow;
+  moduleTitle.textContent = meta.title;
+  sampleBtn.textContent = meta.sampleButtonLabel;
   showBefore = false;
   syncBefore();
   acneDirty = true;
@@ -690,7 +666,7 @@ async function processCurrentSource() {
 
     const segmentation =
       (sourceMode === "photo" || cameraNeedsEffect()) &&
-      ["skin", "acne", "wrinkles"].includes(currentModule)
+      metaOf(currentModule).usesSkinMask
         ? modelMode === "VIDEO"
           ? segmenter.segmentForVideo(sourceCanvas, timestamp)
           : segmenter.segment(sourceCanvas)
@@ -1282,16 +1258,11 @@ function renderAcne(w, h) {
 function renderSkinDebug(w, h) {
   if (
     !skinDebug.checked ||
-    !["skin", "acne", "wrinkles"].includes(currentModule) ||
+    !metaOf(currentModule).usesSkinMask ||
     !facePoints
   )
     return;
-  const actual =
-    currentModule === "acne"
-      ? acneMask
-      : currentModule === "wrinkles"
-        ? wrinklesMask
-        : skinEffectMask;
+  const actual = debugMasks[currentModule]();
   const mw = actual.width,
     mh = actual.height;
   if (!mw || !mh) return;
@@ -1327,28 +1298,45 @@ function renderAll() {
   // Composite the effect over the exact captured frame used by the models.
   if (sourceMode === "camera") drawForDisplay(ctx, w, h);
   if (showBefore) return;
-  if (currentModule === "lips" && lipData) drawForDisplay(ctx, w, h);
-  renderSkin(w, h);
-  renderLips(w, h);
-  renderAcne(w, h);
-  renderWrinkles(w, h);
+  if (metaOf(currentModule).paintsBaseFrame && lipData)
+    drawForDisplay(ctx, w, h);
+  effectRender[currentModule]?.(w, h);
   renderSkinDebug(w, h);
 }
+
+// Per-service behaviour, looked up by module id (declarative facts live in effects/registry.ts).
+const serviceSections = {
+  lips: [lipsSection, colorSection],
+  wrinkles: [wrinklesSection],
+  acne: [acneSection],
+  skin: [skinSection],
+};
+const effectRender = {
+  skin: renderSkin,
+  lips: renderLips,
+  acne: renderAcne,
+  wrinkles: renderWrinkles,
+};
+const effectActive = {
+  wrinkles: () => Number(wrinklesSlider.value) > 0,
+  acne: () => Number(acneSlider.value) > 0,
+  skin: () => Number(brightnessSlider.value) > 0,
+  lips: () =>
+    Number(lipSlider.value) > 0 ||
+    Number(colorSlider.value) > 0 ||
+    lipDebug.checked,
+};
+const debugMasks = {
+  acne: () => acneMask,
+  wrinkles: () => wrinklesMask,
+  skin: () => skinEffectMask,
+};
 
 function cameraNeedsEffect() {
   if (sourceMode === "camera") return false;
   if (showBefore || currentModule === "home") return false;
-  if (skinDebug.checked && ["skin", "acne", "wrinkles"].includes(currentModule))
-    return true;
-  if (currentModule === "wrinkles") return Number(wrinklesSlider.value) > 0;
-  if (currentModule === "acne") return Number(acneSlider.value) > 0;
-  if (currentModule === "skin") return Number(brightnessSlider.value) > 0;
-  return (
-    currentModule === "lips" &&
-    (Number(lipSlider.value) > 0 ||
-      Number(colorSlider.value) > 0 ||
-      lipDebug.checked)
-  );
+  if (skinDebug.checked && metaOf(currentModule).usesSkinMask) return true;
+  return effectActive[currentModule]();
 }
 async function renderLoop(now) {
   cameraFrameRequest = 0;
@@ -1489,7 +1477,7 @@ resetBtn.addEventListener("click", () => {
   lipDebug.checked = false;
   selectedShade = "off";
   selectedShadeHex = "";
-  showBefore = currentModule === "wrinkles";
+  showBefore = metaOf(currentModule).resetShowsBefore;
   syncBefore();
   syncPreset();
   syncShadeButtons();
