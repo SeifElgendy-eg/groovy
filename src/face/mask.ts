@@ -151,7 +151,7 @@ export function refineSkinMask(
   height: number,
   band = 4,
   opt: RefineOptions = {},
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const {
     darkRatio = 0.72,
     chromaRatio = 0.5,
