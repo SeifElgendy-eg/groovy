@@ -341,6 +341,7 @@ function setModule(moduleName) {
 
   showEl(moduleHome, isHome);
   showEl(moduleHeader, !isHome);
+  showEl(backHomeBtn, !isHome);
   showEl(compareSection, !isHome);
   showEl(resetSection, !isHome);
   showEl(skinDebugSection, ["skin", "acne", "wrinkles"].includes(moduleName));
