@@ -150,3 +150,37 @@ describe("redness", () => {
     for (let c = 0; c < 3; c++) expect(Math.abs(out[normal + c] - px[normal + c])).toBeLessThan(1.5);
   });
 });
+
+describe("scars keep normal skin texture", () => {
+  it("leaves fine everyday relief mostly alone but still fills a real pit", () => {
+    const size = 160;
+    const px = new Uint8ClampedArray(size * size * 4);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
+    // Everyday skin relief: bumps a few pixels across (blurred noise), plus one deep pit.
+    const noise = new Float32Array(size * size).map(() => rnd());
+    const grain = blurLike(noise, size, size, 2.5);
+    let g2 = 0;
+    for (const g of grain) g2 += g * g;
+    const scale = 3 / Math.sqrt(g2 / grain.length);
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const d = Math.hypot(x - 80, y - 80);
+        const v = grain[y * size + x] * scale + (d < 7 ? -22 * (1 - d / 7) : 0);
+        px.set([200 + v, 160 + v, 140 + v, 255], (y * size + x) * 4);
+      }
+    const mask = new Uint8ClampedArray(px.length).fill(255);
+    const r = textureCompute({ pixels: px, mask, width: size, height: size, faceWidth: 400 });
+    const out = apply(px, r.scars, 1);
+    // Grain far from the pit: its spread survives.
+    const spread = (a: ArrayLike<number>) => {
+      const v: number[] = [];
+      for (let y = 10; y < 50; y++) for (let x = 10; x < 50; x++) v.push(lum(a, (y * size + x) * 4));
+      const m = v.reduce((s, q) => s + q, 0) / v.length;
+      return Math.sqrt(v.reduce((s, q) => s + (q - m) ** 2, 0) / v.length);
+    };
+    expect(spread(out)).toBeGreaterThan(spread(px) * 0.7);
+    const pit = (80 * size + 80) * 4;
+    expect(lum(out, pit) - lum(px, pit)).toBeGreaterThan(5);
+  });
+});

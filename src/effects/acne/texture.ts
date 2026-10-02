@@ -39,7 +39,7 @@ export interface TextureResult {
 }
 
 /** How strongly each band is reduced at full strength: [dark parts, light parts]. */
-export const PORE_REDUCTION: [number, number] = [0.6, 0.15];
+export const PORE_REDUCTION: [number, number] = [0.5, 0.12];
 
 /** In-place horizontal + vertical box blur of radius r (clamped edges). */
 function boxBlur(src: Float32Array, w: number, h: number, r: number, tmp: Float32Array): void {
@@ -162,7 +162,7 @@ const opening = (v: Float32Array, ok: Uint8Array, w: number, h: number, k: numbe
  * the slight darkening/lightening either order alone gives on textured skin. Wider shapes
  * (cheekbone, jaw) are wider than the window and left alone.
  */
-function scarDepth(b1: Float32Array, mask: Pixels, w: number, h: number, faceWidth: number): Float32Array {
+export function scarDepth(b1: Float32Array, mask: Pixels, w: number, h: number, faceWidth: number): Float32Array {
   const n = w * h;
   const valid = new Uint8Array(n);
   for (let p = 0; p < n; p++) valid[p] = mask[p * 4 + 3] > 64 ? 1 : 0;
@@ -182,11 +182,36 @@ function scarDepth(b1: Float32Array, mask: Pixels, w: number, h: number, faceWid
   }
   // Only soften the square window's edges; a wide blur would wash out small pits.
   depth = blurLike(depth, w, h, Math.max(1, faceWidth * 0.003));
+  // Ordinary skin has relief too; flattening it all is what looks plastic. Take the typical
+  // relief of this face (median |depth| over skin) as normal and remove only what goes beyond it,
+  // so a filled scar ends up as textured as the skin around it.
+  const floor = medianAbs(depth, valid) * SCAR_TEXTURE_KEPT;
+  for (let p = 0; p < n; p++) {
+    const d = depth[p];
+    depth[p] = Math.sign(d) * Math.max(0, Math.abs(d) - floor);
+  }
   return depth;
 }
 
-/** How much of a scar's relief is removed at full strength. */
+/** How much of a scar's relief (beyond normal texture) is removed at full strength. */
 export const SCAR_FILL = 1;
+
+/** Relief up to this multiple of the face's median relief counts as normal texture and is kept. */
+export const SCAR_TEXTURE_KEPT = 1.5;
+
+/** Median of |v| over valid pixels (histogram, 0.05-level bins). */
+function medianAbs(v: Float32Array, valid: Uint8Array): number {
+  const bins = new Uint32Array(1000);
+  let count = 0;
+  for (let p = 0; p < v.length; p++) {
+    if (!valid[p]) continue;
+    bins[Math.min(999, Math.floor(Math.abs(v[p]) * 20))]++;
+    count++;
+  }
+  let seen = 0;
+  for (let b = 0; b < 1000; b++) if ((seen += bins[b]) * 2 >= count) return b / 20;
+  return 0;
+}
 
 /**
  * Fill scar pits with the colour of the skin around them (not by brightening the pit's own,
@@ -225,7 +250,7 @@ function scarLayers(pixels: Pixels, lum: Float32Array, b1: Float32Array, mask: P
     // The brightness change is exactly the fill (texture kept). The more a pixel is changed, the
     // more of its colour comes from the surrounding skin tone.
     const targetL = Math.max(1, lum[p] + fill);
-    const a = Math.min(0.75, Math.abs(fill) / 10);
+    const a = Math.min(0.6, Math.abs(fill) / 10);
     for (let c = 0; c < 3; c++) {
       const v = pixels[i + c];
       const own = v / lum[p];
@@ -258,7 +283,7 @@ export function textureCompute(j: TextureJob): TextureResult {
 }
 
 /** Share of the excess redness removed at full strength (a little is kept: skin is never grey). */
-export const REDNESS_REDUCTION = 0.85;
+export const REDNESS_REDUCTION = 0.75;
 
 /**
  * Redness: inflamed patches and post-acne red marks are skin that is redder (OKLab a, the
