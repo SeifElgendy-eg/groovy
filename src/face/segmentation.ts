@@ -2,27 +2,45 @@
 //
 // The segmentation model sees a 256x256 picture. Given the whole frame, a face that fills a third
 // of a 4K photo gets ~85 model pixels across, and the mask is then stretched back up to the
-// photo: blocky at the hairline, brows and around loose hair. So once the face is found, the model
-// is run again on a crop around the face (the face then gets ~160 model pixels), and its soft
-// "how likely is this skin" output is used rather than the hard yes/no label, so the edge lands
-// between pixels where it really is. The whole-frame result is kept outside the crop (neck, a
-// second person...) and the two are cross-faded near the crop's border, so there is no seam.
+// photo. So once the face is found, the model is run again on a square crop around the face (the
+// face then gets ~160 model pixels). Both runs see downscaled copies (the model works at 256 px
+// anyway, and its outputs come back at the input's size: six float masks per run).
+//
+// A pixel is skin where the face-skin class beats every other class, exactly as with the model's
+// hard label, but the decision is read from the soft per-class scores: the margin (skin score minus
+// the strongest other class) is sampled smoothly up to the photo's size, so the edge lands between
+// pixels where it really is, with a soft fringe just outside it. The whole-frame result is kept
+// outside the crop (neck, a second person...) and the two cross-fade near the crop's border.
 import type { NormalizedLandmark } from "../effects/skin/input";
 
 export interface CropRect {
   x: number;
   y: number;
-  w: number;
-  h: number;
+  /** Square: the model's input is square, so the crop is not stretched. */
+  size: number;
+}
+
+/** A margin map: skin score minus the strongest other class, -1..1, at the map's own size. */
+export interface MarginMap {
+  margin: Float32Array;
+  width: number;
+  height: number;
 }
 
 /** Margins around the landmark box, as fractions of the face's size. */
 export const CROP_PAD = { side: 0.3, top: 0.45, bottom: 0.3 };
+/** Longest side the whole frame is segmented at. */
+export const FRAME_MAX = 1024;
+/** Side the face crop is segmented at. */
+export const CROP_SIZE = 512;
+/** Margin below zero over which the soft fringe fades out (0 = the hard label's edge). */
+export const FRINGE = 0.1;
 
 /**
  * The crop (in pixels of a `w` x `h` image) to segment the face in: the landmark box plus room
- * for the hairline above (the mesh stops around the brows' top) and the jaw's edge, made square
- * (the model's input is square, so a square crop is not stretched) and clamped to the image.
+ * for the hairline above (the mesh stops around the brows' top) and the jaw's edge, made square.
+ * It may reach past the image's edge (that part is drawn empty), so it stays square. Null when it
+ * would not help (no face, or the face already fills the photo).
  */
 export function faceCropRect(points: NormalizedLandmark[], w: number, h: number): CropRect | null {
   if (!points.length) return null;
@@ -38,75 +56,90 @@ export function faceCropRect(points: NormalizedLandmark[], w: number, h: number)
   }
   const fw = maxX - minX,
     fh = maxY - minY;
-  if (fw < 8 || fh < 8) return null;
-  let x0 = minX - fw * CROP_PAD.side,
+  if (!(fw >= 8 && fh >= 8)) return null;
+  const x0 = minX - fw * CROP_PAD.side,
     x1 = maxX + fw * CROP_PAD.side,
     y0 = minY - fh * CROP_PAD.top,
     y1 = maxY + fh * CROP_PAD.bottom;
-  // Square, around the same centre.
-  const side = Math.max(x1 - x0, y1 - y0);
-  const cx = (x0 + x1) / 2,
-    cy = (y0 + y1) / 2;
-  x0 = cx - side / 2;
-  x1 = cx + side / 2;
-  y0 = cy - side / 2;
-  y1 = cy + side / 2;
-  const rx = Math.max(0, Math.floor(x0)),
-    ry = Math.max(0, Math.floor(y0));
-  const rw = Math.min(w, Math.ceil(x1)) - rx,
-    rh = Math.min(h, Math.ceil(y1)) - ry;
-  if (rw < 16 || rh < 16) return null;
-  // No gain when the crop is (nearly) the whole image.
-  if (rw * rh > w * h * 0.8) return null;
-  return { x: rx, y: ry, w: rw, h: rh };
+  const size = Math.ceil(Math.max(x1 - x0, y1 - y0));
+  // No gain when the crop is (nearly) as large as the whole image.
+  if (size * size > w * h * 0.8) return null;
+  return { x: Math.round((x0 + x1 - size) / 2), y: Math.round((y0 + y1 - size) / 2), size };
 }
 
 /**
- * Put the crop's skin probability (`crop`, rect.w x rect.h) into the whole frame's (`full`,
- * w x h, changed in place), cross-fading over `fade` of the crop's size at its inner border (the
- * crop's edge pixels were seen with no context, so the whole-frame value is trusted there). A crop
- * side that touches the image border needs no fade.
+ * Margin map from the model's per-class scores (each `width` x `height`): the skin class's
+ * score minus the best other class's.
  */
-export function mergeCrop(
-  full: Float32Array,
+export function marginFromScores(scores: Float32Array[], skinClass: number, width: number, height: number): MarginMap {
+  const n = width * height;
+  const margin = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    let other = 0;
+    for (let c = 0; c < scores.length; c++) if (c !== skinClass) other = Math.max(other, scores[c][p]);
+    margin[p] = scores[skinClass][p] - other;
+  }
+  return { margin, width, height };
+}
+
+/** Bilinear sample of a map at (u, v) in its own pixel coordinates (pixel centres at +0.5). */
+function sample(m: MarginMap, u: number, v: number): number {
+  const x = Math.min(m.width - 1, Math.max(0, u - 0.5)),
+    y = Math.min(m.height - 1, Math.max(0, v - 0.5));
+  const x0 = Math.floor(x),
+    y0 = Math.floor(y);
+  const x1 = Math.min(m.width - 1, x0 + 1),
+    y1 = Math.min(m.height - 1, y0 + 1);
+  const fx = x - x0,
+    fy = y - y0;
+  const a = m.margin[y0 * m.width + x0],
+    b = m.margin[y0 * m.width + x1],
+    c = m.margin[y1 * m.width + x0],
+    d = m.margin[y1 * m.width + x1];
+  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
+
+/**
+ * The skin mask's alpha at the photo's size (`w` x `h`, RGBA out): the whole frame's margin map
+ * (covering the photo), with the face crop's map (covering `rect`) cross-faded in over `fade` of
+ * its size from its inner border. Full alpha exactly where skin wins (the hard label's area), a
+ * soft fringe just outside.
+ */
+export function skinAlpha(
+  full: MarginMap,
+  crop: { map: MarginMap; rect: CropRect } | null,
   w: number,
   h: number,
-  crop: Float32Array,
-  rect: CropRect,
+  out: Uint8ClampedArray,
   fade = 0.06,
-): Float32Array {
-  const band = Math.max(1, Math.min(rect.w, rect.h) * fade);
-  const left = rect.x > 0,
-    top = rect.y > 0,
-    right = rect.x + rect.w < w,
-    bottom = rect.y + rect.h < h;
-  for (let y = 0; y < rect.h; y++) {
-    let dy = Infinity;
-    if (top) dy = Math.min(dy, y + 0.5);
-    if (bottom) dy = Math.min(dy, rect.h - y - 0.5);
-    for (let x = 0; x < rect.w; x++) {
-      let d = dy;
-      if (left) d = Math.min(d, x + 0.5);
-      if (right) d = Math.min(d, rect.w - x - 0.5);
-      const t = Math.min(1, d / band);
-      const k = t * t * (3 - 2 * t);
-      const p = (rect.y + y) * w + rect.x + x;
-      full[p] = full[p] * (1 - k) + crop[y * rect.w + x] * k;
+): Uint8ClampedArray {
+  const fsx = full.width / w,
+    fsy = full.height / h;
+  const r = crop?.rect;
+  const band = r ? Math.max(1, r.size * fade) : 1;
+  const cs = crop ? crop.map.width / crop.rect.size : 1;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let m = sample(full, (x + 0.5) * fsx, (y + 0.5) * fsy);
+      if (crop && r) {
+        const lx = x + 0.5 - r.x,
+          ly = y + 0.5 - r.y;
+        if (lx > 0 && ly > 0 && lx < r.size && ly < r.size) {
+          // Fade only along crop sides inside the photo (beyond the photo there is no context).
+          let d = Infinity;
+          if (r.x > 0) d = Math.min(d, lx);
+          if (r.y > 0) d = Math.min(d, ly);
+          if (r.x + r.size < w) d = Math.min(d, r.size - lx);
+          if (r.y + r.size < h) d = Math.min(d, r.size - ly);
+          const t = Math.min(1, d / band);
+          const k = t * t * (3 - 2 * t);
+          if (k > 0) m = m * (1 - k) + sample(crop.map, lx * cs, ly * cs) * k;
+        }
+      }
+      const t = Math.max(0, Math.min(1, (m + FRINGE) / FRINGE));
+      const p = (y * w + x) * 4;
+      out[p] = out[p + 1] = out[p + 2] = 255;
+      out[p + 3] = Math.round(255 * t * t * (3 - 2 * t));
     }
-  }
-  return full;
-}
-
-/**
- * Skin probability to mask alpha. The hard label the app used before is "skin wins" (p > ~0.5);
- * this keeps that boundary but makes it a short ramp, so the edge is anti-aliased at its true
- * sub-pixel position instead of a stair-stepped copy of the model's grid.
- */
-export function probToAlpha(prob: Float32Array, out: Uint8ClampedArray): Uint8ClampedArray {
-  for (let p = 0; p < prob.length; p++) {
-    const t = Math.max(0, Math.min(1, (prob[p] - 0.35) / 0.3));
-    out[p * 4] = out[p * 4 + 1] = out[p * 4 + 2] = 255;
-    out[p * 4 + 3] = Math.round(255 * t * t * (3 - 2 * t));
-  }
   return out;
 }

@@ -3,7 +3,7 @@
 import { buildLipData } from "../effects/lips/geometry";
 import { metaOf } from "../effects/registry";
 import { headPose } from "../face/alignment";
-import { faceCropRect, mergeCrop, probToAlpha } from "../face/segmentation";
+import { CROP_SIZE, FRAME_MAX, faceCropRect, marginFromScores, skinAlpha, type CropRect, type MarginMap } from "../face/segmentation";
 import type { NormalizedLandmark } from "../effects/skin/input";
 import { insetSkinMask } from "../imaging/maskOps";
 import type { FaceLandmarker, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
@@ -90,43 +90,61 @@ function closeSegmentation(r: ImageSegmenterResult): void {
   r.confidenceMasks?.forEach((m) => m.close());
 }
 
-/** Face-skin probability over the whole result (mask size), or null. */
-function skinProbability(r: ImageSegmenterResult): { prob: Float32Array; width: number; height: number } | null {
-  const m = r.confidenceMasks?.[FACE_SKIN];
-  const out = m ? { prob: new Float32Array(m.getAsFloat32Array()), width: m.width, height: m.height } : null;
-  closeSegmentation(r);
-  return out;
+/** Segment `canvas` and turn its per-class scores into a skin margin map (masks always released). */
+function marginOf(segmenter: ImageSegmenter, canvas: HTMLCanvasElement): MarginMap | null {
+  const r = segmenter.segment(canvas);
+  try {
+    const masks = r.confidenceMasks;
+    if (!masks || masks.length <= FACE_SKIN) return null;
+    const { width, height } = masks[FACE_SKIN];
+    return marginFromScores(
+      masks.map((m) => m.getAsFloat32Array()),
+      FACE_SKIN,
+      width,
+      height,
+    );
+  } finally {
+    closeSegmentation(r);
+  }
 }
 
+const frameCanvas = document.createElement("canvas");
+const frameCtx = frameCanvas.getContext("2d")!;
 const cropCanvas = document.createElement("canvas");
-const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: false })!;
+const cropCtx = cropCanvas.getContext("2d")!;
 
 /**
- * Skin segmentation of `source`: the whole frame, then (when the face is known) the face's crop
- * at the model's full resolution, merged in (see face/segmentation.ts).
+ * Skin segmentation of `source`: the whole frame, then (when the face is known) a square crop
+ * around the face, both at small sizes, merged into the mask at the photo's size (see
+ * face/segmentation.ts).
  */
 function segmentSkin(segmenter: ImageSegmenter, source: HTMLCanvasElement, points: NormalizedLandmark[] | null): void {
-  const full = skinProbability(segmenter.segment(source));
+  const { width: w, height: h } = source;
+  const scale = Math.min(1, FRAME_MAX / Math.max(w, h));
+  frameCanvas.width = Math.max(1, Math.round(w * scale));
+  frameCanvas.height = Math.max(1, Math.round(h * scale));
+  frameCtx.drawImage(source, 0, 0, frameCanvas.width, frameCanvas.height);
+  const full = marginOf(segmenter, frameCanvas);
   if (!full) return;
-  const rect = points ? faceCropRect(points, full.width, full.height) : null;
+  let crop: { map: MarginMap; rect: CropRect } | null = null;
+  const rect = points ? faceCropRect(points, w, h) : null;
   if (rect) {
-    // The mask is the source's size; map the rect back in case it is not.
-    const sx = source.width / full.width,
-      sy = source.height / full.height;
-    cropCanvas.width = rect.w;
-    cropCanvas.height = rect.h;
-    cropCtx.drawImage(source, rect.x * sx, rect.y * sy, rect.w * sx, rect.h * sy, 0, 0, rect.w, rect.h);
-    const crop = skinProbability(segmenter.segment(cropCanvas));
-    if (crop && crop.width === rect.w && crop.height === rect.h) mergeCrop(full.prob, full.width, full.height, crop.prob, rect);
+    const side = Math.min(CROP_SIZE, rect.size);
+    cropCanvas.width = cropCanvas.height = side;
+    cropCtx.clearRect(0, 0, side, side); // the part past the photo's edge stays empty
+    const k = side / rect.size;
+    cropCtx.drawImage(source, -rect.x * k, -rect.y * k, w * k, h * k);
+    const map = marginOf(segmenter, cropCanvas);
+    if (map) crop = { map, rect };
   }
-  publishSkinMask(full.prob, full.width, full.height);
+  publishSkinMask(full, crop, w, h);
 }
 
-function publishSkinMask(prob: Float32Array, width: number, height: number): void {
+function publishSkinMask(full: MarginMap, crop: { map: MarginMap; rect: CropRect } | null, width: number, height: number): void {
   segMask.canvas.width = width;
   segMask.canvas.height = height;
   const pixels = segMask.ctx.createImageData(width, height);
-  probToAlpha(prob, pixels.data);
+  skinAlpha(full, crop, width, height, pixels.data);
   segMask.ctx.putImageData(pixels, 0, 0);
   skinEffectMask.canvas.width = width;
   skinEffectMask.canvas.height = height;
