@@ -105,8 +105,10 @@ function lineness(lum: Float32Array, w: number, h: number, sigma: number) {
         diff = Math.sqrt(((hxx - hyy) / 2) ** 2 + hxy * hxy);
       const across = mean + diff, // curvature across the line (> 0 for a dark valley)
         along = mean - diff;
-      // A dark spot curves up both ways (freckle, mole).
-      if (along > 0) blob[p] = along * sigma * sigma;
+      // A dark spot curves up both ways (freckle, mole), and about as much one way as the other.
+      // The deepest points of a wavy crease curve up both ways too, but far more across the crease
+      // than along it: counting those as spots left dashes of the crease behind.
+      if (along > 0) blob[p] = along * sigma * sigma * smoothstep(0.15, 0.35, along / across);
       // A thin bright line (the lit edge of a crease) curves down across it, hardly along it.
       const b = -along - Math.abs(across);
       if (b > 0) {
@@ -233,10 +235,72 @@ export function linesCompute(j: LinesJob): LinesResult {
   // strength as this face's least-lined skin.
   const donorGrain = synthGrain(fineBand, lineShaped, mask, w, h, fw, lowBand);
   const spotFree = new Float32Array(n);
-  for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
+  // A spot must also be a real one: strong against this face's typical spot response. (On plain
+  // skin the line strength is ~0, so the ratio alone called every speck of grain a freckle, and
+  // the treatment kept every slightly dark pixel, crease remnants included, as dark dashes.)
+  for (let p = 0; p < n; p++)
+    spotFree[p] =
+      1 -
+      smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p])) *
+        smoothstep(0.3, 0.6, spotNear[p] / Math.max(1e-6, spotRef));
 
   const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
+  // Stray hairs: a thin, strong dark line that no area's lines run along (a strand across the
+  // forehead runs down or diagonally, the forehead's lines run across). The main areas would
+  // otherwise paint it over in part and leave broken pieces; it is left whole instead.
+  const strayLine = new Float32Array(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const fr = fine.strength[p] / Math.max(1e-6, scaleRef[0]);
+      if (fr <= 0.8 || fine.strength[p] / Math.max(1e-6, scaleRef[0]) < deep.strength[p] / Math.max(1e-6, scaleRef[1])) continue;
+      let along = 0,
+        inside = 0;
+      for (const z of j.zones) {
+        const e = ellipseWeight(z, x, y);
+        if (e <= 0) continue;
+        inside = Math.max(inside, e);
+        if (z.anyDirection) {
+          along = 1;
+          break;
+        }
+        const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
+        const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
+        along = Math.max(along, smoothstep(lo, hi, Math.abs(Math.cos(fine.dir[p] - expected))));
+      }
+      if (inside > 0) strayLine[p] = smoothstep(0.8, 1.6, fr) * (1 - along);
+    }
+  // A hair is long: keep only stray line that continues along its own direction (short pieces
+  // are bits of creases that bend, and protecting those left dashes of crease behind).
+  const len = Math.max(4, Math.round(fw * 0.04));
+  const longStray = new Float32Array(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (strayLine[p] <= 0.2) continue;
+      const dx = Math.cos(fine.dir[p]),
+        dy = Math.sin(fine.dir[p]);
+      let sum = 0,
+        cnt = 0;
+      for (let t = -len; t <= len; t++) {
+        const xx = Math.round(x + dx * t),
+          yy = Math.round(y + dy * t);
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        // Best of the pixel and its neighbours across the line (a curved strand drifts sideways).
+        let b = 0;
+        for (let o = -1; o <= 1; o++) {
+          const qx = Math.round(xx - dy * o),
+            qy = Math.round(yy + dx * o);
+          if (qx >= 0 && qy >= 0 && qx < w && qy < h) b = Math.max(b, strayLine[qy * w + qx]);
+        }
+        sum += b;
+        cnt++;
+      }
+      longStray[p] = strayLine[p] * smoothstep(0.45, 0.7, cnt ? sum / cnt : 0);
+    }
+  const hr = Math.max(1, Math.round(fw * 0.003));
+  const strayNear = slide(slide(longStray, w, h, hr, true, false), w, h, hr, true, true);
   const result = {} as LinesResult;
   // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
   // area's layer is computed from the original photo and they are drawn on top of each other, so
@@ -422,6 +486,12 @@ export function linesCompute(j: LinesJob): LinesResult {
         const k = edge * (1 - (1 - spotFree[p]) * core);
         fill[p] = fill[p] * (1 - edge) + toTarget * k;
         recolour[p] = k;
+      }
+      // Stray hairs keep their own pixels (only their dark strand, not the skin beside it).
+      const hair = Math.min(1, strayNear[p]) * smoothstep(3, 8, around[p] - lum[p]);
+      if (hair > 0) {
+        fill[p] *= 1 - hair;
+        recolour[p] *= 1 - hair;
       }
       fill[p] = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, fill[p]));
     }
