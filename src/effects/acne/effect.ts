@@ -11,7 +11,7 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { runAcne, runTexture } from "../skin/client";
+import { Cancelled, cancel, runAcne, runTexture } from "../skin/client";
 import type { Layers } from "./texture";
 import { boundsOfPoints } from "../../imaging/contours";
 
@@ -58,9 +58,17 @@ export class AcneEffect {
     this.busy = true;
     try {
       return await this.run(input, gen);
+    } catch (err) {
+      if (err instanceof Cancelled) return false;
+      throw err;
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Stop a running prepare() whose input is out of date (it resolves false at once). */
+  cancel(): void {
+    if (this.busy && this.stale) cancel("acne");
   }
 
   private async run(input: SkinInput, gen: number): Promise<boolean> {

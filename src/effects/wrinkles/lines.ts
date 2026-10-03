@@ -92,12 +92,13 @@ const smoothstep = (e0: number, e1: number, x: number) => {
  * Math.hypot for two numbers, the same algorithm (scaled, Kahan-summed squares) and so the same
  * result, without the builtin's call overhead (it is several times slower in a hot loop).
  */
-function hypot(a: number, b: number): number {
+export function hypot(a: number, b: number): number {
   a = Math.abs(a);
   b = Math.abs(b);
+  if (a === Infinity || b === Infinity) return Infinity;
+  if (a !== a || b !== b) return NaN;
   const max = a > b ? a : b;
-  if (max === Infinity) return Infinity;
-  if (max === 0 || max !== max) return max === 0 && a === a && b === b ? 0 : NaN;
+  if (max === 0) return 0;
   const n1 = a / max,
     n2 = b / max;
   let sum = 0,
@@ -1181,7 +1182,7 @@ export function strayHairs(
  * Repeated [1 2 1]/4 passes (each adds variance 1/2): a close Gaussian for small sigmas. One copy
  * per sigma (ascending), each the same run of passes stopped at its own count.
  */
-function binomial(src: Float32Array, w: number, h: number, sigmas: number[]): Float32Array[] {
+export function binomial(src: Float32Array, w: number, h: number, sigmas: number[]): Float32Array[] {
   const counts = sigmas.map((sigma) => Math.max(1, Math.round(2 * sigma * sigma)));
   const outs: Float32Array[] = [];
   const passes = Math.max(...counts);

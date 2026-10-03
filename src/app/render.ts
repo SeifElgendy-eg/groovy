@@ -54,6 +54,7 @@ interface AsyncEffect {
   busy: boolean;
   ready: boolean;
   prepare(input: SkinInput): Promise<boolean>;
+  cancel(): void;
 }
 
 /**
@@ -68,6 +69,10 @@ wrinkles.onChange = () => {
 };
 
 function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
+  // A new photo while the last one is still being worked on: stop that work (its result would be
+  // thrown away) so the new one starts now rather than after it. (Live camera frames change all
+  // the time: there the running work is left to finish.)
+  if (effect.dirty && effect.busy && state.sourceMode === "photo") effect.cancel();
   if (effect.dirty && !effect.busy) {
     document.body.dataset.effectsBusy = "1";
     void effect
