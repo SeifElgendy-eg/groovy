@@ -9,7 +9,7 @@ import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
-import { markEffectsDirty, segMask, skinEffectMask } from "./effects";
+import { lipRenderer, markEffectsDirty, segMask, skinEffectMask } from "./effects";
 import {
   analysisSource,
   getSourceDims,
@@ -43,6 +43,7 @@ export async function initModels(): Promise<void> {
       const m = models!;
       m.faceLandmarker.detect(warm);
       m.segmenter.segment(warm).categoryMask?.close();
+      lipRenderer.warmUp();
     });
     state.modelReady = true;
     // The live-camera model is built right after, in the background, so the first camera start
