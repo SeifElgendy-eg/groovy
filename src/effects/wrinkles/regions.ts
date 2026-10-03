@@ -64,14 +64,30 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
     [263, 362, 374],
   ]) {
     const ew = Math.hypot(P[outer].x - P[inner].x, P[outer].y - P[inner].y);
+    const mx = (P[outer].x + P[inner].x) / 2;
+    // Lower under-eye: crepe in every direction.
     zones.push({
       id: "undereye",
-      cx: (P[outer].x + P[inner].x) / 2 + vx * ew * 0.12,
-      cy: P[lower].y + vy * ew * 0.55,
+      cx: mx + ux * 0 + vx * ew * 0.6,
+      cy: P[lower].y + vy * ew * 0.6,
       rx: ew * 0.85,
-      ry: ew * 0.55,
+      ry: ew * 0.45,
       angle,
       anyDirection: true,
+      fine: true,
+    });
+    // Right below the lid: only lines running along the lid (the under-lid line), never the
+    // lashes, which cross it.
+    zones.push({
+      id: "undereye",
+      cx: mx + vx * ew * 0.2,
+      cy: P[lower].y + vy * ew * 0.2,
+      rx: ew * 0.7,
+      ry: ew * 0.2,
+      angle,
+      lineAngle: angle,
+      tolerance: [20, 40],
+      strict: true,
       fine: true,
     });
   }

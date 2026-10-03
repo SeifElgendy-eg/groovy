@@ -89,7 +89,7 @@ export class WrinklesEffect {
   // 2. Lashes and eyebrows: full loops grown outward, with a rounded edge.
   mask.ctx.lineJoin = "round";
   mask.ctx.lineWidth = Math.max(1.5, faceWidth * 0.008);
-  for (const poly of guardContours(points, faceWidth)) {
+  for (const poly of guardContours(points, faceWidth, { lowerLid: 0.09 })) {
     mask.ctx.beginPath();
     addClosedContour(mask.ctx, poly);
     mask.ctx.fill();

@@ -7,7 +7,7 @@
 // across the forehead, up and down between the brows, fanning out from the eye corner. Round dark
 // spots (freckles) and pores are not lines and are left alone. Each area returns its own
 // correction layers, so the caller can switch areas on and off and set the dose without a recompute.
-import { blurLike, slide } from "../acne/texture";
+import { blobWeight, blurLike, slide } from "../acne/texture";
 
 type Pixels = Uint8ClampedArray<ArrayBuffer>;
 
@@ -29,6 +29,11 @@ export interface Zone {
   from?: { x: number; y: number };
   /** Lines here are very fine (crepe under the eyes, crow's feet): soften finer detail too. */
   fine?: boolean;
+  /**
+   * Only lines in this zone's direction are touched, no texture softening (next to the lid:
+   * lashes are thin dark lines too, but they cross the lid; the under-lid line runs along it).
+   */
+  strict?: boolean;
   /** Lines here run every way (under the eyes): no direction preference. */
   anyDirection?: boolean;
   /** Direction tolerance (degrees): fully treated within the first, nothing past the second. */
@@ -60,6 +65,8 @@ export const RIDGE_FLATTEN = 0.95;
 export const RIDGE_CAP = 35;
 /** Share of the mid band (crepey texture between lines) softened at full dose. */
 export const TEXTURE_SOFTEN = 0.85;
+/** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
+export const FINEST_LINES = 0.85;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -193,6 +200,10 @@ export function linesCompute(j: LinesJob): LinesResult {
   const fineTop = blurLike(lum, w, h, Math.max(0.8, fw * 0.0022));
   // For fine-line areas only the very finest grain is kept.
   const finestTop = blurLike(lum, w, h, Math.max(0.5, fw * 0.0009));
+  // The faint lines left in the finest grain: line-shaped detail (pores and grain are round or
+  // random, lines are long), with its direction for the strict zones.
+  const lineShaped = blobWeight(lum, w, h, Math.max(1, fw * 0.003));
+  for (let p = 0; p < n; p++) lineShaped[p] = 1 - lineShaped[p];
   const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
   const spotFree = new Float32Array(n);
   for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
@@ -218,7 +229,10 @@ export function linesCompute(j: LinesJob): LinesResult {
           if (e <= 0) continue;
           const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
           const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
-          const d = z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
+          let d = z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
+          // By the lid, the finest width must agree too: a row of lashes reads as one dark band
+          // along the lid at the broad widths, but at the finest width each lash crosses it.
+          if (z.strict) d *= smoothstep(lo, hi, Math.abs(Math.cos(fine.dir[p] - expected))) * (fine.strength[p] > 0 ? 1 : 0);
           if (e * d > zw * dw) {
             zw = e;
             dw = d;
@@ -277,9 +291,17 @@ export function linesCompute(j: LinesJob): LinesResult {
       const x = p % w,
         y = (p / w) | 0;
       let zone = 0,
-        fineZone = 0;
+        fineZone = 0,
+        loose = 0,
+        strictOk = 0;
       for (const z of zones) {
         const e = ellipseWeight(z, x, y);
+        if (e <= 0) continue;
+        if (z.strict) {
+          const expected = z.lineAngle ?? 0;
+          const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
+          strictOk = Math.max(strictOk, e * smoothstep(lo, hi, Math.abs(Math.cos(fine.dir[p] - expected))) * (fine.strength[p] > 0 ? 1 : 0));
+        } else loose = Math.max(loose, e);
         zone = Math.max(zone, e);
         if (z.fine) fineZone = Math.max(fineZone, e);
       }
@@ -289,11 +311,15 @@ export function linesCompute(j: LinesJob): LinesResult {
         const top = fineTop[p] + (finestTop[p] - fineTop[p]) * fineZone;
         const mid = top - lowBand[p];
         const onLine = Math.min(1, cover[p]);
+        // Texture is softened in loose zones only; strict zones (by the lid) soften only lines.
         band =
           mid < 0
-            ? -mid * MAX_SOFTEN * (TEXTURE_SOFTEN + (1 - TEXTURE_SOFTEN) * onLine) * spotFree[p]
-            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * 0.6 + RIDGE_FLATTEN * Math.min(1, nearLine[p]));
-        band *= zone * m;
+            ? -mid * MAX_SOFTEN * Math.max(TEXTURE_SOFTEN * loose, onLine * zone) * spotFree[p]
+            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * 0.6 * loose + RIDGE_FLATTEN * Math.min(1, nearLine[p]) * zone);
+        // The faint leftover lines in the finest grain (both dark and light ones).
+        const finest = lum[p] - finestTop[p];
+        band -= finest * FINEST_LINES * lineShaped[p] * Math.max(loose, strictOk) * spotFree[p];
+        band *= m;
       }
       if (cover[p] > 0) {
         const depth = Math.max(0, skinLevel - level[p]);

@@ -46,7 +46,7 @@ describe("botox line finder", () => {
 
   it("softens lines running the wrong way for the area less", () => {
     // Softened too (crepey texture runs every way), but clearly less than the area's own lines.
-    expect(lift(70, 110)).toBeLessThan(lift(75, 50) * 0.5);
+    expect(lift(70, 110)).toBeLessThan(lift(75, 50) * 0.75);
   });
 
   it("leaves a freckle (round, not a line)", () => {
@@ -62,5 +62,30 @@ describe("botox line finder", () => {
     for (let i = 3; i < empty.length; i += 4) empty[i] = 255;
     const o2 = apply(px, r.frown);
     expect(Math.abs(lum(o2, at(75, 50)) - lum(px, at(75, 50)))).toBeLessThan(0.5);
+  });
+});
+
+describe("next to the lid (strict zone)", () => {
+  it("removes a line along the lid but never touches lashes crossing it", () => {
+    const px = skin();
+    // Lashes: short thin dark strokes crossing a horizontal lid line at y=50.
+    for (let x = 140; x < 230; x += 6)
+      for (let y = 40; y < 62; y++)
+        for (const dx of [0, 1]) {
+          const i = (y * W + x + dx) * 4;
+          px[i] -= 45; px[i + 1] -= 45; px[i + 2] -= 45;
+        }
+    const mask = new Uint8ClampedArray(px.length).fill(255);
+    const zones: Zone[] = [
+      { id: "undereye", cx: 120, cy: 50, rx: 400, ry: 60, angle: 0, lineAngle: 0, tolerance: [20, 40], strict: true, fine: true },
+    ];
+    const r = linesCompute({ pixels: px, mask, width: W, height: H, faceWidth: 400, zones });
+    const out = apply(px, r.undereye);
+    const at = (x: number, y: number) => (y * W + x) * 4;
+    const lift = (x: number, y: number) => lum(out, at(x, y)) - lum(px, at(x, y));
+    expect(lift(75, 50)).toBeGreaterThan(8); // the line along the lid
+    let worst = 0;
+    for (let x = 140; x < 230; x += 6) for (const y of [42, 56, 60]) worst = Math.max(worst, Math.abs(lift(x, y)));
+    expect(worst).toBeLessThan(3); // the lashes
   });
 });

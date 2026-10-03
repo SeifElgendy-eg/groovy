@@ -92,7 +92,12 @@ function growAxial(pts: Point[], ux: number, uy: number, g: Growth): Point[] {
 }
 
 // Returns polygons (arrays of {x,y}) to carve out of the treatable mask.
-export function guardContours(points: Point[], faceWidth: number): Point[][] {
+/**
+ * Lash and brow guards. `lowerLid` (fraction of eye width, default 0.15) is how far below the lower
+ * lid is protected: botox uses less, so it can reach the under-lid line (its strict zone there only
+ * touches lines running along the lid, never the lashes).
+ */
+export function guardContours(points: Point[], faceWidth: number, opt: { lowerLid?: number } = {}): Point[][] {
   const P = points,
     angle = Math.atan2(P[263].y - P[33].y, P[263].x - P[33].x),
     ux = Math.cos(angle),
@@ -111,7 +116,7 @@ export function guardContours(points: Point[], faceWidth: number): Point[][] {
         {
           side: ew * 0.12, // lashes flare past the corners
           up: ew * 0.3, // upper lashes are the long ones
-          down: ew * 0.15,
+          down: ew * (opt.lowerLid ?? 0.15),
           blend: ew * 0.06,
         },
       ),
