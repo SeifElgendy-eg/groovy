@@ -8,9 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "typecheck": "tsc --noEmit",
-    "golden": "node tests/golden/run.mjs",
+    "golden": "node scripts/golden-ab.mjs",
     "smoke": "node tests/golden/smoke.mjs",
-    "golden:update": "node tests/golden/run.mjs --update",
     "test": "vitest run",
     "package:windows": "node scripts/package-windows.mjs"
   },

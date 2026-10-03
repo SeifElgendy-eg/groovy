@@ -1,0 +1,81 @@
+name: ci
+
+# Every PR and every push to main:
+#   checks  - type check + build, unit tests (fast; fails first)
+#   visual  - golden-image A/B against the PR's base (scripts/golden-ab.mjs) and the UI smoke test
+# The Windows package and launcher are checked in windows-package.yml.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Compare the golden images against this branch or commit"
+        default: "main"
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels the run for its previous commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Type check, build, unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  visual:
+    name: Golden images (A/B) and UI smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # PRs compare with their base; manual runs with the chosen ref; pushes to main skip the A/B.
+      BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+
+      - name: Golden images vs base
+        if: env.BASE_REF != ''
+        run: node scripts/golden-ab.mjs --base "$BASE_REF"
+
+      - name: UI smoke test (services, reset, debug overlay, live camera)
+        run: |
+          npm run build
+          npm run smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-renders
+          path: |
+            tests/golden/out
+            tests/golden/out-base
+          if-no-files-found: ignore
+          retention-days: 7
