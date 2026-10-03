@@ -48,7 +48,15 @@ export interface Layers {
 export type LinesResult = Record<AreaId, Layers>;
 
 /** Share of a line's depth removed at full dose (botox softens, it does not erase). */
-export const MAX_SOFTEN = 0.78;
+export const MAX_SOFTEN = 0.92;
+/** Share of the raised ridge between deep lines lowered at full dose (the fold's other half). */
+export const RIDGE_FLATTEN = 0.85;
+/** Ridges brighter than this above the skin are shine; only this much of them is lowered. */
+export const RIDGE_CAP = 35;
+/** Share of the mid band (crepey texture between lines) softened at full dose. */
+export const TEXTURE_SOFTEN = 0.5;
+/** Largest lift of a line (levels). */
+export const MAX_LIFT = 32;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
 export const MIN_DEPTH: [number, number] = [3, 8];
 /** A line within this angle of the area's expected direction is fully treated (degrees)... */
@@ -70,7 +78,9 @@ function lineness(lum: Float32Array, w: number, h: number, sigma: number) {
   const n = w * h;
   const strength = new Float32Array(n),
     dir = new Float32Array(n),
-    blob = new Float32Array(n);
+    blob = new Float32Array(n),
+    bright = new Float32Array(n),
+    brightDir = new Float32Array(n);
   for (let y = 1; y < h - 1; y++)
     for (let x = 1; x < w - 1; x++) {
       const p = y * w + x;
@@ -83,6 +93,12 @@ function lineness(lum: Float32Array, w: number, h: number, sigma: number) {
         along = mean - diff;
       // A dark spot curves up both ways (freckle, mole).
       if (along > 0) blob[p] = along * sigma * sigma;
+      // A thin bright line (the lit edge of a crease) curves down across it, hardly along it.
+      const b = -along - Math.abs(across);
+      if (b > 0) {
+        bright[p] = b * sigma * sigma;
+        brightDir[p] = 0.5 * Math.atan2(2 * hxy, hxx - hyy);
+      }
       // Long, not round: strong curvature across, little along (freckles curve both ways).
       const s = across - Math.abs(along);
       if (s <= 0) continue;
@@ -90,7 +106,7 @@ function lineness(lum: Float32Array, w: number, h: number, sigma: number) {
       // Direction of strongest curvature; the line runs perpendicular to it.
       dir[p] = 0.5 * Math.atan2(2 * hxy, hxx - hyy) + Math.PI / 2;
     }
-  return { strength, dir, blob };
+  return { strength, dir, blob, bright, brightDir };
 }
 
 /** Soft ellipse weight: 1 inside, fading to 0 over the outer `feather` of its radius. */
@@ -112,16 +128,37 @@ export function linesCompute(j: LinesJob): LinesResult {
   for (let p = 0; p < n; p++) lum[p] = 0.2126 * pixels[p * 4] + 0.7152 * pixels[p * 4 + 1] + 0.0722 * pixels[p * 4 + 2];
 
   // Two line widths: fine lines and deeper folds.
+  // Three widths: fine lines, deeper lines, and broad folds (e.g. a raised-brow forehead).
   const fine = lineness(lum, w, h, Math.max(0.8, fw * 0.0028));
   const deep = lineness(lum, w, h, Math.max(1.5, fw * 0.0065));
+  const fold = lineness(lum, w, h, Math.max(2.5, fw * 0.013));
+  const scales = [fine, deep, fold];
+  // Lightness at each width's own scale: depth is measured on these, so the correction is smooth
+  // and the skin's texture stays on top of it (inside a filled fold too).
+  const smooth = [0.0014, 0.003, 0.0065].map((k) => blurLike(lum, w, h, Math.max(0.5, fw * k)));
   const strength = new Float32Array(n),
     dir = new Float32Array(n),
-    spots = new Float32Array(n);
+    spots = new Float32Array(n),
+    level = new Float32Array(n),
+    edge = new Float32Array(n),
+    edgeDir = new Float32Array(n);
+  // Each width is judged against its own typical strength on this face (90th percentile over
+  // the skin), so the broad width cannot drown the fine lines just by being broad.
+  const scaleRef = scales.map((sc) => percentile(sc.strength, mask, j.zones, w, h, 0.9));
   for (let p = 0; p < n; p++) {
-    const useDeep = deep.strength[p] > fine.strength[p];
-    strength[p] = useDeep ? deep.strength[p] : fine.strength[p];
-    dir[p] = useDeep ? deep.dir[p] : fine.dir[p];
+    let k = 0;
+    const rel = scales.map((sc, i) => sc.strength[p] / scaleRef[i]);
+    // A wider width wins only when it clearly dominates (a broad fold, not a fine line).
+    for (let i = 1; i < 3; i++) if (rel[i] > rel[k] * 1.5) k = i;
+    strength[p] = rel[k];
+    dir[p] = scales[k].dir[p];
+    // Depth on a copy one step finer than the line's width: fine lines stay deep enough to fill,
+    // broad folds keep their skin texture on top.
+    level[p] = k === 0 ? lum[p] : smooth[k - 1][p];
     spots[p] = Math.max(fine.blob[p], deep.blob[p]);
+    const bk = deep.bright[p] > fine.bright[p] ? deep : fine;
+    edge[p] = bk.bright[p];
+    edgeDir[p] = bk.brightDir[p];
   }
   // Round dark spots light up the line measure on their rims; find each spot (its centre curves
   // both ways) and switch the treatment off over its whole extent.
@@ -134,11 +171,24 @@ export function linesCompute(j: LinesJob): LinesResult {
   const around = blurLike(lum, w, h, Math.max(3, fw * 0.02));
   // Surrounding skin colour, so a lifted crease takes the skin's colour (not its own darker,
   // more saturated one, which would leave orange-brown streaks).
+  // (Shine and creases are left out: the reference is the plain skin's colour, so lowered shine
+  // does not turn grey and lifted creases do not turn orange.)
+  const plain = new Float32Array(n);
+  for (let p = 0; p < n; p++) plain[p] = Math.abs(lum[p] - around[p]) <= MIN_DEPTH[1] ? 1 : 0; // no shine, no creases
+  const plainW = blurLike(plain, w, h, Math.max(3, fw * 0.02));
   const skin = [0, 1, 2].map((c) => {
     const v = new Float32Array(n);
-    for (let p = 0; p < n; p++) v[p] = pixels[p * 4 + c];
-    return blurLike(v, w, h, Math.max(3, fw * 0.02));
+    for (let p = 0; p < n; p++) v[p] = pixels[p * 4 + c] * plain[p];
+    const b = blurLike(v, w, h, Math.max(3, fw * 0.02));
+    for (let p = 0; p < n; p++) b[p] = plainW[p] > 1e-3 ? b[p] / plainW[p] : pixels[p * 4 + c];
+    return b;
   });
+  // Frequency separation: the mid band (lines and crepey texture) is what botox softens; the fine
+  // band (pores, grain) and the low band (the face's shading) are kept.
+  const fineTop = blurLike(lum, w, h, Math.max(0.8, fw * 0.0022));
+  const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
+  const spotFree = new Float32Array(n);
+  for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
 
   const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
@@ -146,17 +196,9 @@ export function linesCompute(j: LinesJob): LinesResult {
   for (const id of ["forehead", "frown", "crows"] as AreaId[]) {
     const zones = j.zones.filter((z) => z.id === id);
     const fill = new Float32Array(n),
-      weight = new Float32Array(n);
-    // Relative threshold: this area's own line strengths decide what counts as a clear line,
-    // so exposure and skin tone matter less.
-    const inZone: number[] = [];
-    for (let p = 0; p < n; p += 3) {
-      const x = p % w,
-        y = (p / w) | 0;
-      if (strength[p] > 0 && mask[p * 4 + 3] > 128 && zones.some((z) => ellipseWeight(z, x, y, 0) > 0)) inZone.push(strength[p]);
-    }
-    inZone.sort((a, b) => a - b);
-    const ref = inZone.length ? inZone[Math.floor(inZone.length * 0.9)] : 1;
+      weight = new Float32Array(n),
+      edgeWeight = new Float32Array(n);
+    const ref = 1; // strengths are already relative to their width's typical value
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const p = y * w + x;
@@ -180,34 +222,95 @@ export function linesCompute(j: LinesJob): LinesResult {
         const isLine = smoothstep(0.12, 0.45, strength[p] / Math.max(1e-6, ref)) * notSpot;
         weight[p] = isLine * dw * zw * m;
       }
+    // Thin bright crease edges running the area's way (relative threshold as for lines).
+    const edgeRef = percentile(edge, mask, zones, w, h, 0.9);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        const m = mask[p * 4 + 3] / 255;
+        if (m <= 0 || edge[p] <= 0) continue;
+        let best = 0;
+        for (const z of zones) {
+          const e = ellipseWeight(z, x, y);
+          if (e <= 0) continue;
+          const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
+          const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
+          best = Math.max(best, e * smoothstep(lo, hi, Math.abs(Math.cos(edgeDir[p] - expected))));
+        }
+        edgeWeight[p] = best * smoothstep(0.35, 0.8, edge[p] / Math.max(1e-6, edgeRef)) * m;
+      }
     // The line mask, widened to cover the whole line (its centre is where the measure peaks).
     const r = Math.max(1, Math.round(fw * 0.0025));
     const cover = slide(slide(weight, w, h, r, true, false), w, h, r, true, true);
-    // The skin level around each line, leaving the lines themselves out of the average
+    // The skin level around each line, leaving the lines (and the shine) out of the average
     // (normalised convolution): the depth is then right at the line's centre and zero beside it,
     // so the fill never leaves a light halo next to a line.
-    const sig = Math.max(3, fw * 0.02);
+    const sig = Math.max(3, fw * 0.03);
     const keep = new Float32Array(n),
       keepLum = new Float32Array(n);
     for (let p = 0; p < n; p++) {
       keep[p] = 1 - Math.min(1, cover[p]);
-      keepLum[p] = lum[p] * keep[p];
+      // Bright ridges and shine are clipped too, so the skin level is the plain skin's (else
+      // a ridge measures less raised than it is).
+      keepLum[p] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * keep[p];
     }
     const num = blurLike(keepLum, w, h, sig),
       den = blurLike(keep, w, h, sig);
+    // Next to lines (within a fold's width), the raised ridges between them: lowering those is
+    // the other half of flattening a fold. Elsewhere bright bumps are highlights and stay.
+    const rf = Math.max(2, Math.round(fw * 0.02));
+    const ridgeLevel = smooth[2];
+    const r1 = Math.max(1, Math.round(fw * 0.002));
+    const onEdge = slide(slide(edgeWeight, w, h, r1, true, false), w, h, r1, true, true);
+    const nearLine = blurLike(slide(slide(weight, w, h, rf, true, false), w, h, rf, true, true), w, h, Math.max(1, fw * 0.006));
     for (let p = 0; p < n; p++) {
-      if (cover[p] <= 0) continue;
       const skinLevel = den[p] > 1e-3 ? num[p] / den[p] : around[p];
-      const depth = Math.max(0, skinLevel - near[p]);
-      // Skin grain dips a few levels; a line is deeper than that.
-      fill[p] = depth * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], depth) * Math.min(1, cover[p]) * MAX_SOFTEN;
+      // The softened mid band everywhere in the area: dark detail fully on lines, partly elsewhere
+      // (crepey texture); bright detail only near lines (ridges), never shine beyond RIDGE_CAP.
+      const x = p % w,
+        y = (p / w) | 0;
+      let zone = 0;
+      for (const z of zones) zone = Math.max(zone, ellipseWeight(z, x, y));
+      const m = mask[p * 4 + 3] / 255;
+      let band = 0;
+      if (zone > 0 && m > 0) {
+        const mid = fineTop[p] - lowBand[p];
+        const onLine = Math.min(1, cover[p]);
+        band =
+          mid < 0
+            ? -mid * MAX_SOFTEN * (TEXTURE_SOFTEN + (1 - TEXTURE_SOFTEN) * onLine) * spotFree[p]
+            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * 0.6 + RIDGE_FLATTEN * Math.min(1, nearLine[p]));
+        band *= zone * m;
+      }
+      if (cover[p] > 0) {
+        const depth = Math.max(0, skinLevel - level[p]);
+        // Skin grain dips a few levels; a line is deeper than that.
+        // Capped: a fold deeper than this is mostly shadow from an expression (raised brows);
+        // lifting it fully turns the skin flat and orange.
+        fill[p] = Math.min(MAX_LIFT, depth * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], depth) * Math.min(1, cover[p]) * MAX_SOFTEN);
+      }
+      const notLine = 1 - Math.min(1, cover[p]);
+      let lower = 0;
+      if (nearLine[p] > 0 && ridgeLevel[p] > skinLevel) {
+        const ridge = Math.min(RIDGE_CAP, ridgeLevel[p] - skinLevel);
+        lower = ridge * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], ridge) * Math.min(1, nearLine[p]);
+      }
+      const edgeHere = Math.min(1, onEdge[p]);
+      if (edgeHere > 0 && smooth[0][p] > skinLevel) {
+        const rise = Math.min(RIDGE_CAP, smooth[0][p] - skinLevel);
+        lower = Math.max(lower, rise * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], rise) * edgeHere);
+      }
+      fill[p] -= lower * notLine * RIDGE_FLATTEN;
+      // Whichever change is larger (in its own direction) wins: line fill, ridge lowering, band.
+      fill[p] = band > 0 ? Math.max(fill[p], band) : Math.min(fill[p], band);
+      fill[p] = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, fill[p]));
     }
     result[id] = toLayers(pixels, lum, fill, skin);
   }
   return result;
 }
 
-/** Lighten by `fill` per pixel; the more a pixel is lifted, the more it takes the skin's colour. */
+/** Change lightness by `fill` per pixel (lift lines, lower ridges); the more a pixel changes, the more it takes the skin's colour. */
 function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: Float32Array[]): Layers {
   const n = lum.length;
   const mul = new Uint8ClampedArray(n * 4).fill(255);
@@ -216,10 +319,11 @@ function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: F
     const i = p * 4;
     add[i + 3] = 255;
     const f = fill[p];
-    if (f < 0.25 || lum[p] < 1) continue;
+    if (Math.abs(f) < 0.25 || lum[p] < 1) continue;
     const target = lum[p] + f;
     const sl = 0.2126 * skin[0][p] + 0.7152 * skin[1][p] + 0.0722 * skin[2][p];
-    const a = Math.min(0.6, f / 12);
+    // Lifted creases take the skin's colour; lowered ridges (often shine) mostly keep their own.
+    const a = f > 0 ? Math.min(0.6, f / 16) : Math.min(0.5, -f / 30);
     for (let c = 0; c < 3; c++) {
       const v = pixels[i + c];
       const own = v / lum[p],
@@ -230,4 +334,18 @@ function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: F
     }
   }
   return { mul, add };
+}
+
+/** The q-quantile of `v` over masked pixels inside the zones (every 3rd pixel), or 1. */
+function percentile(v: Float32Array, mask: Pixels, zones: Zone[], w: number, h: number, q: number): number {
+  const xs: number[] = [];
+  for (let p = 0; p < w * h; p += 3) {
+    if (v[p] <= 0 || mask[p * 4 + 3] <= 128) continue;
+    const x = p % w,
+      y = (p / w) | 0;
+    if (zones.some((z) => ellipseWeight(z, x, y, 0) > 0)) xs.push(v[p]);
+  }
+  if (!xs.length) return 1;
+  xs.sort((a, b) => a - b);
+  return xs[Math.floor(xs.length * q)];
 }

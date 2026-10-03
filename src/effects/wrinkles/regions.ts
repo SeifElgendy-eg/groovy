@@ -20,19 +20,21 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
   const zones: Zone[] = [
     {
       id: "forehead",
-      cx: (P[10].x + brow.x) / 2 - vx * fw * 0.05,
-      cy: (P[10].y + brow.y) / 2 - vy * fw * 0.05,
-      rx: fw * 0.44,
-      ry: Math.max(4, foreheadHeight * 0.62 + fw * 0.08),
+      // Up to the hairline (the face mesh stops below it; the skin mask keeps the hair out).
+      cx: (P[10].x + brow.x) / 2 - vx * fw * 0.08,
+      cy: (P[10].y + brow.y) / 2 - vy * fw * 0.08,
+      rx: fw * 0.46,
+      ry: Math.max(4, foreheadHeight * 0.75 + fw * 0.12),
       angle,
       lineAngle: angle,
     },
     {
       id: "frown",
-      cx: (P[107].x + P[336].x) / 2 - vx * fw * 0.02,
-      cy: (P[107].y + P[336].y) / 2 - vy * fw * 0.02,
-      rx: fw * 0.09,
-      ry: fw * 0.11,
+      // Between the brows, from a little above them down to the top of the nose.
+      cx: (P[107].x + P[336].x) / 2 + vx * fw * 0.02,
+      cy: (P[107].y + P[336].y) / 2 + vy * fw * 0.02,
+      rx: fw * 0.11,
+      ry: fw * 0.14,
       angle,
       lineAngle: angle + Math.PI / 2,
     },
