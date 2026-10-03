@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../src/core/types";
-import { FILLED_RATIO, rollProfile, transformOuterLip } from "../../src/effects/lips/geometry";
+import { crossSection, FILLED_RATIO, transformOuterLip } from "../../src/effects/lips/geometry";
 
 /** Mouth in landmark order (0 left corner, 1-9 upper, 10 right corner, 11-19 lower). */
 function mouth(up: number, down: number, width = 300, cx = 400, cy = 300) {
@@ -52,10 +52,14 @@ describe("lip filler shape", () => {
     expect(out[10]).toEqual(m.outer[10]);
   });
 
-  it("the roll is gentle: stretch near the opening stays under 1.3x even at full volume and roll", () => {
-    const f = rollProfile(0.55, 1);
-    expect((f(0.01) - f(0)) / 0.01).toBeLessThan(1.3);
-    expect(f(0)).toBe(0);
-    expect(f(1)).toBeCloseTo(1, 9);
+  it("keeps the lip line and the border at their original scale (crisp), growing the middle", () => {
+    const rho = 0.5; // the lip doubled in height
+    const eps = 1e-3;
+    const stretchAt = (t: number) => ((crossSection(t + eps, rho) - crossSection(t, rho)) / eps) / rho;
+    expect(stretchAt(0)).toBeCloseTo(1, 2); // at the lip line: no stretch
+    expect(stretchAt(1 - eps)).toBeCloseTo(1, 2); // at the border: no stretch
+    expect(stretchAt(0.5)).toBeGreaterThan(2); // the middle takes the growth
+    expect(crossSection(0, rho)).toBe(0);
+    expect(crossSection(1, rho)).toBeCloseTo(1, 9);
   });
 });

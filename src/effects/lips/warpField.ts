@@ -8,7 +8,7 @@
 // construction (shared mesh vertices), zero on its border, and is what both the WebGL2 renderer and
 // the CPU fallback sample.
 import type { Point } from "../../core/types";
-import { rollProfile, type LipData, type LipParams } from "./geometry";
+import { crossSection, type LipData, type LipParams } from "./geometry";
 
 export interface Roi {
   x: number;
@@ -66,23 +66,27 @@ const LIP_RINGS = 12,
 
 /**
  * The lip model as a fine mesh, from the mouth opening (fixed) through the lips (grown, with the
- * "roll" cross-section) to an anchor ring (fixed) whose distance scales with how far the lips
+ * crossSection profile: lip line and border keep their scale) to an anchor ring (fixed) whose distance scales with how far the lips
  * moved, so the skin in between is squeezed but never folded.
  */
-export function buildMesh(lip: LipData, targetOuter: Point[], p: LipParams): WarpMesh {
+export function buildMesh(lip: LipData, targetOuter: Point[], _p?: LipParams): WarpMesh {
   const inner = densify(lip.innerPts, SUBDIVIDE),
     outer = densify(lip.outerPts, SUBDIVIDE),
     tOuter = densify(targetOuter, SUBDIVIDE);
   const pts = lip.outerPts;
   const width = Math.hypot(pts[10].x - pts[0].x, pts[10].y - pts[0].y);
-  // Cross-section: a gentle outward roll (see rollProfile).
-  const rolled = rollProfile(p.amount, p.roll);
+  // Cross-section per point: the lip line and the border keep their scale; the middle grows.
+  const rho = outer.map((q, i) => {
+    const before = Math.hypot(q.x - inner[i].x, q.y - inner[i].y),
+      after = Math.hypot(tOuter[i].x - inner[i].x, tOuter[i].y - inner[i].y);
+    return after > 1e-6 ? before / after : 1;
+  });
   const dst: Point[][] = [],
     src: Point[][] = [];
   for (let r = 0; r <= LIP_RINGS; r++) {
     const t = r / LIP_RINGS;
     src.push(outer.map((q, i) => lerp(inner[i], q, t)));
-    dst.push(tOuter.map((q, i) => lerp(inner[i], q, rolled(t))));
+    dst.push(tOuter.map((q, i) => lerp(inner[i], q, crossSection(t, rho[i]))));
   }
   // Skin: the offset fades from the lip edge's to zero at the anchor along a smoothstep, whose
   // slope peaks at 1.5x. Each anchor's gap scales with how far its own edge point moved (so corners,

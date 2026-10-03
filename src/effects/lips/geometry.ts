@@ -15,7 +15,7 @@ export interface LipData {
 export interface LipParams {
   /** Filler volume. */
   amount: number;
-  /** "Lip Roll": how much the tissue rolls outward rather than stretching flat. */
+  /** "Lip Roll": scales how much volume the lips take (the shape of the cross-section is fixed). */
   roll: number;
   /** "Edge Blend": feather width of the lip mask. */
   blend: number;
@@ -112,14 +112,15 @@ export function transformOuterLip(
 }
 
 /**
- * Cross-section of the grown lip: where tissue at fraction t (0 mouth opening .. 1 lip edge) ends
- * up, as a fraction of the new height. A gentle outward roll; kept mild so the stretch is spread
- * through the lip instead of smearing the lip lines near the opening.
+ * Cross-section of the grown lip: where tissue at fraction t (0 = the lip line, 1 = the lip's
+ * outer border) ends up, as a fraction of the new height. `rho` = old height / new height (<= 1).
+ * The slope is rho at both ends, i.e. the lip line and the border keep their original scale (they
+ * stay thin and crisp, as in real filled lips), and the growth is taken up in the middle of the
+ * lip, where there is least detail to smear.
  */
-export function rollProfile(amount: number, roll: number): (t: number) => number {
-  const r = Math.max(0, Math.min(1, (roll - 0.2) / 0.8));
-  const k = amount * (0.03 + r * 0.14);
-  return (t: number) => t + k * Math.sin(Math.PI * t);
+export function crossSection(t: number, rho: number): number {
+  const r = Math.max(0.2, Math.min(1, rho));
+  return r * t + (1 - r) * t * t * (3 - 2 * t);
 }
 
 /** Where the lip contours end up for the given settings. */
