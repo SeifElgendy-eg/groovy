@@ -98,3 +98,23 @@ describe("next to the lid (strict zone)", () => {
     expect(worst).toBeLessThan(3); // the lashes
   });
 });
+
+import { lightDirection } from "../../src/effects/wrinkles/lines";
+
+describe("light direction for the texture", () => {
+  const w = 120, h = 120;
+  const mask = new Uint8ClampedArray(w * h * 4).fill(255);
+  it("finds side light from the shading", () => {
+    const lum = new Float32Array(w * h).map((_, p) => 100 + (p % w) * 0.8); // brighter to the right
+    const l = lightDirection(lum, mask, w, h, 200);
+    expect(l.x).toBeGreaterThan(0.9);
+    expect(l.strength).toBeGreaterThan(0.8);
+  });
+  it("takes flat lighting as light from above", () => {
+    const W2 = 400, H2 = 400;
+    let s = 3;
+    const lum = new Float32Array(W2 * H2).map(() => 120 + ((s = (s * 16807) % 2147483647) / 2147483647 - 0.5) * 4);
+    const l = lightDirection(lum, new Uint8ClampedArray(W2 * H2 * 4).fill(255), W2, H2, 120);
+    expect(l.y).toBeLessThan(-0.7);
+  });
+});

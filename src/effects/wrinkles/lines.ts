@@ -231,7 +231,7 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Fresh grain for the treated skin: the face's own fine texture grew along its creases and
   // keeps tracing them, so it is replaced by new, directionless grain of the same scale and
   // strength as this face's least-lined skin.
-  const donorGrain = synthGrain(fineBand, lineShaped, mask, w, h, fw);
+  const donorGrain = synthGrain(fineBand, lineShaped, mask, w, h, fw, lowBand);
   const spotFree = new Float32Array(n);
   for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
 
@@ -483,6 +483,7 @@ export function synthGrain(
   w: number,
   h: number,
   fw: number,
+  shading?: Float32Array,
 ): Float32Array {
   const n = w * h;
   const ref: number[] = [];
@@ -569,7 +570,23 @@ export function synthGrain(
   for (let p = 0; p < n; p++) fs += fine[p] * fine[p];
   const fsd = Math.sqrt(fs / n) || 1;
   // Soft edges (furrows are rounded, never a hard pixel line), then the fine grain.
-  const soft = blurLike(relief, w, h, Math.max(0.5, cell * 0.06));
+  let soft = blurLike(relief, w, h, Math.max(0.5, cell * 0.06));
+  // Light it like the photo: the relief is a height map, lit from the direction the face's own
+  // shading says the light comes from (each furrow gets a lit and a shadowed edge), plus a little
+  // ambient term (cell tops lighter than furrows whatever the direction).
+  const light = shading ? lightDirection(shading, mask, w, h, fw) : null;
+  if (light) {
+    const lit = new Float32Array(n);
+    for (let y = 1; y < h - 1; y++)
+      for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        const gx = (soft[p + 1] - soft[p - 1]) / 2,
+          gy = (soft[p + w] - soft[p - w]) / 2;
+        // Surface facing the light is brighter: slope towards the light raises it.
+        lit[p] = (gx * light.x + gy * light.y) * cell * 0.9 * light.strength + 0.45 * soft[p];
+      }
+    soft = lit;
+  }
   let rm = 0;
   for (let p = 0; p < n; p++) rm += soft[p];
   rm /= n;
@@ -582,5 +599,50 @@ export function synthGrain(
   for (let p = 0; p < n; p++) sum += out[p] * out[p];
   const sd = Math.sqrt(sum / n) || 1;
   for (let p = 0; p < n; p++) out[p] *= target / sd;
+  // Texture contrast follows the light: stronger where the skin is lit, fainter in shadow.
+  if (shading) {
+    let m = 0,
+      c = 0;
+    for (let p = 0; p < n; p += 3)
+      if (mask[p * 4 + 3] > 200) {
+        m += shading[p];
+        c++;
+      }
+    m = c ? m / c : 1;
+    for (let p = 0; p < n; p++) out[p] *= Math.max(0.45, Math.min(1.5, shading[p] / Math.max(1, m)));
+  }
   return out;
+}
+
+/**
+ * Where the light comes from, from the face's broad shading: the average direction in which the
+ * skin gets brighter (over the skin mask), as a unit vector pointing towards the light, with a
+ * strength 0..1 (0 = flat, frontal light: no directional shading of the texture).
+ */
+export function lightDirection(shading: Float32Array, mask: Pixels, w: number, h: number, fw: number) {
+  const broad = blurLike(shading, w, h, Math.max(3, fw * 0.05));
+  let sx = 0,
+    sy = 0,
+    mag = 0;
+  for (let y = 2; y < h - 2; y += 2)
+    for (let x = 2; x < w - 2; x += 2) {
+      const p = y * w + x;
+      if (mask[p * 4 + 3] <= 200) continue;
+      const gx = (broad[p + 2] - broad[p - 2]) / 4,
+        gy = (broad[p + 2 * w] - broad[p - 2 * w]) / 4;
+      sx += gx;
+      sy += gy;
+      mag += Math.hypot(gx, gy);
+    }
+  const len = Math.hypot(sx, sy);
+  if (len < 1e-6 || mag < 1e-6) return { x: 0, y: -1, strength: 0.4 };
+  // How consistent the gradients are says how directional the light is. Weakly directional
+  // (frontal) light is taken as coming from slightly above, the usual case, rather than trusting
+  // a direction the face's own shape produced.
+  const c = Math.min(1, (len / mag) * 3);
+  const t = Math.max(0, Math.min(1, (c - 0.25) / 0.35));
+  const x = (sx / len) * t,
+    y = (sy / len) * t + -1 * (1 - t);
+  const l = Math.hypot(x, y) || 1;
+  return { x: x / l, y: y / l, strength: Math.max(0.4, c) };
 }
