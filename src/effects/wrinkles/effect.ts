@@ -97,6 +97,10 @@ export class WrinklesEffect {
   addClosedContour(mask.ctx, faceOval(points, faceWidth));
   mask.ctx.fill();
   mask.ctx.restore();
+  // The skin as the segmenter sees it: its edge (hairline, brows' outer side) is snapped to the
+  // photo's colours in the worker. The guards carved next follow the landmarks exactly and are not
+  // snapped: snapping them peeled the eyes' dark shadows (under-eyes, crow's feet) out of the mask.
+  const segmented = mask.ctx.getImageData(0, 0, aw, ah).data;
 
   mask.ctx.save();
   mask.ctx.globalCompositeOperation = "destination-out";
@@ -151,7 +155,8 @@ export class WrinklesEffect {
   mask.ctx.restore();
   const result = await runWrinkles({
     original: work.ctx.getImageData(0, 0, aw, ah).data,
-    mask: mask.ctx.getImageData(0, 0, aw, ah).data,
+    mask: segmented,
+    guards: mask.ctx.getImageData(0, 0, aw, ah).data,
     aw,
     ah,
     faceWidth,
@@ -270,8 +275,12 @@ export function noseGuard(points: Point[]): Point[] {
   const canthi = Math.hypot(P[133].x - P[362].x, P[133].y - P[362].y);
   const alae = Math.hypot(P[98].x - P[327].x, P[98].y - P[327].y);
   // Along the axis (0 at the bridge between the eyes, 1 at the base of the nose): half-widths.
+  // Up the bridge to between the brows (the bridge's highlight is no frown line either).
+  const root = ((P[168].x - top.x) * ax + (P[168].y - top.y) * ay) / (len * len);
   const rows: [number, number][] = [
-    [-0.08, canthi * 0.2],
+    [Math.min(-0.08, root, -(canthi * 0.45) / len), canthi * 0.16],
+    [Math.min(-0.08, root, -(canthi * 0.3) / len), canthi * 0.22],
+    [-0.08, canthi * 0.26],
     [0, canthi * 0.3],
     [0.3, alae * 0.36],
     [0.6, alae * 0.48],

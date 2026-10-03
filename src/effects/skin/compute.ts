@@ -37,9 +37,11 @@ export function acneCompute(j: AcneJob): AcneResult {
 }
 
 export interface WrinklesJob {
-  /** Analysis frame and the carved face mask (RGBA, alpha = treatable skin). */
+  /** Analysis frame and the face's skin mask (RGBA, alpha = skin). */
   original: Pixels;
   mask: Pixels;
+  /** The same with the eyes, brows, nose and mouth carved out (alpha), applied after the snap. */
+  guards?: Pixels;
   aw: number;
   ah: number;
   faceWidth: number;
@@ -54,5 +56,6 @@ export interface WrinklesResult {
 export function wrinklesCompute(j: WrinklesJob): WrinklesResult {
   const { aw, ah, faceWidth, original } = j;
   const refined = refineSkinMask(j.mask, original, aw, ah, Math.max(3, Math.round(faceWidth * 0.02)));
+  if (j.guards) for (let i = 3; i < refined.length; i += 4) refined[i] = Math.min(refined[i], j.guards[i]);
   return { faded: insetSkinMask(refined, aw, ah, 1, Math.max(3, faceWidth * 0.01)) };
 }

@@ -231,6 +231,11 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Each stage is its own function, so its working arrays are freed when it returns (a 4K
   // photo's face crop needs a lot of them).
   const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, lumBlur, mask, geoms, w, h, fw);
+  // How deep each pixel sits in a valley: lighter skin on both sides of it, within the width of
+  // the line found there (a morphological closing fills such a valley; it leaves a step alone).
+  // A shadow's edge (under the brows, the eye sockets in top light) is dark on one side only: it is
+  // no line, and lifting it left a bright, orange band along the shadow.
+  const { valley, broad } = valleyDepth(smooth0, level, widthOf, w, h, fw);
   const { roundNear, spotNear, spotRef, spotSurround } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
@@ -400,7 +405,8 @@ export function linesCompute(j: LinesJob): LinesResult {
         keepLum[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * keep[q];
         // The plain skin level leaves out anything clearly darker than the skin around it too
         // (stray hair at the hairline, crease remnants), so it never pulls the skin down.
-        const plainHere = lum[p] >= around[p] - MIN_DEPTH[1] ? keep[q] : 0;
+        // (Narrow dark only, in a valley: a broad shadow is the skin's own shading and stays in.)
+        const plainHere = lum[p] >= around[p] - MIN_DEPTH[1] || valley[p] < MIN_DEPTH[1] ? keep[q] : 0;
         baseW[q] = plainHere;
         baseL[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * plainHere;
       }
@@ -469,7 +475,7 @@ export function linesCompute(j: LinesJob): LinesResult {
         let f = 0,
           rc = 0;
         if (cover[q] > 0) {
-          const depth = Math.max(0, skinLevel - level[p]);
+          const depth = Math.max(0, Math.min(skinLevel - level[p], valley[p] + MIN_DEPTH[0]));
           // Skin grain dips a few levels; a line is deeper than that.
           // Capped: a fold deeper than this is mostly shadow from an expression (raised brows);
           // lifting it fully turns the skin flat and orange.
@@ -503,7 +509,11 @@ export function linesCompute(j: LinesJob): LinesResult {
           // The skin's gentle relief between pore and line size, kept where no line is near (the
           // plain base alone reads as flat, airbrushed skin).
           const relief = (fineTop[p] - base) * MID_KEEP * (1 - Math.min(1, nearLine[q]));
-          const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, base + relief + texture - lum[p]));
+          // Lifted no further than a valley's sides (or the local shading) allow: a fold's trough
+          // comes up to the skin either side of it, a shadow cast by the brows or the eye sockets
+          // keeps its depth (lifting it to the area's average left a pale, orange band).
+          const ceiling = Math.max(broad[p], lowBand[p] - lum[p], 0) + MIN_DEPTH[1];
+          const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, ceiling, base + relief + texture - lum[p]));
           // Wide, gentle hand-over at the area's edge.
           const edgeK = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
           // Freckles and moles keep their own look, but only their dark core: the skin around them
@@ -614,6 +624,7 @@ function spotProtection(
   fw: number,
 ) {
   const n = w * h;
+
   const spotR = Math.max(2, Math.round(fw * 0.008));
   // A freckle or mole stands alone; where several lines meet (crow's feet at the eye corner) the
   // junction is round and dark too, but has lines running out of it: those are not protected.
@@ -631,6 +642,10 @@ function spotProtection(
     ringDen = blurLike(ringKeep, w, h, spotR * 3);
   const surround = lumBlur(spotR * 2),
     core = lumBlur(Math.max(0.5, fw * 0.0014));
+  // A freckle is a small dark patch on its own. On a deeply lined face the crevices' junctions are
+  // round and dark too, but each is part of a long dark network: dark patches larger than a
+  // freckle (connected, darker than the skin around them) are not protected.
+  const small = smallDarkPatches(surround, core, w, h, spotR * 4);
   const isolated = new Float32Array(n),
     darkSpots = new Float32Array(n);
   for (let p = 0; p < n; p++) {
@@ -638,12 +653,91 @@ function spotProtection(
     isolated[p] = spots[p] * (1 - smoothstep(0.25, 0.6, around));
     // A freckle or mole is also clearly darker than the skin around it; pores and grain are only
     // a little darker (counting them kept dark crease remnants and grain all over the forehead).
-    darkSpots[p] = isolated[p] * smoothstep(SPOT_DARK[0], SPOT_DARK[1], surround[p] - core[p]);
+    darkSpots[p] =
+      isolated[p] *
+      smoothstep(SPOT_DARK[0], SPOT_DARK[1], surround[p] - core[p]) *
+      small[p];
   }
   const near = (v: Float32Array) => slide(slide(v, w, h, spotR, true, false), w, h, spotR, true, true);
   // (The freckles' protection is softened at its edge: a square cut-off showed as square patches
   // where the skin around a freckle was lifted and the protected square was not.)
   return { roundNear: near(isolated), spotNear: blurLike(near(darkSpots), w, h, Math.max(1, spotR / 2)), spotRef, spotSurround: surround };
+}
+
+/**
+ * Per pixel, how far a closing (max then min filter, a square window per line width: fine, deep,
+ * fold) raises `base` above `level`: the depth of a valley narrower than the window.
+ */
+function valleyDepth(base: Float32Array, level: Float32Array, widthOf: Uint8Array, w: number, h: number, fw: number) {
+  const n = w * h;
+  const valley = new Float32Array(n),
+    broad = new Float32Array(n);
+  [0.006, 0.012, 0.03].forEach((k, i) => {
+    const r = Math.max(1, Math.round(fw * k));
+    const dil = slide(slide(base, w, h, r, true, false), w, h, r, true, true);
+    const closed = slide(slide(dil, w, h, r, false, false), w, h, r, false, true);
+    for (let p = 0; p < n; p++) if (widthOf[p] === i) valley[p] = Math.max(0, closed[p] - level[p]);
+    // (The broadest window, for every pixel: how far a fold's trough sits below its sides.)
+    if (i === 2) for (let p = 0; p < n; p++) broad[p] = Math.max(0, closed[p] - base[p]);
+  });
+  return { valley, broad };
+}
+
+/**
+ * 1 on dark patches (darker than `surround` by most of SPOT_DARK[1]) that fit in a `size` square,
+ * 0 elsewhere: connected patches (8-neighbours) found with a union-find over the picture.
+ */
+export function smallDarkPatches(surround: Float32Array, core: Float32Array, w: number, h: number, size: number): Float32Array {
+  const n = w * h;
+  const parent = new Int32Array(n).fill(-1);
+  const find = (p: number): number => {
+    let r = p;
+    while (parent[r] !== r) r = parent[r];
+    while (parent[p] !== r) {
+      const next = parent[p];
+      parent[p] = r;
+      p = next;
+    }
+    return r;
+  };
+  const join = (a: number, b: number) => {
+    const ra = find(a),
+      rb = find(b);
+    if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+  };
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!(surround[p] - core[p] >= SPOT_DARK[1] * 0.75)) continue;
+      parent[p] = p;
+      if (x > 0 && parent[p - 1] >= 0) join(p, p - 1);
+      if (y > 0) {
+        if (parent[p - w] >= 0) join(p, p - w);
+        if (x > 0 && parent[p - w - 1] >= 0) join(p, p - w - 1);
+        if (x < w - 1 && parent[p - w + 1] >= 0) join(p, p - w + 1);
+      }
+    }
+  const x0 = new Int32Array(n).fill(w),
+    x1 = new Int32Array(n).fill(-1),
+    y0 = new Int32Array(n).fill(h),
+    y1 = new Int32Array(n).fill(-1);
+  for (let p = 0; p < n; p++) {
+    if (parent[p] < 0) continue;
+    const r = find(p),
+      x = p % w,
+      y = (p / w) | 0;
+    if (x < x0[r]) x0[r] = x;
+    if (x > x1[r]) x1[r] = x;
+    if (y < y0[r]) y0[r] = y;
+    if (y > y1[r]) y1[r] = y;
+  }
+  const out = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    if (parent[p] < 0) continue;
+    const r = parent[p];
+    if (x1[r] - x0[r] < size && y1[r] - y0[r] < size) out[p] = 1;
+  }
+  return out;
 }
 
 /**
