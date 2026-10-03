@@ -254,6 +254,38 @@ export function linesCompute(j: LinesJob): LinesResult {
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
   // Stray hairs lying on the skin (wisps, a curl hanging over the forehead): left whole.
   const strayNear = strayHairs(lum, around, mask, j.zones, w, h, fw, (p) => widthOf[p] > 0 && strength[p] > 0.45);
+  // Real skin for the lines (healing-brush style): the fine texture of clean skin elsewhere on
+  // this face, copied over the lines in place of generated grain.
+  // Skin to cover: anywhere the treatment may replace the texture (any line it would treat).
+  // Clean source skin: no clear line nearby, no line-shaped detail, spot, hair or mask edge.
+  const strongLine = new Float32Array(n),
+    anyLine = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    strongLine[p] = strength[p] > HEAL.cover ? 1 : 0;
+    anyLine[p] = strength[p] > HEAL.line ? 1 : 0;
+  }
+  const lr = Math.max(1, Math.round(fw * 0.004));
+  const need = slide(slide(strongLine, w, h, lr, true, false), w, h, lr, true, true);
+  const nearAny = slide(slide(anyLine, w, h, lr, true, false), w, h, lr, true, true);
+  const clean = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    const a = mask[p * 4 + 3];
+    if (a < 8) {
+      need[p] = 0;
+      continue;
+    }
+    clean[p] = a > 230 && !nearAny[p] && lineShaped[p] < 0.6 && spotNear[p] < 0.3 * spotRef && strayNear[p] === 0 ? 1 : 0;
+  }
+  // The skin's typical grain amplitude; shine (bright specks) is not copied: sources with it are
+  // skipped and what still comes through is capped.
+  const amps: number[] = [];
+  for (let p = 0; p < n; p += 2) if (clean[p]) amps.push(Math.abs(fineBand[p]));
+  amps.sort((a, b) => a - b);
+  const amp = Math.max(0.5, amps.length ? amps[amps.length >> 1] : 1);
+  for (let p = 0; p < n; p++) if (clean[p] && fineBand[p] > HEAL.shine * amp) clean[p] = 0;
+  const healed = healTexture(fineBand, lowBand, clean, need, w, h, fw);
+  for (let p = 0; p < n; p++)
+    if (!Number.isNaN(healed[p])) healed[p] = Math.max(-HEAL.darkCap * amp, Math.min(HEAL.brightCap * amp, healed[p]));
   const result = {} as LinesResult;
   // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
   // area's layer is computed from the original photo and they are drawn on top of each other, so
@@ -436,7 +468,8 @@ export function linesCompute(j: LinesJob): LinesResult {
         // themselves, and where the fine detail is round or random rather than long. Only on the
         // lines is the detail replaced (it traces the creases there).
         const keep = (1 - Math.min(1, onLineSoft[p])) * (1 - PORE_LINE_DROP * lineShaped[p]);
-        const texture = keep * fineBand[p] + (1 - keep) * donorGrain[p] * GRAIN_REPLACE;
+        const fresh = Number.isNaN(healed[p]) ? donorGrain[p] * GRAIN_REPLACE : healed[p];
+        const texture = keep * fineBand[p] + (1 - keep) * fresh;
         // The skin's gentle relief between pore and line size, kept where no line is near (the
         // plain base alone reads as flat, airbrushed skin).
         const relief = (fineTop[p] - base) * MID_KEEP * (1 - Math.min(1, nearLine[p]));
@@ -866,3 +899,167 @@ function thinLine(lum: Float32Array, w: number, h: number, sigma: number): { str
     }
   return { strength, dir };
 }
+
+/**
+ * Healing-brush texture: for each block of skin that needs new texture (`need`), the offset to the
+ * cleanest skin nearby (`clean`: no lines, spots, hair or mask edge) of similar brightness, and the
+ * fine texture (`fine`) read through it, scaled to the local brightness. Neighbouring blocks are
+ * cross-faded (keeping the texture's contrast, not averaging it away). NaN where no clean skin was
+ * found (the caller falls back to generated grain).
+ */
+export function healTexture(
+  fine: Float32Array,
+  low: Float32Array,
+  clean: Float32Array,
+  need: Float32Array,
+  w: number,
+  h: number,
+  fw: number,
+): Float32Array {
+  const n = w * h;
+  const out = new Float32Array(n).fill(NaN);
+  const B = Math.max(6, Math.round(fw * HEAL.block));
+  const bw = Math.ceil(w / B),
+    bh = Math.ceil(h / B);
+  // Blocks with need in or next to them (their neighbours are blended in too).
+  const blockNeed = new Uint8Array(bw * bh);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (need[y * w + x] > 0) {
+        const bx = Math.floor(x / B),
+          by = Math.floor(y / B);
+        for (let j = -1; j <= 1; j++)
+          for (let i = -1; i <= 1; i++) {
+            const X = bx + i,
+              Y = by + j;
+            if (X >= 0 && Y >= 0 && X < bw && Y < bh) blockNeed[Y * bw + X] = 1;
+          }
+      }
+  // Candidate offsets: rings around the block, several radii and angles.
+  const cands: [number, number][] = [];
+  for (let r = 1; r <= HEAL.rings; r++) {
+    const steps = 8 * r;
+    for (let k = 0; k < steps; k++) {
+      const a = (2 * Math.PI * (k + 0.5 * (r % 2))) / steps;
+      cands.push([Math.round(Math.cos(a) * r * B * 0.75), Math.round(Math.sin(a) * r * B * 0.75)]);
+    }
+  }
+  // The best few sources per block (a pixel whose first source is not clean uses the next).
+  const K = 3;
+  const offX = new Int32Array(bw * bh * K),
+    offY = new Int32Array(bw * bh * K),
+    nOk = new Uint8Array(bw * bh);
+  const step = Math.max(1, Math.round(B / 6)); // sample the block sparsely when scoring
+  const scores: number[] = [],
+    order: number[] = [];
+  for (let by = 0; by < bh; by++)
+    for (let bx = 0; bx < bw; bx++) {
+      const b = by * bw + bx;
+      if (!blockNeed[b]) continue;
+      const x0 = bx * B,
+        y0 = by * B,
+        x1 = Math.min(w, x0 + B),
+        y1 = Math.min(h, y0 + B);
+      let lowHere = 0,
+        cnt = 0;
+      for (let y = y0; y < y1; y += step)
+        for (let x = x0; x < x1; x += step) {
+          lowHere += low[y * w + x];
+          cnt++;
+        }
+      lowHere /= Math.max(1, cnt);
+      scores.length = 0;
+      order.length = 0;
+      cands.forEach(([dx, dy], ci) => {
+        if (x0 + dx < 0 || y0 + dy < 0 || x1 + dx > w || y1 + dy > h) return;
+        let c = 0,
+          lw = 0,
+          m = 0;
+        for (let y = y0; y < y1; y += step)
+          for (let x = x0; x < x1; x += step) {
+            const q = (y + dy) * w + x + dx;
+            c += clean[q];
+            lw += low[q];
+            m++;
+          }
+        const cleanFrac = c / m;
+        if (cleanFrac < HEAL.minClean) return;
+        const bright = Math.abs(lw / m - lowHere) / Math.max(10, lowHere);
+        scores[ci] = cleanFrac - bright * 2 - Math.hypot(dx, dy) / (B * HEAL.rings * 8);
+        order.push(ci);
+      });
+      order.sort((i, j) => scores[j] - scores[i]);
+      const k = Math.min(K, order.length);
+      for (let t = 0; t < k; t++) {
+        offX[b * K + t] = cands[order[t]][0];
+        offY[b * K + t] = cands[order[t]][1];
+      }
+      nOk[b] = k;
+    }
+  // Cross-fade between block centres; normalised by the root of the summed squared weights so
+  // the blended texture keeps the contrast of a single source.
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (need[p] <= 0) continue;
+      const fx = (x + 0.5) / B - 0.5,
+        fy = (y + 0.5) / B - 0.5;
+      const ix = Math.floor(fx),
+        iy = Math.floor(fy);
+      // Up to four sources; blocks sharing an offset are one source (their weights add).
+      const ox: number[] = [],
+        oy: number[] = [],
+        ow: number[] = [];
+      for (let j = 0; j <= 1; j++)
+        for (let i = 0; i <= 1; i++) {
+          const X = Math.min(bw - 1, Math.max(0, ix + i)),
+            Y = Math.min(bh - 1, Math.max(0, iy + j));
+          const b = Y * bw + X;
+          if (!nOk[b]) continue;
+          const wx = i ? fx - ix : 1 - (fx - ix),
+            wy = j ? fy - iy : 1 - (fy - iy);
+          const wt = Math.max(0, wx) * Math.max(0, wy);
+          if (wt <= 0) continue;
+          // This block's best source that lands on clean skin here.
+          let t = 0;
+          for (; t < nOk[b]; t++) {
+            const qx = x + offX[b * K + t],
+              qy = y + offY[b * K + t];
+            if (qx >= 0 && qy >= 0 && qx < w && qy < h && clean[qy * w + qx]) break;
+          }
+          if (t === nOk[b]) continue;
+          const dx = offX[b * K + t],
+            dy = offY[b * K + t];
+          const k = ox.findIndex((v, u) => v === dx && oy[u] === dy);
+          if (k >= 0) ow[k] += wt;
+          else {
+            ox.push(dx);
+            oy.push(dy);
+            ow.push(wt);
+          }
+        }
+      let sum = 0,
+        w2 = 0;
+      for (let k = 0; k < ox.length; k++) {
+        const qx = x + ox[k],
+          qy = y + oy[k];
+        if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue;
+        const q = qy * w + qx;
+        // Only clean skin is copied: a source pixel on a line or spot is skipped.
+        if (!clean[q]) continue;
+        // Pore contrast follows brightness: scale to this spot's level.
+        const gain = Math.min(1.5, Math.max(0.6, low[p] / Math.max(1, low[q])));
+        sum += ow[k] * fine[q] * gain;
+        w2 += ow[k] * ow[k];
+      }
+      if (w2 > 0) out[p] = sum / Math.sqrt(w2);
+    }
+  return out;
+}
+
+/**
+ * Healing: block size (of face width), search rings, least clean share of a source block, line
+ * strength that rules a source out, line strength that asks for new texture, and (in multiples of
+ * the typical grain) the brightest source detail allowed and the caps on copied detail.
+ */
+export const HEAL = { block: 0.035, rings: 8, minClean: 0.6, line: 0.56, cover: 0.12, shine: 3, brightCap: 2, darkCap: 4 };
