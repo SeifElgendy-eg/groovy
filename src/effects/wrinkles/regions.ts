@@ -27,7 +27,7 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
       // Up to the hairline (the face mesh stops below it; the skin mask keeps the hair out).
       cx: (P[10].x + brow.x) / 2 - vx * fw * 0.08,
       cy: (P[10].y + brow.y) / 2 - vy * fw * 0.08,
-      rx: fw * 0.46,
+      rx: fw * 0.62,
       ry: Math.max(4, foreheadHeight * 0.75 + fw * 0.12),
       angle,
       lineAngle: angle,

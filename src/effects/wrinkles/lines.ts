@@ -81,6 +81,11 @@ export const MIN_DEPTH: [number, number] = [3, 8];
 export const DIRECTION_TOLERANCE = 25;
 /** ...falling to nothing at this angle. */
 export const DIRECTION_LIMIT = 50;
+/**
+ * Mean valley depth (percent of the skin's lightness) over which a face counts from typical to very
+ * deeply lined (typical faces measure 2-4, a deeply lined one about 9).
+ */
+export const SEVERE_VALLEY: [number, number] = [4.5, 8];
 /** Under the eyes, the most a fine bright ridge (crepe) is lowered (levels). */
 export const UNDEREYE_LOWER = 6;
 /** Darkness of a spot's centre below the skin around it (levels) from which it counts as a freckle or mole. */
@@ -236,6 +241,9 @@ export function linesCompute(j: LinesJob): LinesResult {
   // A shadow's edge (under the brows, the eye sockets in top light) is dark on one side only: it is
   // no line, and lifting it left a bright, orange band along the shadow.
   const { valley, broad } = valleyDepth(smooth0, level, widthOf, w, h, fw);
+  // How deeply lined this face is (0 typical .. 1 very): on such skin the texture between the
+  // lines is crepe too, so less of it is kept and more is renewed.
+  const severity = smoothstep(SEVERE_VALLEY[0], SEVERE_VALLEY[1], meanValley(mask, geoms, w, h, valley, lum));
   const { roundNear, spotNear, spotRef, spotSurround } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
@@ -503,12 +511,14 @@ export function linesCompute(j: LinesJob): LinesResult {
           // The skin's own pores and grain stay wherever they do not trace a line: off the lines
           // themselves, and where the fine detail is round or random rather than long. Only on the
           // lines is the detail replaced (it traces the creases there).
-          const keepTex = (1 - Math.min(1, onLineSoft[q])) * (1 - PORE_LINE_DROP * lineShaped[p]);
-          const fresh = Number.isNaN(healed[p]) ? donorGrain[p] * GRAIN_REPLACE : healed[p];
+          const keepTex = (1 - Math.min(1, onLineSoft[q])) * (1 - PORE_LINE_DROP * lineShaped[p]) * (1 - 0.75 * severity);
+          // (Deeply lined skin: the "clean" skin the healing copies from is crepey too.)
+          const grain = donorGrain[p] * GRAIN_REPLACE;
+          const fresh = Number.isNaN(healed[p]) ? grain : healed[p] + (grain - healed[p]) * 0.6 * severity;
           const texture = keepTex * fineBand[p] + (1 - keepTex) * fresh;
           // The skin's gentle relief between pore and line size, kept where no line is near (the
           // plain base alone reads as flat, airbrushed skin).
-          const relief = (fineTop[p] - base) * MID_KEEP * (1 - Math.min(1, nearLine[q]));
+          const relief = (fineTop[p] - base) * MID_KEEP * (1 - 0.8 * severity) * (1 - Math.min(1, nearLine[q]));
           // Lifted no further than a valley's sides (or the local shading) allow: a fold's trough
           // comes up to the skin either side of it, a shadow cast by the brows or the eye sockets
           // keeps its depth (lifting it to the area's average left a pale, orange band).
@@ -537,7 +547,7 @@ export function linesCompute(j: LinesJob): LinesResult {
         // bright ridges come down, to the skin's local level and by a few levels at most, so
         // nothing gets darker than the skin around it. That holds for any area reaching there
         // (the crow's feet's lower zone covers the same band).
-        const lowest = -Math.min(UNDEREYE_LOWER, Math.max(1, lum[p] - lowBand[p]));
+        const lowest = -Math.min(UNDEREYE_LOWER * (1 + 3 * severity), Math.max(1, lum[p] - lowBand[p]));
         if (id === "undereye") f = Math.max(lowest, f);
         else if (f < lowest) {
           const u = smoothstep(0, 0.3, areaWeight.undereye[p]);
@@ -662,6 +672,21 @@ function spotProtection(
   // (The freckles' protection is softened at its edge: a square cut-off showed as square patches
   // where the skin around a freckle was lifted and the protected square was not.)
   return { roundNear: near(isolated), spotNear: blurLike(near(darkSpots), w, h, Math.max(1, spotR / 2)), spotRef, spotSurround: surround };
+}
+
+/** Mean valley depth over the skin inside the zones (every 3rd pixel), in percent of its lightness. */
+function meanValley(mask: Pixels, zones: ZoneGeom[], w: number, h: number, valley: Float32Array, lum: Float32Array): number {
+  let vs = 0,
+    ls = 0;
+  for (let p = 0; p < w * h; p += 3) {
+    if (mask[p * 4 + 3] <= 128) continue;
+    const x = p % w,
+      y = (p / w) | 0;
+    if (!zones.some((g) => zoneWeight(g, x, y, 0) > 0)) continue;
+    vs += valley[p];
+    ls += lum[p];
+  }
+  return ls > 0 ? (vs / ls) * 100 : 0;
 }
 
 /**
