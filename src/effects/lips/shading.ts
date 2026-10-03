@@ -179,3 +179,32 @@ export function borderLightTone(
   const rgb = m.map((v) => Math.round(v + (255 - v) * 0.55)) as [number, number, number];
   return { scale, rgb };
 }
+
+/**
+ * Colour and strength of an added shadow, from the surface it falls on. Real shadows keep the
+ * hue of that surface, so the tint is the surface's own colour, darkened. With `reference` (the
+ * skin a little further out, for the shadow under the lower lip), the shadow is weakened where the
+ * photo already has one there (no doubled shadow), and is a little gentler on darker skin, where
+ * a multiplied shadow turns muddy.
+ */
+export function shadowTone(
+  here: number[][],
+  reference: number[][] = [],
+): { scale: number; rgb: [number, number, number] } {
+  if (!here.length) return { scale: 1, rgb: [95, 55, 45] };
+  const mean = (xs: number[][]) => [0, 1, 2].map((c) => xs.reduce((a, s) => a + s[c], 0) / xs.length);
+  const luma = (v: number[]) => (0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]) / 255;
+  const m = mean(here);
+  const rgb = m.map((v) => Math.round(v * SHADOW_DARKEN)) as [number, number, number];
+  let scale = 1;
+  if (reference.length) {
+    const ref = luma(mean(reference));
+    const already = ref - luma(m); // how much darker the photo already is here
+    scale *= Math.max(0.3, Math.min(1, 1 - already / 0.12));
+    scale *= Math.max(0.5, Math.min(1, ref / BORDER_SKIN_REF));
+  }
+  return { scale, rgb };
+}
+
+/** Shadow tint = the surface's own colour times this. */
+export const SHADOW_DARKEN = 0.5;

@@ -95,3 +95,27 @@ describe("border light does not double a natural highlight", () => {
     expect(lit).toBeLessThan(plain * 0.6);
   });
 });
+
+import { shadowTone } from "../../src/effects/lips/shading";
+
+describe("added shadows follow the surface", () => {
+  const swatch = (rgb: number[]) => Array.from({ length: 20 }, () => rgb);
+  it("is tinted from the surface (keeps its hue, darker)", () => {
+    const t = shadowTone(swatch([200, 150, 120]));
+    expect(t.rgb[0]).toBeLessThan(200);
+    expect(t.rgb[0]).toBeGreaterThan(t.rgb[1]);
+    expect(t.rgb[1]).toBeGreaterThan(t.rgb[2]);
+  });
+  it("is weaker where the photo already has a shadow under the lip", () => {
+    const skin = swatch([220, 175, 150]);
+    const plain = shadowTone(swatch([218, 173, 148]), skin).scale;
+    const shaded = shadowTone(swatch([170, 125, 105]), skin).scale;
+    expect(shaded).toBeLessThan(plain * 0.6);
+  });
+  it("is a little gentler on darker skin", () => {
+    const light = shadowTone(swatch([220, 175, 150]), swatch([220, 175, 150])).scale;
+    const dark = shadowTone(swatch([110, 75, 55]), swatch([110, 75, 55])).scale;
+    expect(dark).toBeLessThan(light);
+    expect(dark).toBeGreaterThanOrEqual(0.5);
+  });
+});
