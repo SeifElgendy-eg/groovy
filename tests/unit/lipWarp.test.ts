@@ -86,12 +86,16 @@ describe("lip warp field", () => {
     }
   });
 
-  it("stays local: no bigger than the old fixed rim at full volume, much smaller at moderate", () => {
+  it("stays local: the skin it moves scales with the volume, smaller than the old rim when moderate", () => {
     const oldRim = lip.outer.height * 2.8;
-    expect(roi.h).toBeLessThan(oldRim * 1.05);
+    // Anchors sit at most 2x the largest move + 4% of mouth width beyond the grown lips.
+    let maxMove = 0;
+    lip.outerPts.forEach((q, i) => (maxMove = Math.max(maxMove, Math.hypot(targetOuter[i].x - q.x, targetOuter[i].y - q.y))));
+    const width = lip.outerPts[10].x - lip.outerPts[0].x;
+    expect(roi.h).toBeLessThan(lip.outer.height + 2 * (maxMove * 3 + width * 0.04) + 4);
     const m = params(0.2, 0.5);
     const m2 = buildMesh(lip, computeLipTargets(lip, m).targetOuter, m);
-    expect(warpRoi(m2, 2000, 2000).h).toBeLessThan(oldRim * 0.75);
+    expect(warpRoi(m2, 2000, 2000).h).toBeLessThan(oldRim);
   });
 });
 

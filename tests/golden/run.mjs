@@ -36,7 +36,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const scenarios = [
   { name: "lips-original", module: "#chooseLipsBtn", sample: "#sampleBtn", steps: [] },
-  ...[16, 28, 50].map((p) => ({
+  ...[16, 28, 50, 55].map((p) => ({
     name: `lips-preset-${p}`, module: "#chooseLipsBtn", sample: "#sampleBtn",
     steps: [`[data-lip-preset="${p}"]`],
   })),
@@ -86,7 +86,11 @@ for (const s of scenarios) {
       }, [id, value]);
       // A control this build does not have yet (e.g. the base of a PR that adds it): skip.
       if (!found) { s.unsupported = true; break; }
-    } else await page.click(sel);
+    } else {
+      // A button this build does not have yet (e.g. a new preset on the PR's base): skip.
+      if (!(await page.$(sel))) { s.unsupported = true; break; }
+      await page.click(sel);
+    }
   }
   // Let render settle: effects prepare in a Web Worker and flag body[data-effects-busy] meanwhile
   // (older builds compute synchronously and never set it).
