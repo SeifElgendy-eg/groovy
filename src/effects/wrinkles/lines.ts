@@ -68,7 +68,7 @@ export const TEXTURE_SOFTEN = 0.95;
 /** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
 export const FINEST_LINES = 0.85;
 /** Share of the fine detail replaced by fresh grain at full dose (main areas). */
-export const GRAIN_REPLACE = 0.8;
+export const GRAIN_REPLACE = 0.6;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -313,7 +313,7 @@ export function linesCompute(j: LinesJob): LinesResult {
     const cover = slide(slide(weight, w, h, r, true, false), w, h, r, true, true);
     // Main areas: the plain skin level, with lines (and bright ridges, clipped) left out of the
     // average. Each pixel there goes to this level plus fresh grain: one target, so nothing stacks.
-    const sb = Math.max(4, fw * 0.022);
+    const sb = Math.max(5, fw * 0.032);
     const exW = new Float32Array(n),
       exL = new Float32Array(n);
     for (let p = 0; p < n; p++) {
@@ -501,12 +501,28 @@ export function synthGrain(
     }
     return v;
   };
-  const fineS = Math.max(0.5, fw * 0.0008),
-    poreS = Math.max(0.8, fw * 0.0018);
-  const a = blurLike(noise(0x9e37), w, h, fineS),
-    b = blurLike(noise(0x7f4a), w, h, poreS);
+  // Skin texture is pores (small, soft, slightly dark dots, scattered irregularly) on a very fine
+  // smooth grain, not blurred noise (which reads as digital mottling).
+  const fine = blurLike(noise(0x9e37), w, h, Math.max(0.7, fw * 0.0007));
+  const poreR = Math.max(0.7, fw * 0.0009);
+  const seeds = new Float32Array(n);
+  const u = noise(0x7f4a);
+  // About one pore per (5 pore widths)^2.
+  const density = 1 / Math.max(9, (poreR * 5) ** 2);
+  for (let p = 0; p < n; p++) if (u[p] + 0.5 < density) seeds[p] = 0.6 + (u[(p * 7) % n] + 0.5) * 0.8;
+  const pores = blurLike(seeds, w, h, poreR);
+  let pm = 0;
+  for (let p = 0; p < n; p++) pm += pores[p];
+  pm /= n;
+  let ps = 0;
+  for (let p = 0; p < n; p++) ps += (pores[p] - pm) ** 2;
+  const psd = Math.sqrt(ps / n) || 1;
+  let fs = 0;
+  for (let p = 0; p < n; p++) fs += fine[p] * fine[p];
+  const fsd = Math.sqrt(fs / n) || 1;
   const out = new Float32Array(n);
-  for (let p = 0; p < n; p++) out[p] = a[p] + 0.7 * b[p];
+  // Pores dark (minus), fine grain a little under half of the texture.
+  for (let p = 0; p < n; p++) out[p] = -0.7 * ((pores[p] - pm) / psd) + 0.7 * (fine[p] / fsd);
   let sum = 0;
   for (let p = 0; p < n; p++) sum += out[p] * out[p];
   const sd = Math.sqrt(sum / n) || 1;
