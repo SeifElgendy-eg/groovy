@@ -12,7 +12,7 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { runLines, runLinesLayers, runWrinkles } from "../skin/client";
+import { Cancelled, cancel, runLines, runLinesLayers, runWrinkles } from "../skin/client";
 import { AREAS, type AreaId, type Layers, type LinesResult } from "./lines";
 import { botoxZones } from "./regions";
 
@@ -62,9 +62,17 @@ export class WrinklesEffect {
     this.busy = true;
     try {
       return await this.run(input, gen);
+    } catch (err) {
+      if (err instanceof Cancelled) return false;
+      throw err;
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Stop a running prepare() whose input is out of date (it resolves false at once). */
+  cancel(): void {
+    if (this.busy && this.stale) cancel("botox");
   }
 
   private async run(input: SkinInput, gen: number): Promise<boolean> {
@@ -228,7 +236,9 @@ export class WrinklesEffect {
         if (!r) this.dirty = true; // the worker lost its cache: recompute everything
         else a.sets.set(key, toAreaLayers(r, a.w, a.h));
       })
-      .catch((err) => console.error("botox layers failed", err))
+      .catch((err) => {
+        if (!(err instanceof Cancelled)) console.error("botox layers failed", err);
+      })
       .finally(() => {
         if (this.pendingSet === key) this.pendingSet = null;
         this.onChange?.();

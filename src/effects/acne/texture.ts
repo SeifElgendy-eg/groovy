@@ -43,35 +43,106 @@ export interface TextureResult {
 export const PORE_REDUCTION: [number, number] = [0.5, 0.04];
 
 /** In-place horizontal + vertical box blur of radius r (clamped edges). */
-function boxBlur(src: Float32Array, w: number, h: number, r: number, tmp: Float32Array): void {
+function boxBlur(src: Float32Array, w: number, h: number, r: number, tmp: Float32Array, acc: Float64Array): void {
   if (r < 1) return;
   const norm = 1 / (2 * r + 1);
-  for (let y = 0; y < h; y++) {
+  // Rows: a running sum along each row (edges clamped). Four rows at a time: their sums are
+  // independent, so the processor can work on them together (same arithmetic per row).
+  // Split where the window is inside the row, so the middle needs no clamping.
+  const x1 = Math.max(0, Math.min(w, r)), // x - r >= 0 from here
+    x2 = Math.max(x1, Math.min(w, w - r - 1)); // x + r + 1 <= w - 1 below this
+  let y = 0;
+  for (; y + 3 < h; y += 4) {
+    const r0 = y * w,
+      r1 = r0 + w,
+      r2 = r1 + w,
+      r3 = r2 + w;
+    let a0 = 0,
+      a1 = 0,
+      a2 = 0,
+      a3 = 0;
+    for (let k = -r; k <= r; k++) {
+      const c = k < 0 ? 0 : k > w - 1 ? w - 1 : k;
+      a0 += src[r0 + c];
+      a1 += src[r1 + c];
+      a2 += src[r2 + c];
+      a3 += src[r3 + c];
+    }
+    let x = 0;
+    for (; x < x1; x++) {
+      tmp[r0 + x] = a0 * norm;
+      tmp[r1 + x] = a1 * norm;
+      tmp[r2 + x] = a2 * norm;
+      tmp[r3 + x] = a3 * norm;
+      const i = Math.min(w - 1, x + r + 1);
+      a0 += src[r0 + i] - src[r0];
+      a1 += src[r1 + i] - src[r1];
+      a2 += src[r2 + i] - src[r2];
+      a3 += src[r3 + i] - src[r3];
+    }
+    for (; x < x2; x++) {
+      const i = x + r + 1,
+        o = x - r;
+      tmp[r0 + x] = a0 * norm;
+      tmp[r1 + x] = a1 * norm;
+      tmp[r2 + x] = a2 * norm;
+      tmp[r3 + x] = a3 * norm;
+      a0 += src[r0 + i] - src[r0 + o];
+      a1 += src[r1 + i] - src[r1 + o];
+      a2 += src[r2 + i] - src[r2 + o];
+      a3 += src[r3 + i] - src[r3 + o];
+    }
+    for (; x < w; x++) {
+      tmp[r0 + x] = a0 * norm;
+      tmp[r1 + x] = a1 * norm;
+      tmp[r2 + x] = a2 * norm;
+      tmp[r3 + x] = a3 * norm;
+      const o = Math.max(0, x - r);
+      a0 += src[r0 + w - 1] - src[r0 + o];
+      a1 += src[r1 + w - 1] - src[r1 + o];
+      a2 += src[r2 + w - 1] - src[r2 + o];
+      a3 += src[r3 + w - 1] - src[r3 + o];
+    }
+  }
+  for (; y < h; y++) {
     const row = y * w;
-    let acc = 0;
-    for (let k = -r; k <= r; k++) acc += src[row + Math.min(w - 1, Math.max(0, k))];
+    let a = 0;
+    for (let k = -r; k <= r; k++) a += src[row + (k < 0 ? 0 : k > w - 1 ? w - 1 : k)];
     for (let x = 0; x < w; x++) {
-      tmp[row + x] = acc * norm;
-      acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+      tmp[row + x] = a * norm;
+      a += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
     }
   }
-  for (let x = 0; x < w; x++) {
-    let acc = 0;
-    for (let k = -r; k <= r; k++) acc += tmp[Math.min(h - 1, Math.max(0, k)) * w + x];
-    for (let y = 0; y < h; y++) {
-      src[y * w + x] = acc * norm;
-      acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+  // Columns: the same running sum, for every column at once (one double per column, added in the
+  // same order as a column-by-column pass), walking the rows in memory order.
+  acc.fill(0, 0, w);
+  for (let k = -r; k <= r; k++) {
+    const row = (k < 0 ? 0 : k > h - 1 ? h - 1 : k) * w;
+    for (let x = 0; x < w; x++) acc[x] += tmp[row + x];
+  }
+  for (let y = 0; y < h; y++) {
+    const row = y * w,
+      add = Math.min(h - 1, y + r + 1) * w,
+      sub = Math.max(0, y - r) * w;
+    for (let x = 0; x < w; x++) {
+      src[row + x] = acc[x] * norm;
+      acc[x] += tmp[add + x] - tmp[sub + x];
     }
   }
+}
+
+/** Box radius blurLike uses for `sigma`: three boxes of radius r approximate a Gaussian with sigma^2 = r(r+1). Each pass reads r pixels each way. */
+export function boxRadius(sigma: number): number {
+  return Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2));
 }
 
 /** Gaussian-like blur (three box passes) of std. deviation ~sigma. Returns a new array. */
 export function blurLike(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
   const out = src.slice();
   const tmp = new Float32Array(src.length);
-  // Three boxes of radius r approximate a Gaussian with sigma^2 = r(r+1).
-  const r = Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2));
-  for (let pass = 0; pass < 3; pass++) boxBlur(out, w, h, r, tmp);
+  const acc = new Float64Array(w);
+  const r = boxRadius(sigma);
+  for (let pass = 0; pass < 3; pass++) boxBlur(out, w, h, r, tmp, acc);
   return out;
 }
 
@@ -121,24 +192,106 @@ function reduceBand(
  * (van Herk / Gil-Werman). Invalid pixels (valid=0) are ignored (treated as +/- infinity).
  */
 export function slide(src: Float32Array, w: number, h: number, k: number, isMax: boolean, vertical: boolean): Float32Array {
+  if (vertical) return slideColumns(src, w, h, k, isMax);
   const out = new Float32Array(src.length);
   const len = vertical ? h : w,
     lines = vertical ? w : h;
   const win = 2 * k + 1;
-  const g = new Float32Array(len + win),
-    hh = new Float32Array(len + win);
+  const n = len + 2 * k;
+  // (Doubles: the values are all float32 ones, so nothing changes, and no conversions are needed.)
+  const g = new Float64Array(n),
+    hh = new Float64Array(n),
+    v = new Float64Array(n).fill(isMax ? -Infinity : Infinity); // the line, padded k each side
+  const step = vertical ? w : 1,
+    stride = vertical ? 1 : w;
+  for (let line = 0; line < lines; line++) {
+    const base = line * stride;
+    for (let i = 0; i < len; i++) v[k + i] = src[base + i * step];
+    // Running max (or min) from the end of each window-sized block backwards (hh), then from its
+    // start forwards (g), and out of the two: any window spans at most two blocks. (The output
+    // for i needs g at i + 2k, so it trails the forward pass.)
+    const k2 = 2 * k;
+    if (isMax) {
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        hh[e - 1] = v[e - 1];
+        for (let i = e - 2; i >= b; i--) hh[i] = Math.max(hh[i + 1], v[i]);
+      }
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        let m = (g[b] = v[b]);
+        if (b >= k2) out[base + (b - k2) * step] = Math.max(hh[b - k2], m);
+        for (let i = b + 1; i < e; i++) {
+          m = g[i] = Math.max(g[i - 1], v[i]);
+          if (i >= k2) out[base + (i - k2) * step] = Math.max(hh[i - k2], m);
+        }
+      }
+    } else {
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        hh[e - 1] = v[e - 1];
+        for (let i = e - 2; i >= b; i--) hh[i] = Math.min(hh[i + 1], v[i]);
+      }
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        let m = (g[b] = v[b]);
+        if (b >= k2) out[base + (b - k2) * step] = Math.min(hh[b - k2], m);
+        for (let i = b + 1; i < e; i++) {
+          m = g[i] = Math.min(g[i - 1], v[i]);
+          if (i >= k2) out[base + (i - k2) * step] = Math.min(hh[i - k2], m);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** slide down the columns, all columns at once (a row at a time, in memory order). Same result. */
+function slideColumns(src: Float32Array, w: number, h: number, k: number, isMax: boolean): Float32Array {
+  const out = new Float32Array(src.length);
+  const win = 2 * k + 1,
+    k2 = 2 * k;
+  const n = h + k2; // padded rows: row i is the source row i - k
   const pad = isMax ? -Infinity : Infinity;
   const pick = isMax ? Math.max : Math.min;
-  const at = (line: number, i: number) => (vertical ? i * w + line : line * w + i);
-  for (let line = 0; line < lines; line++) {
-    const n = len + 2 * k;
-    const v = (i: number) => {
+  // Backwards from the end of each window-sized block of rows (all of them kept), then forwards
+  // from its start (only the current row kept), each output row trailing by 2k rows.
+  const hh = new Float32Array(n * w),
+    g = new Float32Array(w);
+  for (let b = 0; b < n; b += win) {
+    const e = Math.min(n, b + win);
+    for (let i = e - 1; i >= b; i--) {
+      const j = i - k,
+        r = i * w;
+      if (j < 0 || j >= h) {
+        if (i === e - 1) hh.fill(pad, r, r + w);
+        else for (let x = 0; x < w; x++) hh[r + x] = pick(hh[r + w + x], pad);
+      } else {
+        const s0 = j * w;
+        if (i === e - 1) hh.set(src.subarray(s0, s0 + w), r);
+        else if (isMax) for (let x = 0; x < w; x++) hh[r + x] = Math.max(hh[r + w + x], src[s0 + x]);
+        else for (let x = 0; x < w; x++) hh[r + x] = Math.min(hh[r + w + x], src[s0 + x]);
+      }
+    }
+  }
+  for (let b = 0; b < n; b += win) {
+    const e = Math.min(n, b + win);
+    for (let i = b; i < e; i++) {
       const j = i - k;
-      return j < 0 || j >= len ? pad : src[at(line, j)];
-    };
-    for (let i = 0; i < n; i++) g[i] = i % win === 0 ? v(i) : pick(g[i - 1], v(i));
-    for (let i = n - 1; i >= 0; i--) hh[i] = i === n - 1 || (i + 1) % win === 0 ? v(i) : pick(hh[i + 1], v(i));
-    for (let i = 0; i < len; i++) out[at(line, i)] = pick(hh[i], g[i + 2 * k]);
+      if (j < 0 || j >= h) {
+        if (i === b) g.fill(pad);
+        else for (let x = 0; x < w; x++) g[x] = pick(g[x], pad);
+      } else {
+        const s0 = j * w;
+        if (i === b) g.set(src.subarray(s0, s0 + w));
+        else if (isMax) for (let x = 0; x < w; x++) g[x] = Math.max(g[x], src[s0 + x]);
+        else for (let x = 0; x < w; x++) g[x] = Math.min(g[x], src[s0 + x]);
+      }
+      if (i < k2) continue;
+      const o = (i - k2) * w;
+      if (isMax) for (let x = 0; x < w; x++) out[o + x] = Math.max(hh[o + x], g[x]);
+      else for (let x = 0; x < w; x++) out[o + x] = Math.min(hh[o + x], g[x]);
+    }
   }
   return out;
 }

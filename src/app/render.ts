@@ -8,7 +8,7 @@ import { dom } from "../ui/dom";
 import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
-import { tracked } from "./activity";
+import { noteWork, tracked } from "./activity";
 
 type Draw = (w: number, h: number) => void;
 
@@ -32,7 +32,9 @@ function renderLips(w: number, h: number): void {
     sourceCtx.clearRect(0, 0, w, h);
     drawForDisplay(sourceCtx, w, h);
   }
+  const start = performance.now();
   lipRenderer.render(ctx, sourceCanvas, state.lipData, params, w, h);
+  if (state.sourceMode === "photo") noteWork("lips", performance.now() - start);
 }
 
 function renderSkin(w: number, h: number): void {
@@ -54,6 +56,7 @@ interface AsyncEffect {
   busy: boolean;
   ready: boolean;
   prepare(input: SkinInput): Promise<boolean>;
+  cancel(): void;
 }
 
 /**
@@ -68,6 +71,10 @@ wrinkles.onChange = () => {
 };
 
 function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
+  // A new photo while the last one is still being worked on: stop that work (its result would be
+  // thrown away) so the new one starts now rather than after it. (Live camera frames change all
+  // the time: there the running work is left to finish.)
+  if (effect.dirty && effect.busy && state.sourceMode === "photo") effect.cancel();
   if (effect.dirty && !effect.busy) {
     document.body.dataset.effectsBusy = "1";
     void effect
