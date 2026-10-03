@@ -140,18 +140,35 @@
               <button id="wrinklesSampleBtn" class="ghost-btn">
                 Try a wrinkles test photo
               </button>
-              <div hidden>
-                <input
-                  id="wrinklesSlider"
-                  type="range"
-                  min="0"
-                  max="100"
-                  value="100"
-                /><span id="wrinklesValue"></span
-                ><span id="wrinklesSelection"></span>
+              <div class="area-chips" role="group" aria-label="Treated areas">
+                <button class="area-chip" type="button" data-botox-area="forehead" aria-pressed="true">Forehead</button>
+                <button class="area-chip" type="button" data-botox-area="frown" aria-pressed="true">Frown lines</button>
+                <button class="area-chip" type="button" data-botox-area="crows" aria-pressed="true">Crow's feet</button>
+                <button class="area-chip" type="button" data-botox-area="undereye" aria-pressed="true">Under eyes</button>
+              </div>
+              <div class="control step-control">
+                <div class="row">
+                  <strong>Dose</strong>
+                  <span id="wrinklesValue" class="value">0 U</span>
+                </div>
+                <input id="wrinklesSlider" class="step-slider" aria-label="Botox dose in units" type="range" min="0" max="40" step="2" value="0" />
+                <div class="step-scale">
+                  <div class="step-ticks" aria-hidden="true"><i class="major" style="left:0%"></i><i class="" style="left:5%"></i><i class="" style="left:10%"></i><i class="" style="left:15%"></i><i class="" style="left:20%"></i><i class="major" style="left:25%"></i><i class="" style="left:30%"></i><i class="" style="left:35%"></i><i class="" style="left:40%"></i><i class="" style="left:45%"></i><i class="major" style="left:50%"></i><i class="" style="left:55%"></i><i class="" style="left:60%"></i><i class="" style="left:65%"></i><i class="" style="left:70%"></i><i class="major" style="left:75%"></i><i class="" style="left:80%"></i><i class="" style="left:85%"></i><i class="" style="left:90%"></i><i class="" style="left:95%"></i><i class="major" style="left:100%"></i></div>
+                  <div class="step-stops" role="radiogroup" aria-label="Botox dose presets">
+                    <button class="step-stop" type="button" role="radio" aria-checked="false" data-wrinkles-preset="0" style="left:0%">None</button>
+                    <button class="step-stop" type="button" role="radio" aria-checked="false" data-wrinkles-preset="10" style="left:25%">10 U</button>
+                    <button class="step-stop" type="button" role="radio" aria-checked="false" data-wrinkles-preset="20" style="left:50%">20 U</button>
+                    <button class="step-stop" type="button" role="radio" aria-checked="false" data-wrinkles-preset="30" style="left:75%">30 U</button>
+                    <button class="step-stop" type="button" role="radio" aria-checked="false" data-wrinkles-preset="40" style="left:100%">40 U</button>
+                  </div>
+                </div>
+                <span id="wrinklesSelection" hidden></span>
               </div>
               <div id="wrinklesStatus" class="small-note">
                 Compare Before and After to preview smoother skin.
+              </div>
+              <div class="small-note">
+                Illustrative simulation only. Doses and results vary by person and clinician.
               </div>
             </section>
             <section
@@ -247,20 +264,20 @@
             >
               <div class="eyebrow">LIPS</div>
               <h3>Filler (lips)</h3>
-              <div class="control ml-control">
+              <div class="control step-control">
                 <div class="row">
                   <strong>Volume</strong>
                   <span id="lipValue" class="value">0 ml</span>
                 </div>
-                <input id="lipSlider" class="ml-slider" aria-label="Filler volume in ml" type="range" min="0" max="4" step="0.25" value="0" />
-                <div class="ml-scale">
-                  <div class="ml-ticks" aria-hidden="true"><i class="major" style="left:0%"></i><i class="" style="left:6.25%"></i><i class="" style="left:12.5%"></i><i class="" style="left:18.75%"></i><i class="major" style="left:25%"></i><i class="" style="left:31.25%"></i><i class="" style="left:37.5%"></i><i class="" style="left:43.75%"></i><i class="major" style="left:50%"></i><i class="" style="left:56.25%"></i><i class="" style="left:62.5%"></i><i class="" style="left:68.75%"></i><i class="major" style="left:75%"></i><i class="" style="left:81.25%"></i><i class="" style="left:87.5%"></i><i class="" style="left:93.75%"></i><i class="major" style="left:100%"></i></div>
-                  <div class="ml-stops" role="radiogroup" aria-label="Filler volume presets">
-                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="0" style="left:0%">None</button>
-                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="1" style="left:25%">1 ml</button>
-                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="2" style="left:50%">2 ml</button>
-                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="3" style="left:75%">3 ml</button>
-                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="4" style="left:100%">4 ml</button>
+                <input id="lipSlider" class="step-slider" aria-label="Filler volume in ml" type="range" min="0" max="4" step="0.25" value="0" />
+                <div class="step-scale">
+                  <div class="step-ticks" aria-hidden="true"><i class="major" style="left:0%"></i><i class="" style="left:6.25%"></i><i class="" style="left:12.5%"></i><i class="" style="left:18.75%"></i><i class="major" style="left:25%"></i><i class="" style="left:31.25%"></i><i class="" style="left:37.5%"></i><i class="" style="left:43.75%"></i><i class="major" style="left:50%"></i><i class="" style="left:56.25%"></i><i class="" style="left:62.5%"></i><i class="" style="left:68.75%"></i><i class="major" style="left:75%"></i><i class="" style="left:81.25%"></i><i class="" style="left:87.5%"></i><i class="" style="left:93.75%"></i><i class="major" style="left:100%"></i></div>
+                  <div class="step-stops" role="radiogroup" aria-label="Filler volume presets">
+                  <button class="step-stop" type="button" role="radio" aria-checked="false" data-lip-preset="0" style="left:0%">None</button>
+                  <button class="step-stop" type="button" role="radio" aria-checked="false" data-lip-preset="1" style="left:25%">1 ml</button>
+                  <button class="step-stop" type="button" role="radio" aria-checked="false" data-lip-preset="2" style="left:50%">2 ml</button>
+                  <button class="step-stop" type="button" role="radio" aria-checked="false" data-lip-preset="3" style="left:75%">3 ml</button>
+                  <button class="step-stop" type="button" role="radio" aria-checked="false" data-lip-preset="4" style="left:100%">4 ml</button>
                   </div>
                 </div>
               </div>

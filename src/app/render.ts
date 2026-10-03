@@ -3,7 +3,7 @@
 import { needsWarp } from "../effects/lips/renderer";
 import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
 import type { SkinInput } from "../effects/skin/input";
-import { readLipParams } from "../ui/controls";
+import { readBotoxDoses, readLipParams } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
@@ -61,6 +61,12 @@ interface AsyncEffect {
  * result for the current input is ready to draw; when one arrives later the stage redraws itself.
  * `body[data-effects-busy]` is set meanwhile, so tests can wait for the final picture.
  */
+// Layers for a newly chosen set of botox areas arrive asynchronously: redraw then.
+wrinkles.onChange = () => {
+  if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
+  renderAll();
+};
+
 function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
   if (effect.dirty && !effect.busy) {
     document.body.dataset.effectsBusy = "1";
@@ -68,7 +74,7 @@ function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
       .prepare(skinInput(w, h))
       .catch((err) => console.error("effect preparation failed", err))
       .finally(() => {
-        if (!acne.busy && !wrinkles.busy) delete document.body.dataset.effectsBusy;
+        if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
         renderAll();
       });
   }
@@ -85,8 +91,9 @@ function renderWrinkles(w: number, h: number): void {
     return;
   }
   status.textContent = "Compare Before and After to preview smoother skin.";
-  const amount = Number(dom.wrinklesSlider.value) / 100;
-  if (amount <= 0 && !dom.skinDebug.checked) return;
+  const doses = readBotoxDoses();
+  const any = Object.values(doses).some((d) => d > 0);
+  if (!any && !dom.skinDebug.checked) return;
   const ready = ensurePrepared(wrinkles, w, h);
   // Photos: draw the native photo first. Camera frames are already on the stage.
   if (state.sourceMode === "photo") {
@@ -95,7 +102,7 @@ function renderWrinkles(w: number, h: number): void {
     drawForDisplay(ctx, w, h);
     ctx.restore();
   }
-  if (ready) wrinkles.draw(ctx, w, h, amount);
+  if (ready) wrinkles.draw(ctx, doses);
 }
 
 function renderAcne(w: number, h: number): void {
@@ -128,7 +135,7 @@ const effectRender: Partial<Record<ModuleId, Draw>> = {
 };
 
 const effectActive: Record<ServiceId, () => boolean> = {
-  wrinkles: () => Number(dom.wrinklesSlider.value) > 0,
+  wrinkles: () => Object.values(readBotoxDoses()).some((d) => d > 0),
   acne: () =>
     Number(dom.acneSlider.value) > 0 ||
     Number(dom.scarsSlider.value) > 0 ||

@@ -1,0 +1,4 @@
+# Botox: lines found and softened per area (forehead, frown lines, crow's feet), dose in units
+wrinkles-20u
+wrinkles-40u
+wrinkles-forehead-40u

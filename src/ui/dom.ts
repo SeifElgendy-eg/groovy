@@ -76,4 +76,5 @@ export const dom = {
   finishButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-finish]")],
   acnePresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-acne-preset]")],
   wrinklesPresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-wrinkles-preset]")],
+  botoxAreaButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-botox-area]")],
 };

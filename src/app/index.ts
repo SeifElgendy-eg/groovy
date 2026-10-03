@@ -9,6 +9,7 @@ import {
   syncFinishButtons,
   syncShadeButtons,
   syncWrinklesPreset,
+  syncBotoxAreas,
 } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { mountFaceGuide } from "../ui/faceGuide";
@@ -67,7 +68,9 @@ function setShade(name: string, hex: string): void {
 
 function resetAll(): void {
   dom.skinDebug.checked = false;
-  dom.wrinklesSlider.value = "100";
+  dom.wrinklesSlider.value = "0";
+  for (const btn of dom.botoxAreaButtons) btn.setAttribute("aria-pressed", "true");
+  syncBotoxAreas();
   syncWrinklesPreset();
   for (const slider of [dom.acneSlider, dom.scarsSlider, dom.poresSlider, dom.rednessSlider]) slider.value = "0";
   syncAcnePreset();
@@ -123,6 +126,16 @@ function bindControls(): void {
     btn.addEventListener("click", () => {
       dom.wrinklesSlider.value = btn.dataset.wrinklesPreset!;
       syncWrinklesPreset();
+      userChanged();
+    });
+  // Botox areas: toggles (at least one stays on).
+  for (const btn of dom.botoxAreaButtons)
+    btn.addEventListener("click", () => {
+      const on = btn.getAttribute("aria-pressed") === "true";
+      const others = dom.botoxAreaButtons.filter((b) => b !== btn && b.getAttribute("aria-pressed") === "true");
+      if (on && !others.length) return;
+      btn.setAttribute("aria-pressed", String(!on));
+      syncBotoxAreas();
       userChanged();
     });
   dom.skinDebug.addEventListener("change", userChanged);
