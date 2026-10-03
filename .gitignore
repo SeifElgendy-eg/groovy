@@ -3,3 +3,4 @@ dist/
 tests/golden/out/
 tests/golden/out-base/
 release/
+tests/golden/golden-images/

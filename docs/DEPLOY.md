@@ -13,8 +13,20 @@ This runs the type check and `vite build`, checks that every offline asset is pr
 - `release/Groovy-Windows/` - the folder to copy to the laptop
 - `release/Groovy-Windows.zip` - the same, zipped
 
-Every push also builds this zip on GitHub Actions (workflow **windows-package**). Open the run,
-download the **Groovy-Windows** artifact, and unzip it on the laptop.
+Every push also builds this zip on GitHub Actions (workflow **windows-package**) and test-starts
+the launcher on Windows. Open the run, download the **Groovy-Windows** artifact (kept 30 days), and
+unzip it on the laptop.
+
+For a version to keep, push a tag: `git tag v1.2.0 && git push origin v1.2.0`. The same workflow
+then publishes the zip as a GitHub **release** (Releases page), which does not expire.
+
+## Checks on every PR (workflow **ci**)
+
+- **Type check, build, unit tests**: `npm run build`, `npm test`.
+- **Golden images**: `npm run golden` renders every scenario with the PR's base and with the PR on
+  the same machine and compares them (no reference images are stored). Intentional visual changes
+  are listed in `tests/golden/expected-changes/<branch>.txt`.
+- **UI smoke test**: `npm run smoke` (service switching, reset, debug overlay, live camera).
 
 ## On the laptop
 

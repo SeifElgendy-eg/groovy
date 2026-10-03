@@ -1,0 +1,12 @@
+# Keeps the GitHub Actions used by the workflows up to date (one grouped PR a month).
+# npm packages are pinned on purpose (MediaPipe models and wasm ship with the kiosk) and are
+# updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
