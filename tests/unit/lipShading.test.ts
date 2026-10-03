@@ -30,8 +30,32 @@ describe("lip volume shading", () => {
     const gloss = spots.find((s) => s.kind === "light" && s.region === "lips" && s.cy > 300)!;
     expect(gloss.cy).toBeGreaterThan(303);
     expect(gloss.cy).toBeLessThan(370);
-    const shadow = spots.find((s) => s.kind === "shadow")!;
+    const shadow = spots.filter((s) => s.kind === "shadow").sort((a, b) => b.cy - a.cy)[0];
     expect(shadow.region).toBe("skin");
     expect(shadow.cy).toBeGreaterThan(370);
+  });
+});
+
+import { glintAlpha } from "../../src/effects/lips/shading";
+
+describe("gloss glints", () => {
+  const w = 60, h = 40;
+  /** Lip with bright vertical ridges every 6 px. */
+  const px = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const v = x % 6 === 0 ? 200 : 150;
+      px.set([v, v * 0.6, v * 0.6, 255], (y * w + x) * 4);
+    }
+  const spot = { cx: 30, cy: 20, rx: 25, ry: 15, angle: 0 };
+
+  it("follows the lip's own ridges (broken highlight, not a blob)", () => {
+    const a = glintAlpha(px, w, h, spot, 1);
+    expect(a[20 * w + 30]).toBeGreaterThan(a[20 * w + 32] + 40); // ridge vs between ridges
+  });
+
+  it("is zero outside the gloss area and without filler", () => {
+    expect(glintAlpha(px, w, h, spot, 1)[2 * w + 2]).toBe(0);
+    expect(Math.max(...glintAlpha(px, w, h, spot, 0))).toBe(0);
   });
 });

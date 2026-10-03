@@ -7,7 +7,7 @@ import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
 import { SNAP_REACH, snapLipOutline } from "./lipMask";
-import { lipShading } from "./shading";
+import { borderLight, glintAlpha, lipShading, type ShadeSpot } from "./shading";
 
 function scratch(read = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -23,6 +23,7 @@ export class LipRenderer {
   /** The frame's warp ROI (input), and the CPU fallback's output. */
   private roiFrame = scratch();
   private warped = scratch();
+  private glint = scratch();
   /** Created on first use; null when WebGL2 is unavailable. */
   private gl: GlWarp | null | undefined;
 
@@ -100,6 +101,62 @@ export class LipRenderer {
       target.fillRect(-1, -1, 2, 2);
       target.restore();
     }
+    // The light line along the upper border: one soft stroke, fading toward the corners.
+    const line = borderLight(outer, inner, Math.min(1, p.amount / 0.55));
+    if (line.alpha > 0) {
+      const a = line.points[0],
+        z = line.points[line.points.length - 1];
+      const g = target.createLinearGradient(a.x, a.y, z.x, z.y);
+      g.addColorStop(0, "rgba(255,250,245,0)");
+      g.addColorStop(0.3, `rgba(255,250,245,${line.alpha})`);
+      g.addColorStop(0.7, `rgba(255,250,245,${line.alpha})`);
+      g.addColorStop(1, "rgba(255,250,245,0)");
+      target.save();
+      target.beginPath();
+      target.rect(b.minX - b.width, b.minY - b.width, b.width * 3, b.height + b.width * 2);
+      addClosedContour(target, outer);
+      target.clip("evenodd");
+      target.globalCompositeOperation = "screen";
+      target.filter = `blur(${line.blur}px)`;
+      target.strokeStyle = g;
+      target.lineWidth = line.width;
+      target.lineCap = "round";
+      target.lineJoin = "round";
+      target.beginPath();
+      line.points.forEach((q, i) => (i ? target.lineTo(q.x, q.y) : target.moveTo(q.x, q.y)));
+      target.stroke();
+      target.restore();
+    }
+    this.gloss(target, outer, inner, spots[0], Math.min(1, p.amount / 0.55));
+  }
+
+  /** Gloss glints on the lower lip (see glintAlpha), drawn as light, on the lips only. */
+  private gloss(target: CanvasRenderingContext2D, outer: Point[], inner: Point[], sheen: ShadeSpot, strength: number): void {
+    const r = Math.ceil(Math.max(sheen.rx, sheen.ry)) + 2;
+    const x = Math.max(0, Math.floor(sheen.cx - r)),
+      y = Math.max(0, Math.floor(sheen.cy - r));
+    const w = Math.min(target.canvas.width - x, 2 * r),
+      h = Math.min(target.canvas.height - y, 2 * r);
+    if (w < 4 || h < 4) return;
+    const img = target.getImageData(x, y, w, h);
+    const alpha = glintAlpha(img.data, w, h, { ...sheen, cx: sheen.cx - x, cy: sheen.cy - y, ry: sheen.ry * 0.85 }, strength);
+    for (let p = 0; p < alpha.length; p++) {
+      img.data[p * 4] = 255;
+      img.data[p * 4 + 1] = 252;
+      img.data[p * 4 + 2] = 248;
+      img.data[p * 4 + 3] = alpha[p];
+    }
+    const { canvas, ctx } = this.glint;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.putImageData(img, 0, 0);
+    target.save();
+    target.beginPath();
+    addClosedContour(target, outer);
+    addClosedContour(target, inner);
+    target.clip("evenodd");
+    target.drawImage(canvas, x, y);
+    target.restore();
   }
 
   /** Create the WebGL context and compile the shader now, not on the customer's first move. */

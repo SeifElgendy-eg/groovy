@@ -22,7 +22,15 @@ export interface ShadeSpot {
 }
 
 /** Peak strengths at full volume. */
-export const SHADE = { lowerGloss: 0.3, upperGloss: 0.2, borderLight: 0.16, underShadow: 0.5 };
+export const SHADE = {
+  lowerGloss: 0.3,
+  upperGloss: 0.2,
+  borderLight: 0.24,
+  underShadow: 0.6,
+  /** The upper lip turning inward toward the lip line, and the lower lip rolling away at its edge. */
+  upperTuck: 0.28,
+  lowerEdge: 0.16,
+};
 
 /**
  * Shading spots for grown lips. `outer` is the grown outline and `inner` the mouth opening (20
@@ -53,11 +61,90 @@ export function lipShading(outer: Point[], inner: Point[], strength: number): Sh
   const lowerBody = along(inner[15], outer[15], 0.45);
   const upperBody = along(inner[5], outer[5], 0.55);
   const under = { x: outer[15].x + nx * lowerH * 0.32, y: outer[15].y + ny * lowerH * 0.32 };
-  const peaks = [outer[4], outer[6]].map((q) => ({ x: q.x - nx * upperH * 0.14, y: q.y - ny * upperH * 0.14 }));
+  const tuck = along(inner[5], outer[5], 0.12);
+  const lowerRim = along(inner[15], outer[15], 0.9);
   return [
     spot(lowerBody, width * 0.2, lowerH * 0.32, "light", SHADE.lowerGloss, "lips"),
     spot(upperBody, width * 0.11, upperH * 0.3, "light", SHADE.upperGloss, "lips"),
-    ...peaks.map((q) => spot(q, width * 0.1, Math.max(1.5, upperH * 0.14), "light", SHADE.borderLight, "skin")),
+    spot(tuck, width * 0.3, upperH * 0.28, "shadow", SHADE.upperTuck, "lips"),
+    spot(lowerRim, width * 0.22, lowerH * 0.22, "shadow", SHADE.lowerEdge, "lips"),
     spot(under, width * 0.24, lowerH * 0.38, "shadow", SHADE.underShadow, "skin"),
   ];
+}
+
+/** The light line just above the upper border (the "white roll" catching light), as a path. */
+export function borderLight(outer: Point[], inner: Point[], strength: number) {
+  const s = Math.max(0, Math.min(1, strength));
+  const upperH = Math.hypot(outer[5].x - inner[5].x, outer[5].y - inner[5].y);
+  const angle = Math.atan2(outer[10].y - outer[0].y, outer[10].x - outer[0].x);
+  let nx = Math.sin(angle),
+    ny = -Math.cos(angle); // toward the nose
+  if ((outer[5].x - inner[5].x) * nx + (outer[5].y - inner[5].y) * ny < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const off = upperH * 0.1;
+  return {
+    points: outer.slice(1, 10).map((q) => ({ x: q.x + nx * off, y: q.y + ny * off })),
+    width: Math.max(1.5, upperH * 0.16),
+    blur: Math.max(0.5, upperH * 0.06),
+    alpha: SHADE.borderLight * s,
+  };
+}
+
+/** Gloss glints at full volume: how strongly the lip's own bright texture is lifted. */
+export const GLINT = { gain: 5, base: 0.06, max: 0.6 };
+
+/**
+ * Gloss glints: lip gloss catches light on the lip's own ridges, so the highlight is broken and
+ * follows the lip lines rather than being a smooth blob. Returns a 0..255 alpha (to draw as white
+ * light) for an RGBA region: pixels brighter than their neighbourhood (box radius `r`), weighted
+ * by the soft ellipse `spot` (in the region's own coordinates).
+ */
+export function glintAlpha(
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  spot: { cx: number; cy: number; rx: number; ry: number; angle: number },
+  strength: number,
+  r = 3,
+): Uint8ClampedArray {
+  const n = w * h;
+  const lum = new Float32Array(n);
+  for (let p = 0; p < n; p++) lum[p] = (0.2126 * pixels[p * 4] + 0.7152 * pixels[p * 4 + 1] + 0.0722 * pixels[p * 4 + 2]) / 255;
+  // Local mean (separable box).
+  const tmp = new Float32Array(n),
+    mean = new Float32Array(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let a = 0,
+        c = 0;
+      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++, c++) a += lum[y * w + k];
+      tmp[y * w + x] = a / c;
+    }
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let a = 0,
+        c = 0;
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++, c++) a += tmp[k * w + x];
+      mean[y * w + x] = a / c;
+    }
+  const cos = Math.cos(spot.angle),
+    sin = Math.sin(spot.angle);
+  const s = Math.max(0, Math.min(1, strength));
+  const out = new Uint8ClampedArray(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const dx = x + 0.5 - spot.cx,
+        dy = y + 0.5 - spot.cy;
+      const u = (dx * cos + dy * sin) / spot.rx,
+        v = (-dx * sin + dy * cos) / spot.ry;
+      const d2 = u * u + v * v;
+      if (d2 >= 1) continue;
+      const fall = (1 - d2) * (1 - d2);
+      const p = y * w + x;
+      const ridge = Math.max(0, lum[p] - mean[p]) * GLINT.gain;
+      out[p] = Math.round(Math.min(GLINT.max, ridge + GLINT.base) * fall * s * 255);
+    }
+  return out;
 }
