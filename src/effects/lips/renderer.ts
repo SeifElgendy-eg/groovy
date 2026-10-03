@@ -146,7 +146,8 @@ export class LipRenderer {
     featherCanvas.width = roi.w;
     featherCanvas.height = roi.h;
     const mouthWidth = boundsOfPoints(targetOuter).width;
-    f.filter = `blur(${Math.max(0.35, mouthWidth * (0.002 + blend * 0.004))}px)`;
+    // Soft edge, like real lipstick fading into the skin (Edge Blend 0..1 sets how soft).
+    f.filter = `blur(${Math.max(0.5, mouthWidth * (0.006 + blend * 0.014))}px)`;
     f.drawImage(maskCanvas, 0, 0);
     f.filter = "none";
     return f.getImageData(0, 0, roi.w, roi.h).data;
