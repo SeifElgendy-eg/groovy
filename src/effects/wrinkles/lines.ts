@@ -62,7 +62,7 @@ export const MAX_SOFTEN = 1;
 /** Share of the raised ridge between deep lines lowered at full dose (the fold's other half). */
 export const RIDGE_FLATTEN = 0.95;
 /** Ridges brighter than this above the skin are shine; only this much of them is lowered. */
-export const RIDGE_CAP = 35;
+export const RIDGE_CAP = 50;
 /** Share of the mid band (crepey texture between lines) softened at full dose. */
 export const TEXTURE_SOFTEN = 0.95;
 /** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
@@ -72,15 +72,17 @@ export const GRAIN_REPLACE = 0.65;
 /** How much of the photo's own fine detail is dropped where it is line-shaped (0..1). */
 export const PORE_LINE_DROP = 0.8;
 /** Share of the skin's mid-scale relief kept away from the lines. */
-export const MID_KEEP = 0.6;
+export const MID_KEEP = 0.4;
 /** Largest lift of a line (levels). */
-export const MAX_LIFT = 45;
+export const MAX_LIFT = 80;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
 export const MIN_DEPTH: [number, number] = [3, 8];
 /** A line within this angle of the area's expected direction is fully treated (degrees)... */
 export const DIRECTION_TOLERANCE = 25;
 /** ...falling to nothing at this angle. */
 export const DIRECTION_LIMIT = 50;
+/** Darkness of a spot's centre below the skin around it (levels) from which it counts as a freckle or mole. */
+export const SPOT_DARK: [number, number] = [3, 6];
 
 const smoothstep = (e0: number, e1: number, x: number) => {
   if (e1 === e0) return x < e0 ? 0 : 1;
@@ -227,7 +229,7 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Each stage is its own function, so its working arrays are freed when it returns (a 4K
   // photo's face crop needs a lot of them).
   const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, lumBlur, mask, geoms, w, h, fw);
-  const { spotNear, spotRef } = spotProtection(spots, strength, mask, geoms, w, h, fw);
+  const { roundNear, spotNear, spotRef } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
   const around = lumBlur(Math.max(3, fw * 0.02));
@@ -352,7 +354,7 @@ export function linesCompute(j: LinesJob): LinesResult {
         // Not a line where anything round is (deliberately broader than spotFree, which decides
         // what keeps its own pixels): lash tips crossing the lid line and similar dots must never
         // count as line, or the lid's lashes get painted over (unit test).
-        const notSpot = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] + spotNear[p]));
+        const notSpot = 1 - smoothstep(0.35, 0.7, roundNear[p] / Math.max(1e-6, strength[p] + roundNear[p]));
         const isLine = smoothstep(0.12, 0.45, strength[p] / Math.max(1e-6, ref)) * notSpot;
         weight[(y - oy) * sw + x - ox] = isLine * dw * zw * m;
       }
@@ -385,16 +387,23 @@ export function linesCompute(j: LinesJob): LinesResult {
     // Bright ridges and shine are clipped too, so the skin level is the plain skin's (else a
     // ridge measures less raised than it is).
     const keep = new Float32Array(sn),
-      keepLum = new Float32Array(sn);
+      keepLum = new Float32Array(sn),
+      baseW = new Float32Array(sn),
+      baseL = new Float32Array(sn);
     for (let y = 0; y < sh; y++)
       for (let x = 0; x < sw; x++) {
         const q = y * sw + x,
           p = (y + oy) * w + x + ox;
         keep[q] = 1 - Math.min(1, cover[q]);
         keepLum[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * keep[q];
+        // The plain skin level leaves out anything clearly darker than the skin around it too
+        // (stray hair at the hairline, crease remnants), so it never pulls the skin down.
+        const plainHere = lum[p] >= around[p] - MIN_DEPTH[1] ? keep[q] : 0;
+        baseW[q] = plainHere;
+        baseL[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * plainHere;
       }
-    const baseNum = blurLike(keepLum, sw, sh, sb),
-      baseDen = blurLike(keep, sw, sh, sb);
+    const baseNum = blurLike(baseL, sw, sh, sb),
+      baseDen = blurLike(baseW, sw, sh, sb);
     const num = blurLike(keepLum, sw, sh, sig),
       den = blurLike(keep, sw, sh, sig);
     // Next to lines (within a fold's width), the raised ridges between them: lowering those is
@@ -481,7 +490,8 @@ export function linesCompute(j: LinesJob): LinesResult {
         if (looseSoft > 0 && m > 0) {
           // Never below the area's own average: botox never darkens skin (dark circles stay as
           // they are rather than turning darker or blotchy).
-          const base = Math.max(lowBand[p], baseDen[q] > 0.05 ? baseNum[q] / baseDen[q] : lowBand[p]);
+          const avg = baseDen[q] > 0.05 ? baseNum[q] / baseDen[q] : lowBand[p];
+          const base = id === "undereye" ? Math.max(lowBand[p], avg) : avg;
           // The skin's own pores and grain stay wherever they do not trace a line: off the lines
           // themselves, and where the fine detail is round or random rather than long. Only on the
           // lines is the detail replaced (it traces the creases there).
@@ -585,7 +595,17 @@ function lineMeasures(lum: Float32Array, lumBlur: (sigma: number) => Float32Arra
  * face's typical spot response. Round dark spots light up the line measure on their rims; each spot
  * is found by its centre (which curves both ways) and protected over its whole extent.
  */
-function spotProtection(spots: Float32Array, strength: Float32Array, mask: Pixels, geoms: ZoneGeom[], w: number, h: number, fw: number) {
+function spotProtection(
+  spots: Float32Array,
+  strength: Float32Array,
+  lum: Float32Array,
+  lumBlur: (sigma: number) => Float32Array,
+  mask: Pixels,
+  geoms: ZoneGeom[],
+  w: number,
+  h: number,
+  fw: number,
+) {
   const n = w * h;
   const spotR = Math.max(2, Math.round(fw * 0.008));
   // A freckle or mole stands alone; where several lines meet (crow's feet at the eye corner) the
@@ -602,12 +622,19 @@ function spotProtection(spots: Float32Array, strength: Float32Array, mask: Pixel
   }
   const ringNum = blurLike(ringLine, w, h, spotR * 3),
     ringDen = blurLike(ringKeep, w, h, spotR * 3);
-  const isolated = new Float32Array(n);
+  const surround = lumBlur(spotR * 2),
+    core = lumBlur(Math.max(0.5, fw * 0.0014));
+  const isolated = new Float32Array(n),
+    darkSpots = new Float32Array(n);
   for (let p = 0; p < n; p++) {
     const around = ringDen[p] > 1e-3 ? ringNum[p] / ringDen[p] : 0;
     isolated[p] = spots[p] * (1 - smoothstep(0.25, 0.6, around));
+    // A freckle or mole is also clearly darker than the skin around it; pores and grain are only
+    // a little darker (counting them kept dark crease remnants and grain all over the forehead).
+    darkSpots[p] = isolated[p] * smoothstep(SPOT_DARK[0], SPOT_DARK[1], surround[p] - core[p]);
   }
-  return { spotNear: slide(slide(isolated, w, h, spotR, true, false), w, h, spotR, true, true), spotRef };
+  const near = (v: Float32Array) => slide(slide(v, w, h, spotR, true, false), w, h, spotR, true, true);
+  return { roundNear: near(isolated), spotNear: near(darkSpots), spotRef };
 }
 
 /**
@@ -763,7 +790,8 @@ function toLayers(
     const sl = 0.2126 * skin[0][p] + 0.7152 * skin[1][p] + 0.0722 * skin[2][p];
     // Lifted creases take the skin's colour; lowered ridges (often shine) mostly keep their own.
     // Creases are redder than the skin around them: even small lifts take most of its colour.
-    let a = f > 0 ? Math.min(0.55, f / 8) : Math.min(0.5, -f / 30);
+    // (A deep fold lifted far takes the skin's colour fully: its own, scaled up, turns orange.)
+    let a = f > 0 ? Math.min(f / 8, 0.55 + 0.4 * smoothstep(20, 60, f)) : Math.min(0.5, -f / 30);
     // Main areas: the colour is the plain skin's too, so a removed fold leaves no tinted trace.
     a = Math.max(a, recolour[q] * 0.85);
     for (let c = 0; c < 3; c++) {
