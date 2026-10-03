@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../src/core/types";
-import { computeLipTargets, type LipData, type LipParams } from "../../src/effects/lips/geometry";
+import { computeLipTargets, mlToAmount, type LipData, type LipParams } from "../../src/effects/lips/geometry";
 import {
   buildMesh,
   densify,
@@ -38,7 +38,7 @@ const params = (amount: number, roll = 0.6): LipParams => ({
 
 describe("lip warp field", () => {
   const lip = mouth();
-  const p = params(0.55, 1);
+  const p = params(mlToAmount(4), 1); // the most extreme setting: 4 ml at full Lip Roll
   const { targetOuter } = computeLipTargets(lip, p);
   const mesh = buildMesh(lip, targetOuter, p);
   const roi = warpRoi(mesh, 2000, 2000);

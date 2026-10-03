@@ -48,12 +48,6 @@ function bindSlider(
   });
 }
 
-const lipPresetDefaults: Record<string, { roll: number; blend: number }> = {
-  16: { roll: 60, blend: 55 },
-  28: { roll: 84, blend: 57 },
-  50: { roll: 76, blend: 55 },
-  55: { roll: 80, blend: 55 },
-};
 
 function setShade(name: string, hex: string): void {
   state.selectedShade = name;
@@ -82,7 +76,6 @@ function resetAll(): void {
   dom.verticalSlider.value = "60";
   dom.blendSlider.value = "55";
   dom.colorSlider.value = "0";
-  dom.lipValue.textContent = "0%";
   dom.verticalValue.textContent = "60%";
   dom.blendValue.textContent = "55%";
   dom.colorValue.textContent = "0%";
@@ -159,15 +152,8 @@ function bindControls(): void {
   // Lips
   for (const btn of dom.lipPresetButtons)
     btn.addEventListener("click", () => {
+      // A preset sets the volume in ml only; Lip Roll and Edge Blend keep the user's choice.
       dom.lipSlider.value = btn.dataset.lipPreset!;
-      showPercent(dom.lipValue, dom.lipSlider);
-      const defaults = lipPresetDefaults[btn.dataset.lipPreset!];
-      if (defaults) {
-        dom.verticalSlider.value = String(defaults.roll);
-        dom.blendSlider.value = String(defaults.blend);
-        showPercent(dom.verticalValue, dom.verticalSlider);
-        showPercent(dom.blendValue, dom.blendSlider);
-      }
       syncLipPreset();
       userChanged();
     });
@@ -181,7 +167,7 @@ function bindControls(): void {
       syncFinishButtons();
       userChanged();
     });
-  bindSlider(dom.lipSlider, dom.lipValue, syncLipPreset);
+  bindSlider(dom.lipSlider, null, syncLipPreset);
   bindSlider(dom.verticalSlider, dom.verticalValue);
   bindSlider(dom.blendSlider, dom.blendValue);
   bindSlider(dom.colorSlider, dom.colorValue, () => {

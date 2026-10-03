@@ -3,6 +3,7 @@
 import type { LipParams } from "../effects/lips/geometry";
 import { state } from "../app/state";
 import { matchAcnePreset, type AcnePlan } from "../effects/acne/presets";
+import { mlToAmount } from "../effects/lips/geometry";
 import { dom } from "./dom";
 
 export function showPercent(label: HTMLElement, slider: HTMLInputElement): void {
@@ -67,8 +68,12 @@ export function syncAcnePreset(): void {
   dom.acneSelection.textContent = `Selected: ${label.trim()} · ${plan.spots}%`;
 }
 
+/** "2.5 ml" */
+export const formatMl = (v: number): string => `${Number(v.toFixed(2))} ml`;
+
 export function syncLipPreset(): void {
   const v = Number(dom.lipSlider.value);
+  dom.lipValue.textContent = formatMl(v);
   for (const btn of dom.lipPresetButtons) {
     btn.classList.toggle("active", Number(btn.dataset.lipPreset) === v);
   }
@@ -90,7 +95,7 @@ export function syncShadeButtons(): void {
 
 export function readLipParams(): LipParams {
   return {
-    amount: Number(dom.lipSlider.value) / 100,
+    amount: mlToAmount(Number(dom.lipSlider.value)),
     roll: Number(dom.verticalSlider.value) / 100,
     blend: Number(dom.blendSlider.value) / 100,
     colorIntensity: Number(dom.colorSlider.value) / 100,

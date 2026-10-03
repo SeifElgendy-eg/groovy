@@ -53,6 +53,14 @@ export function buildLipData(
  */
 export const FILLED_RATIO = 1.3;
 
+/** The filler control is in ml: 0..ML_MAX, each ml adding the same volume. */
+export const ML_MAX = 4;
+/** Internal amount per ml (calibrated so 4 ml at the default Lip Roll matches the clinic ladder). */
+export const AMOUNT_PER_ML = 0.18;
+export const mlToAmount = (ml: number): number => Math.max(0, Math.min(ML_MAX, ml)) * AMOUNT_PER_ML;
+/** 0..1 filler level (0 = none, 1 = ML_MAX), for effects that scale with it (shading). */
+export const fillerLevel = (amount: number): number => Math.max(0, Math.min(1, amount / (ML_MAX * AMOUNT_PER_ML)));
+
 /** Volume per unit of filler level, as a share of each lip's own height (before steering). */
 const GROWTH = 0.55;
 /** Largest growth per unit level, as a share of mouth width: upper, lower (no droop). */
@@ -99,9 +107,12 @@ export function transformOuterLip(
     const shape = upper
       ? 0.72 + 0.4 * (bump(t, 0.36, 0.12) + bump(t, 0.64, 0.12))
       : 0.75 + 0.3 * (bump(t, 0.38, 0.15) + bump(t, 0.62, 0.15));
-    const growth =
+    // Hard ceiling on top of everything (4 ml with Lip Roll at maximum stays believable).
+    const growth = Math.min(
       Math.min(heightAt(i) * GROWTH * (upper ? bias.upper : bias.lower), width * (upper ? CAP.upper : CAP.lower)) *
-      level * edge * shape * roll;
+        level * edge * shape * roll,
+      width * (upper ? 0.12 : 0.13),
+    );
     const side = (t < 0.5 ? -1 : 1) * (upper ? 1 : -1);
     const spread = width * level * 0.01 * edge * Math.abs(2 * t - 1) * side;
     return {

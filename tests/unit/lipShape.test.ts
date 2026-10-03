@@ -63,3 +63,25 @@ describe("lip filler shape", () => {
     expect(crossSection(1, rho)).toBeCloseTo(1, 9);
   });
 });
+
+import { fillerLevel, ML_MAX, mlToAmount } from "../../src/effects/lips/geometry";
+
+describe("filler in ml", () => {
+  it("each ml adds the same amount, and 4 ml is the full level", () => {
+    const steps = [1, 2, 3, 4].map((ml) => mlToAmount(ml) - mlToAmount(ml - 1));
+    steps.forEach((s) => expect(s).toBeCloseTo(steps[0], 9));
+    expect(fillerLevel(mlToAmount(ML_MAX))).toBe(1);
+    expect(fillerLevel(mlToAmount(0))).toBe(0);
+    expect(mlToAmount(9)).toBe(mlToAmount(ML_MAX));
+  });
+
+  it("lips get fuller with every ml", () => {
+    const m = mouth(40, 64);
+    let last = 0;
+    for (const ml of [1, 2, 3, 4]) {
+      const h = heights(transformOuterLip(m.outer, m.inner, mlToAmount(ml), 0.6), m.inner);
+      expect(h.upper + h.lower).toBeGreaterThan(last);
+      last = h.upper + h.lower;
+    }
+  });
+});

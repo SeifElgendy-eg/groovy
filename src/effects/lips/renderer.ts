@@ -2,7 +2,7 @@
 // as arguments, so it reads no sliders, globals or DOM.
 import type { Point } from "../../core/types";
 import { addClosedContour, boundsOfPoints } from "../../imaging/contours";
-import { computeLipTargets, type LipData, type LipParams } from "./geometry";
+import { computeLipTargets, fillerLevel, type LipData, type LipParams } from "./geometry";
 import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
@@ -73,7 +73,7 @@ export class LipRenderer {
 
   /** Draw the volume shading (see shading.ts): soft light on the lips, light and shadow on the skin. */
   private shade(target: CanvasRenderingContext2D, outer: Point[], inner: Point[], p: LipParams): void {
-    const spots = lipShading(outer, inner, Math.min(1, p.amount / 0.55));
+    const spots = lipShading(outer, inner, fillerLevel(p.amount));
     if (!spots.length) return;
     const b = boundsOfPoints(outer);
     for (const sp of spots) {
@@ -102,7 +102,7 @@ export class LipRenderer {
       target.restore();
     }
     // The light along the upper border: one soft stroke across the border, fading to the corners.
-    const line = borderLight(outer, inner, Math.min(1, p.amount / 0.55));
+    const line = borderLight(outer, inner, fillerLevel(p.amount));
     if (line.alpha > 0) {
       const a = line.points[0],
         z = line.points[line.points.length - 1];
@@ -124,7 +124,7 @@ export class LipRenderer {
       target.stroke();
       target.restore();
     }
-    this.gloss(target, outer, inner, spots[0], Math.min(1, p.amount / 0.55));
+    this.gloss(target, outer, inner, spots[0], fillerLevel(p.amount));
   }
 
   /** Gloss glints on the lower lip (see glintAlpha), drawn as light, on the lips only. */
