@@ -52,8 +52,18 @@ describe("botox line finder", () => {
     expect(lift(180, 50)).toBeLessThan(lift(75, 50) * 0.25);
   });
 
-  it("leaves plain skin and its grain alone", () => {
-    expect(Math.abs(lift(200, 130))).toBeLessThan(1);
+  it("keeps plain skin's brightness and a natural grain (replaced, not flattened)", () => {
+    const stats = (a: ArrayLike<number>) => {
+      const v: number[] = [];
+      for (let y = 120; y < 150; y++) for (let x = 170; x < 230; x++) v.push(lum(a, (y * W + x) * 4));
+      const m = v.reduce((t, q) => t + q, 0) / v.length;
+      return { m, sd: Math.sqrt(v.reduce((t, q) => t + (q - m) ** 2, 0) / v.length) };
+    };
+    const before = stats(px),
+      after = stats(out);
+    expect(Math.abs(after.m - before.m)).toBeLessThan(1.5);
+    expect(after.sd).toBeGreaterThan(before.sd * 0.4);
+    expect(after.sd).toBeLessThan(before.sd * 1.6);
   });
 
   it("does nothing in areas with no zone", () => {
