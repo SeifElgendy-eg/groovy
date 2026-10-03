@@ -190,30 +190,119 @@ export function gridOffset(g: WarpGrid, px: number, py: number): [number, number
   return [mix(0), mix(1)];
 }
 
+/** In stretched lip areas: share of the magnified (streaky) detail removed at full effect... */
+export const STRETCH_RELAX = 0.7;
+/** ...which is reached at this much extra area (0.6 = 1.6x). */
+export const STRETCH_FULL_AT = 0.6;
+/** ...the detail's scale, as a mipmap level (1.7 ~ a 4 px low-pass)... */
+export const STRETCH_LOD = 1.7;
+/** ...and the fine grain added back there (0..1 units; ~4 levels of 255). */
+export const STRETCH_GRAIN = 0.015;
+
+/** Integer hash grain in -0.5..0.5, identical to the shader's (fixed to frame coordinates). */
+export function grain(x: number, y: number): number {
+  let h = (Math.imul(x >>> 0, 374761393) + Math.imul(y >>> 0, 668265263)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return (h & 1023) / 1023 - 0.5;
+}
+
 /**
  * CPU version of the warp (used when WebGL2 is unavailable): `src` holds the ROI of the frame;
- * returns the warped ROI. Bilinear sampling, clamped at the ROI's edges.
+ * returns the warped ROI. Bilinear sampling, clamped at the ROI's edges. Stretched areas get the
+ * same detail relaxing and grain as the shader (glWarp.ts).
  */
 export function warpPixelsCpu(src: Uint8ClampedArray, g: WarpGrid): Uint8ClampedArray {
   const { w, h } = g.roi;
   const out = new Uint8ClampedArray(src.length);
+  const px = [0, 0, 0];
+  const at = (sx: number, sy: number, rgb: number[]) => {
+    sx = Math.max(0, Math.min(w - 1, sx - 0.5));
+    sy = Math.max(0, Math.min(h - 1, sy - 0.5));
+    const x0 = Math.floor(sx),
+      y0 = Math.floor(sy);
+    const x1 = Math.min(w - 1, x0 + 1),
+      y1 = Math.min(h - 1, y0 + 1);
+    const tx = sx - x0,
+      ty = sy - y0;
+    for (let c = 0; c < 3; c++) {
+      const a = src[(y0 * w + x0) * 4 + c] * (1 - tx) + src[(y0 * w + x1) * 4 + c] * tx;
+      const b = src[(y1 * w + x0) * 4 + c] * (1 - tx) + src[(y1 * w + x1) * 4 + c] * tx;
+      rgb[c] = a * (1 - ty) + b * ty;
+    }
+  };
+  // Low-pass copy at the lip-line scale (two box passes of radius 2 ~ the shader's mip level).
+  const low = boxBlurRgba(src, w, h, 2, 2);
+  const at2 = (sx: number, sy: number, rgb: number[]) => {
+    sx = Math.max(0, Math.min(w - 1, sx - 0.5));
+    sy = Math.max(0, Math.min(h - 1, sy - 0.5));
+    const x0 = Math.floor(sx),
+      y0 = Math.floor(sy);
+    const x1 = Math.min(w - 1, x0 + 1),
+      y1 = Math.min(h - 1, y0 + 1);
+    const tx = sx - x0,
+      ty = sy - y0;
+    for (let c = 0; c < 3; c++) {
+      const a = low[(y0 * w + x0) * 4 + c] * (1 - tx) + low[(y0 * w + x1) * 4 + c] * tx;
+      const b = low[(y1 * w + x0) * 4 + c] * (1 - tx) + low[(y1 * w + x1) * 4 + c] * tx;
+      rgb[c] = a * (1 - ty) + b * ty;
+    }
+  };
+  const t = [0, 0, 0];
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
-      const [dx, dy] = gridOffset(g, x + 0.5, y + 0.5);
-      const sx = Math.max(0, Math.min(w - 1, x + dx)),
-        sy = Math.max(0, Math.min(h - 1, y + dy));
-      const x0 = Math.floor(sx),
-        y0 = Math.floor(sy);
-      const x1 = Math.min(w - 1, x0 + 1),
-        y1 = Math.min(h - 1, y0 + 1);
-      const tx = sx - x0,
-        ty = sy - y0;
-      const o = (y * w + x) * 4;
-      for (let c = 0; c < 4; c++) {
-        const a = src[(y0 * w + x0) * 4 + c] * (1 - tx) + src[(y0 * w + x1) * 4 + c] * tx;
-        const b = src[(y1 * w + x0) * 4 + c] * (1 - tx) + src[(y1 * w + x1) * 4 + c] * tx;
-        out[o + c] = a * (1 - ty) + b * ty;
+      const qx = x + 0.5,
+        qy = y + 0.5;
+      const [ox, oy] = gridOffset(g, qx, qy);
+      const sx = qx + ox,
+        sy = qy + oy;
+      at(sx, sy, px);
+      const [ax, ay] = gridOffset(g, qx + 1, qy),
+        [bx, by] = gridOffset(g, qx - 1, qy),
+        [cx, cy] = gridOffset(g, qx, qy + 1),
+        [dx, dy] = gridOffset(g, qx, qy - 1);
+      const det = (1 + (ax - bx) / 2) * (1 + (cy - dy) / 2) - ((ay - by) / 2) * ((cx - dx) / 2);
+      const k = Math.max(0, Math.min(1, (1 / Math.max(det, 0.05) - 1) / STRETCH_FULL_AT));
+      if (k > 0) {
+        at2(sx, sy, t);
+        const n = grain(x + g.roi.x, y + g.roi.y) * STRETCH_GRAIN * 255 * k;
+        for (let c = 0; c < 3; c++) px[c] = t[c] + (px[c] - t[c]) * (1 - STRETCH_RELAX * k) + n;
       }
+      const o = (y * w + x) * 4;
+      out[o] = px[0];
+      out[o + 1] = px[1];
+      out[o + 2] = px[2];
+      out[o + 3] = src[o + 3];
     }
   return out;
+}
+
+/** Separable box blur of an RGBA image (radius r, `passes` times), as floats. */
+function boxBlurRgba(src: Uint8ClampedArray, w: number, h: number, r: number, passes: number): Float32Array {
+  let cur = Float32Array.from(src);
+  const tmp = new Float32Array(src.length);
+  const norm = 1 / (2 * r + 1);
+  for (let pass = 0; pass < passes; pass++) {
+    for (let y = 0; y < h; y++)
+      for (let c = 0; c < 3; c++) {
+        let acc = 0;
+        for (let k = -r; k <= r; k++) acc += cur[(y * w + Math.min(w - 1, Math.max(0, k))) * 4 + c];
+        for (let x = 0; x < w; x++) {
+          tmp[(y * w + x) * 4 + c] = acc * norm;
+          acc += cur[(y * w + Math.min(w - 1, x + r + 1)) * 4 + c] - cur[(y * w + Math.max(0, x - r)) * 4 + c];
+        }
+      }
+    const out = new Float32Array(src.length);
+    for (let x = 0; x < w; x++)
+      for (let c = 0; c < 3; c++) {
+        let acc = 0;
+        for (let k = -r; k <= r; k++) acc += tmp[(Math.min(h - 1, Math.max(0, k)) * w + x) * 4 + c];
+        for (let y = 0; y < h; y++) {
+          out[(y * w + x) * 4 + c] = acc * norm;
+          acc += tmp[(Math.min(h - 1, y + r + 1) * w + x) * 4 + c] - tmp[(Math.max(0, y - r) * w + x) * 4 + c];
+        }
+      }
+    cur = out;
+  }
+  return cur;
 }
