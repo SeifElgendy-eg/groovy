@@ -7,7 +7,7 @@ import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
 import { SNAP_REACH, snapLipOutline } from "./lipMask";
-import { borderLight, glintAlpha, lipShading, type ShadeSpot } from "./shading";
+import { borderLight, borderLightTone, glintAlpha, lipShading, type ShadeSpot } from "./shading";
 
 function scratch(read = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -106,12 +106,16 @@ export class LipRenderer {
     if (line.alpha > 0) {
       const a = line.points[0],
         z = line.points[line.points.length - 1];
+      // Tinted and scaled by this face's own skin just above the lip (see borderLightTone); no
+      // clip: it straddles the border and blends lip into skin.
+      const tone = borderLightTone(this.skinAbove(target, line.points, outer, inner, 0.45), this.skinAbove(target, line.points, outer, inner, 0));
+      const alpha = line.alpha * tone.scale;
+      const rgb = tone.rgb.join(",");
       const g = target.createLinearGradient(a.x, a.y, z.x, z.y);
-      // Warm light, not white; no clip: it straddles the border and blends lip into skin.
-      g.addColorStop(0, "rgba(255,236,224,0)");
-      g.addColorStop(0.3, `rgba(255,236,224,${line.alpha})`);
-      g.addColorStop(0.7, `rgba(255,236,224,${line.alpha})`);
-      g.addColorStop(1, "rgba(255,236,224,0)");
+      g.addColorStop(0, `rgba(${rgb},0)`);
+      g.addColorStop(0.3, `rgba(${rgb},${alpha})`);
+      g.addColorStop(0.7, `rgba(${rgb},${alpha})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
       target.save();
       target.globalCompositeOperation = "screen";
       target.filter = `blur(${line.blur}px)`;
@@ -125,6 +129,28 @@ export class LipRenderer {
       target.restore();
     }
     this.gloss(target, outer, inner, spots[0], fillerLevel(p.amount));
+  }
+
+  /**
+   * RGB samples along the upper lip border, pushed `away` x the upper lip's height outward
+   * (0.45: the skin just above the lip; 0: on the border itself).
+   */
+  private skinAbove(target: CanvasRenderingContext2D, border: Point[], outer: Point[], inner: Point[], away: number): number[][] {
+    const upperH = Math.hypot(outer[5].x - inner[5].x, outer[5].y - inner[5].y);
+    const out: number[][] = [];
+    const { width, height } = target.canvas;
+    for (const q of border.slice(1, -1)) {
+      // Outward = away from the mouth opening below this point.
+      const dx = q.x - inner[5].x,
+        dy = q.y - inner[5].y;
+      const len = Math.hypot(dx, dy) || 1;
+      const x = Math.round(q.x + (dx / len) * upperH * away),
+        y = Math.round(q.y + (dy / len) * upperH * away);
+      if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
+      const d = target.getImageData(x - 1, y - 1, 3, 3).data;
+      for (let i = 0; i < d.length; i += 4) out.push([d[i], d[i + 1], d[i + 2]]);
+    }
+    return out;
   }
 
   /** Gloss glints on the lower lip (see glintAlpha), drawn as light, on the lips only. */

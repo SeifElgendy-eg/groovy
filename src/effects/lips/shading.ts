@@ -148,3 +148,34 @@ export function glintAlpha(
     }
   return out;
 }
+
+/** Skin lightness (Rec.709 luma, 0..1) at which the border light is drawn at full strength. */
+export const BORDER_SKIN_REF = 0.72;
+
+/**
+ * Colour and strength of the border light for this face, from skin samples just above the lip.
+ * A fixed light reads as a pale outline on darker skin (screen lifts dark pixels the most), so the
+ * light scales with the skin's lightness and takes its tint from the skin itself (a lighter
+ * version of it), so it reads as that skin catching light. `border` = samples on the lip border
+ * itself (optional).
+ */
+export function borderLightTone(
+  samples: number[][],
+  border: number[][] = [],
+): { scale: number; rgb: [number, number, number] } {
+  if (!samples.length) return { scale: 1, rgb: [255, 236, 224] };
+  const mean = (xs: number[][]) => [0, 1, 2].map((c) => xs.reduce((a, s) => a + s[c], 0) / xs.length);
+  const luma = (v: number[]) => (0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]) / 255;
+  const m = mean(samples);
+  const lum = luma(m);
+  let scale = Math.max(0.3, Math.min(1, lum / BORDER_SKIN_REF));
+  // The photo may already have a bright lip border (side light on the "white roll"): add less
+  // light the brighter it already is than the skin above, so the highlight is not doubled.
+  if (border.length) {
+    const already = luma(mean(border)) - lum;
+    scale *= Math.max(0.3, Math.min(1, 1 - already / 0.12));
+  }
+  // 55% of the way from the skin's colour to white keeps the skin's hue.
+  const rgb = m.map((v) => Math.round(v + (255 - v) * 0.55)) as [number, number, number];
+  return { scale, rgb };
+}

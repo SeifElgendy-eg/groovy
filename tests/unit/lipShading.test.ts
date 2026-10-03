@@ -59,3 +59,39 @@ describe("gloss glints", () => {
     expect(Math.max(...glintAlpha(px, w, h, spot, 0))).toBe(0);
   });
 });
+
+import { BORDER_SKIN_REF, borderLightTone } from "../../src/effects/lips/shading";
+
+describe("border light follows the skin", () => {
+  const swatch = (rgb: number[]) => Array.from({ length: 20 }, () => rgb);
+
+  it("full strength on light skin, gentler on darker skin", () => {
+    const light = borderLightTone(swatch([235, 190, 170]));
+    const dark = borderLightTone(swatch([120, 80, 60]));
+    expect(light.scale).toBe(1);
+    expect(dark.scale).toBeLessThan(0.6);
+    expect(dark.scale).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it("is tinted from the skin itself (keeps its hue), lighter than it", () => {
+    const t = borderLightTone(swatch([120, 80, 60]));
+    expect(t.rgb[0]).toBeGreaterThan(t.rgb[1]);
+    expect(t.rgb[1]).toBeGreaterThan(t.rgb[2]);
+    expect(t.rgb[0]).toBeGreaterThan(120);
+  });
+
+  it("falls back to the default warm light with no samples", () => {
+    expect(borderLightTone([]).scale).toBe(1);
+    expect(BORDER_SKIN_REF).toBeGreaterThan(0.5);
+  });
+});
+
+describe("border light does not double a natural highlight", () => {
+  const swatch = (rgb: number[]) => Array.from({ length: 20 }, () => rgb);
+  it("adds less light where the photo's lip border is already brighter than the skin", () => {
+    const skin = swatch([220, 175, 150]);
+    const plain = borderLightTone(skin, swatch([215, 170, 148])).scale;
+    const lit = borderLightTone(skin, swatch([245, 215, 195])).scale;
+    expect(lit).toBeLessThan(plain * 0.6);
+  });
+});
