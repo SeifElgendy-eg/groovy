@@ -7,7 +7,7 @@ import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
 import { SNAP_REACH, snapLipOutline } from "./lipMask";
-import { borderLight, borderLightTone, glintAlpha, lipShading, type ShadeSpot } from "./shading";
+import { borderLight, borderLightTone, glintAlpha, lipShading, shadowTone, type ShadeSpot } from "./shading";
 
 function scratch(read = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -76,7 +76,9 @@ export class LipRenderer {
     const spots = lipShading(outer, inner, fillerLevel(p.amount));
     if (!spots.length) return;
     const b = boundsOfPoints(outer);
-    for (const sp of spots) {
+    // Shadow colours come from the surface each shadow falls on, sampled before anything is drawn.
+    const tones = spots.map((sp) => (sp.kind === "shadow" ? this.shadowToneFor(target, sp, outer) : null));
+    for (const [k, sp] of spots.entries()) {
       target.save();
       // Clip to the lips (outline minus opening) or to the skin around them.
       target.beginPath();
@@ -92,9 +94,11 @@ export class LipRenderer {
       target.rotate(sp.angle);
       target.scale(sp.rx, sp.ry);
       const g = target.createRadialGradient(0, 0, 0, 0, 0, 1);
-      const rgb = sp.kind === "light" ? "255,250,245" : "95,55,45";
-      g.addColorStop(0, `rgba(${rgb},${sp.alpha})`);
-      g.addColorStop(0.55, `rgba(${rgb},${sp.alpha * 0.45})`);
+      const tone = tones[k];
+      const rgb = tone ? tone.rgb.join(",") : "255,250,245";
+      const alpha = sp.alpha * (tone ? tone.scale : 1);
+      g.addColorStop(0, `rgba(${rgb},${alpha})`);
+      g.addColorStop(0.55, `rgba(${rgb},${alpha * 0.45})`);
       g.addColorStop(1, `rgba(${rgb},0)`);
       target.globalCompositeOperation = sp.kind === "light" ? "screen" : "multiply";
       target.fillStyle = g;
@@ -129,6 +133,29 @@ export class LipRenderer {
       target.restore();
     }
     this.gloss(target, outer, inner, spots[0], fillerLevel(p.amount));
+  }
+
+  /** Tint and strength for a shadow spot: sampled inside it, and (on skin) a little further out. */
+  private shadowToneFor(target: CanvasRenderingContext2D, sp: ShadeSpot, outer: Point[]) {
+    const { width, height } = target.canvas;
+    const cos = Math.cos(sp.angle),
+      sin = Math.sin(sp.angle);
+    const at = (u: number, v: number, into: number[][]) => {
+      const x = Math.round(sp.cx + u * cos - v * sin),
+        y = Math.round(sp.cy + u * sin + v * cos);
+      if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) return;
+      const d = target.getImageData(x - 1, y - 1, 3, 3).data;
+      for (let i = 0; i < d.length; i += 4) into.push([d[i], d[i + 1], d[i + 2]]);
+    };
+    const here: number[][] = [];
+    for (const [u, v] of [[0, 0], [-0.4, 0], [0.4, 0], [0, -0.3], [0, 0.3]]) at(u * sp.rx, v * sp.ry, here);
+    if (sp.region !== "skin") return shadowTone(here);
+    // Further away from the lips than the shadow (the skin it should be compared with).
+    const lip = outer[15];
+    const away = Math.sign((sp.cx - lip.x) * -sin + (sp.cy - lip.y) * cos) || 1;
+    const reference: number[][] = [];
+    for (const u of [-0.4, 0, 0.4]) at(u * sp.rx, away * sp.ry * 1.6, reference);
+    return shadowTone(here, reference);
   }
 
   /**
