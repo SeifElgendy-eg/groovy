@@ -56,6 +56,18 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
       tolerance: [35, 65],
       fine: true,
     });
+    // ...and they run on, down and out from the corner over the upper cheek.
+    zones.push({
+      id: "crows",
+      cx: P[outer].x + ux * side * ew * 0.45 + vx * ew * 0.85,
+      cy: P[outer].y + uy * side * ew * 0.45 + vy * ew * 0.85,
+      rx: ew * 0.85,
+      ry: ew * 0.75,
+      angle,
+      from: { x: P[outer].x - ux * side * ew * 0.1, y: P[outer].y - uy * side * ew * 0.1 },
+      tolerance: [40, 70],
+      fine: true,
+    });
   }
   // Under the eyes: the crepey band below the lower lid, inner to outer corner (lashes and the
   // lid margin are carved out of the skin mask). Lines here run every way.

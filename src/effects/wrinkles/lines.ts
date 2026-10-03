@@ -67,6 +67,8 @@ export const RIDGE_CAP = 35;
 export const TEXTURE_SOFTEN = 0.85;
 /** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
 export const FINEST_LINES = 0.85;
+/** Share of the fine detail replaced by transplanted grain at full dose. */
+export const GRAIN_REPLACE = 0.9;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -205,6 +207,11 @@ export function linesCompute(j: LinesJob): LinesResult {
   const lineShaped = blobWeight(lum, w, h, Math.max(1, fw * 0.003));
   for (let p = 0; p < n; p++) lineShaped[p] = 1 - lineShaped[p];
   const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
+  // Grain transplant: the fine detail of treated skin is replaced by real grain copied from clean,
+  // line-free skin of the same face (see transplantGrain).
+  const fineBand = new Float32Array(n);
+  for (let p = 0; p < n; p++) fineBand[p] = lum[p] - fineTop[p];
+  const donorGrain = transplantGrain(fineBand, lowBand, strength, mask, w, h, fw, j.zones);
   const spotFree = new Float32Array(n);
   for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
 
@@ -318,7 +325,10 @@ export function linesCompute(j: LinesJob): LinesResult {
             : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * 0.6 * loose + RIDGE_FLATTEN * Math.min(1, nearLine[p]) * zone);
         // The faint leftover lines in the finest grain (both dark and light ones).
         const finest = lum[p] - finestTop[p];
-        band -= finest * FINEST_LINES * lineShaped[p] * Math.max(loose, strictOk) * spotFree[p];
+        band -= finest * FINEST_LINES * lineShaped[p] * strictOk * spotFree[p];
+        // Loose zones: swap the fine detail (with the lines' last traces) for transplanted grain.
+        // Freckles and moles keep their own detail.
+        band += (donorGrain[p] - fineBand[p]) * GRAIN_REPLACE * loose * spotFree[p];
         band *= m;
       }
       if (cover[p] > 0) {
@@ -362,12 +372,15 @@ function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: F
     const target = lum[p] + f;
     const sl = 0.2126 * skin[0][p] + 0.7152 * skin[1][p] + 0.0722 * skin[2][p];
     // Lifted creases take the skin's colour; lowered ridges (often shine) mostly keep their own.
-    const a = f > 0 ? Math.min(0.6, f / 16) : Math.min(0.5, -f / 30);
+    // Creases are redder than the skin around them: even small lifts take most of its colour.
+    const a = f > 0 ? Math.min(0.8, f / 6) : Math.min(0.5, -f / 30);
     for (let c = 0; c < 3; c++) {
       const v = pixels[i + c];
       const own = v / lum[p],
         ref = sl > 1 ? skin[c][p] / sl : own;
-      const d = target * (own * (1 - a) + ref * a) - v;
+      let d = target * (own * (1 - a) + ref * a) - v;
+      // A lifted line may lose a little of a channel (its extra red), never much (that turns grey).
+      if (f > 0) d = Math.max(d, -0.08 * v);
       if (d < 0) mul[i + c] = Math.round((255 * (v + d)) / Math.max(1, v));
       else add[i + c] = d;
     }
@@ -387,4 +400,110 @@ function percentile(v: Float32Array, mask: Pixels, zones: Zone[], w: number, h: 
   if (!xs.length) return 1;
   xs.sort((a, b) => a - b);
   return xs[Math.floor(xs.length * q)];
+}
+
+/**
+ * Grain transplant. For a grid of overlapping blocks over the treated zones, find a donor block
+ * nearby whose skin is clean (no lines), of similar brightness, inside the skin mask, and copy
+ * its fine detail. Blocks are blended with tent weights, rescaled so the blend keeps the grain's
+ * strength (averaging overlapping patches would flatten it). Returns the new fine detail per
+ * pixel (0 outside the zones).
+ */
+export function transplantGrain(
+  fineBand: Float32Array,
+  lowBand: Float32Array,
+  lineStrength: Float32Array,
+  mask: Pixels,
+  w: number,
+  h: number,
+  fw: number,
+  zones: Zone[],
+  seed = 1,
+): Float32Array {
+  const n = w * h;
+  // Clean skin: inside the mask and far from anything line-like.
+  const lineNear = blurLike(lineStrength, w, h, Math.max(1.5, fw * 0.006));
+  const clean = new Float32Array(n);
+  for (let p = 0; p < n; p++) clean[p] = mask[p * 4 + 3] > 200 ? 1 - smoothstep(0.12, 0.35, lineNear[p]) : 0;
+  const B = Math.max(6, Math.round(fw * 0.028)); // block spacing; blocks are 2B wide (overlap)
+  const R = Math.max(B * 3, Math.round(fw * 0.22)); // search radius
+  const gx = Math.ceil(w / B) + 1,
+    gy = Math.ceil(h / B) + 1;
+  const offX = new Int32Array(gx * gy),
+    offY = new Int32Array(gx * gy),
+    use = new Uint8Array(gx * gy);
+  let rnd = seed >>> 0 || 1;
+  const rand = () => ((rnd = (Math.imul(rnd, 1664525) + 1013904223) >>> 0) / 4294967296);
+  for (let by = 0; by < gy; by++)
+    for (let bx = 0; bx < gx; bx++) {
+      const cx = bx * B,
+        cy = by * B;
+      if (!zones.some((z) => ellipseWeight(z, Math.min(w - 1, cx), Math.min(h - 1, cy), 0) > 0 || ellipseWeight(z, cx, cy) > 0)) continue;
+      const target = lowBand[Math.min(h - 1, cy) * w + Math.min(w - 1, cx)];
+      let best = -Infinity,
+        bdx = 0,
+        bdy = 0;
+      for (let k = 0; k < 40; k++) {
+        const dx = Math.round((rand() * 2 - 1) * R),
+          dy = Math.round((rand() * 2 - 1) * R);
+        let sc = 0,
+          cnt = 0,
+          bright = 0;
+        for (let yy = -B; yy <= B; yy += 2)
+          for (let xx = -B; xx <= B; xx += 2) {
+            const sx = cx + dx + xx,
+              sy = cy + dy + yy;
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+              sc -= 1;
+              cnt++;
+              continue;
+            }
+            const q = sy * w + sx;
+            sc += clean[q];
+            bright += lowBand[q];
+            cnt++;
+          }
+        if (!cnt) continue;
+        const score = sc / cnt - Math.abs(bright / cnt - target) / 25;
+        if (score > best) {
+          best = score;
+          bdx = dx;
+          bdy = dy;
+        }
+      }
+      if (best < 0.6) continue; // no clean skin nearby: keep this block's own detail
+      const g = by * gx + bx;
+      offX[g] = bdx;
+      offY[g] = bdy;
+      use[g] = 1;
+    }
+  const out = new Float32Array(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const bx0 = Math.floor(x / B),
+        by0 = Math.floor(y / B);
+      let sum = 0,
+        wsum = 0,
+        w2 = 0;
+      for (let by = by0; by <= by0 + 1; by++)
+        for (let bx = bx0; bx <= bx0 + 1; bx++) {
+          if (bx >= gx || by >= gy) continue;
+          const g = by * gx + bx;
+          const wt = (1 - Math.abs(x - bx * B) / B) * (1 - Math.abs(y - by * B) / B);
+          if (wt <= 0) continue;
+          let v = fineBand[p];
+          if (use[g]) {
+            const sx = Math.min(w - 1, Math.max(0, x + offX[g])),
+              sy = Math.min(h - 1, Math.max(0, y + offY[g]));
+            v = fineBand[sy * w + sx];
+          }
+          sum += v * wt;
+          wsum += wt;
+          w2 += wt * wt;
+        }
+      // Keep the grain's strength through the blend (uncorrelated patches).
+      out[p] = wsum > 0 ? (sum / wsum) * Math.min(1.3, wsum / Math.sqrt(Math.max(1e-6, w2))) : fineBand[p];
+    }
+  return out;
 }
