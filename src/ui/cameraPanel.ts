@@ -93,7 +93,7 @@ function render(): void {
   freezeLine.classList.toggle("bad", !!freeze && freeze.ms >= 300);
   const work = recentWork();
   panel.querySelector<HTMLElement>("[data-work]")!.textContent = work.length
-    ? "last run: " + work.map(([label, ms]) => `${label} ${(ms / 1000).toFixed(1)} s`).join(" · ")
+    ? "last run: " + work.map(([label, ms]) => `${label} ${ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}`).join(" · ")
     : "";
   const auto = panel.querySelector<HTMLInputElement>("[data-auto]")!;
   auto.checked = cameraTuning.faceAuto;

@@ -8,7 +8,7 @@ import { dom } from "../ui/dom";
 import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
-import { tracked } from "./activity";
+import { noteWork, tracked } from "./activity";
 
 type Draw = (w: number, h: number) => void;
 
@@ -32,7 +32,9 @@ function renderLips(w: number, h: number): void {
     sourceCtx.clearRect(0, 0, w, h);
     drawForDisplay(sourceCtx, w, h);
   }
+  const start = performance.now();
   lipRenderer.render(ctx, sourceCanvas, state.lipData, params, w, h);
+  if (state.sourceMode === "photo") noteWork("lips", performance.now() - start);
 }
 
 function renderSkin(w: number, h: number): void {
