@@ -2,6 +2,7 @@
 // expression lines of each botox area at the photo's full resolution (lines.ts). Each area keeps
 // its own correction layers, so areas and dose change instantly, without a recompute.
 import { addClosedContour, carveContours } from "../../imaging/contours";
+import type { Point } from "../../core/types";
 import { WRINKLE_EXCLUSION_CONTOURS } from "../../core/landmarks";
 import { faceOval, guardContours } from "../../face/mask";
 import {
@@ -141,30 +142,11 @@ export class WrinklesEffect {
       mask.ctx.fill();
     }
   }
-  // The bridge and sidewalls are facial shape, not wrinkle creases.
-  // Protect the complete nose, with an inward feather below.
-  const noseTop = points[6],
-    noseBottom = points[2];
-  const nx = (noseTop.x + noseBottom.x) / 2,
-    ny = (noseTop.y + noseBottom.y) / 2;
-  const noseHeight = Math.hypot(
-    noseBottom.x - noseTop.x,
-    noseBottom.y - noseTop.y,
-  );
-  const noseWidth = Math.hypot(
-    points[98].x - points[327].x,
-    points[98].y - points[327].y,
-  );
+  // The bridge and sidewalls are facial shape, not wrinkle creases: the nose is protected, in its
+  // own shape (narrow between the eyes, widening to the nostrils). A round guard reached into the
+  // inner under-eyes, and the treatment stopped there in a hard diagonal edge.
   mask.ctx.beginPath();
-  mask.ctx.ellipse(
-    nx,
-    ny,
-    Math.max(4, noseWidth * 0.8),
-    Math.max(6, noseHeight * 0.68),
-    -Math.atan2(noseBottom.x - noseTop.x, noseBottom.y - noseTop.y),
-    0,
-    Math.PI * 2,
-  );
+  addClosedContour(mask.ctx, noseGuard(points));
   mask.ctx.fill();
   mask.ctx.restore();
   const result = await runWrinkles({
@@ -269,6 +251,36 @@ export class WrinklesEffect {
     }
     target.restore();
   }
+}
+
+/**
+ * The nose as a closed outline: down one side and up the other, from between the inner eye corners
+ * (part of the sidewalls, leaving the inner under-eyes) to just below the nostrils.
+ */
+export function noseGuard(points: Point[]): Point[] {
+  const P = points;
+  const top = P[6],
+    bottom = P[2];
+  const ax = bottom.x - top.x,
+    ay = bottom.y - top.y;
+  const len = Math.hypot(ax, ay) || 1;
+  // Across the nose (perpendicular to its axis).
+  const nx = -ay / len,
+    ny = ax / len;
+  const canthi = Math.hypot(P[133].x - P[362].x, P[133].y - P[362].y);
+  const alae = Math.hypot(P[98].x - P[327].x, P[98].y - P[327].y);
+  // Along the axis (0 at the bridge between the eyes, 1 at the base of the nose): half-widths.
+  const rows: [number, number][] = [
+    [-0.08, canthi * 0.2],
+    [0, canthi * 0.3],
+    [0.3, alae * 0.36],
+    [0.6, alae * 0.48],
+    [0.85, alae * 0.62],
+    [1.0, alae * 0.62],
+    [1.15, alae * 0.45],
+  ];
+  const at = (t: number, hw: number) => ({ x: top.x + ax * t + nx * hw, y: top.y + ay * t + ny * hw });
+  return [...rows.map(([t, hw]) => at(t, hw)), ...rows.reverse().map(([t, hw]) => at(t, -hw))];
 }
 
 type AreaLayers = Partial<Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }>>;

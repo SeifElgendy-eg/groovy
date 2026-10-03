@@ -1,0 +1,5 @@
+# Under-eye: area follows the lower lid and tear trough, nose guard in the nose's shape, crepe
+# ridges lowered a little, freckle protection with soft edges (no square patches)
+wrinkles-20u
+wrinkles-40u
+wrinkles-forehead-40u

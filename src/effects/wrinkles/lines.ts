@@ -81,6 +81,8 @@ export const MIN_DEPTH: [number, number] = [3, 8];
 export const DIRECTION_TOLERANCE = 25;
 /** ...falling to nothing at this angle. */
 export const DIRECTION_LIMIT = 50;
+/** Under the eyes, the most a fine bright ridge (crepe) is lowered (levels). */
+export const UNDEREYE_LOWER = 6;
 /** Darkness of a spot's centre below the skin around it (levels) from which it counts as a freckle or mole. */
 export const SPOT_DARK: [number, number] = [3, 6];
 
@@ -229,7 +231,7 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Each stage is its own function, so its working arrays are freed when it returns (a 4K
   // photo's face crop needs a lot of them).
   const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, lumBlur, mask, geoms, w, h, fw);
-  const { roundNear, spotNear, spotRef } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
+  const { roundNear, spotNear, spotRef, spotSurround } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
   const around = lumBlur(Math.max(3, fw * 0.02));
@@ -506,7 +508,9 @@ export function linesCompute(j: LinesJob): LinesResult {
           const edgeK = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
           // Freckles and moles keep their own look, but only their dark core: the skin around them
           // goes to the target like everywhere else (no pale halo).
-          const core = smoothstep(2, 6, base - lum[p]);
+          // (The spot itself: darker than the skin right around it. Darker than the base alone is
+          // not enough: under the eyes the whole dark circle is, and keeping it showed as squares.)
+          const core = smoothstep(3, 8, Math.min(base, spotSurround[p]) - lum[p]);
           const k = edgeK * (1 - (1 - spotFree[p]) * core);
           f = Math.fround(f * (1 - edgeK) + toTarget * k);
           rc = Math.fround(k);
@@ -518,13 +522,16 @@ export function linesCompute(j: LinesJob): LinesResult {
           rc = Math.fround(rc * (1 - hair));
         }
         f = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, f));
-        // Under the eyes only lift: the lower lid's lighter skin and the cheek's highlights are
-        // not ridges to flatten (lowering them reads as a darker eye bag). That holds for any area
-        // reaching there (the crow's feet's lower zone covers the same band).
-        if (id === "undereye") f = Math.max(-1, f);
-        else if (f < -1) {
+        // Under the eyes mostly lift: the lower lid's lighter skin and the cheek's highlights are
+        // not ridges to flatten (lowering them reads as a darker eye bag). Only the crepe's fine
+        // bright ridges come down, to the skin's local level and by a few levels at most, so
+        // nothing gets darker than the skin around it. That holds for any area reaching there
+        // (the crow's feet's lower zone covers the same band).
+        const lowest = -Math.min(UNDEREYE_LOWER, Math.max(1, lum[p] - lowBand[p]));
+        if (id === "undereye") f = Math.max(lowest, f);
+        else if (f < lowest) {
           const u = smoothstep(0, 0.3, areaWeight.undereye[p]);
-          if (u > 0) f = f * (1 - u) - u;
+          if (u > 0) f = f * (1 - u) + lowest * u;
         }
         fill[q] = f;
         recolour[q] = rc;
@@ -634,7 +641,9 @@ function spotProtection(
     darkSpots[p] = isolated[p] * smoothstep(SPOT_DARK[0], SPOT_DARK[1], surround[p] - core[p]);
   }
   const near = (v: Float32Array) => slide(slide(v, w, h, spotR, true, false), w, h, spotR, true, true);
-  return { roundNear: near(isolated), spotNear: near(darkSpots), spotRef };
+  // (The freckles' protection is softened at its edge: a square cut-off showed as square patches
+  // where the skin around a freckle was lifted and the protected square was not.)
+  return { roundNear: near(isolated), spotNear: blurLike(near(darkSpots), w, h, Math.max(1, spotR / 2)), spotRef, spotSurround: surround };
 }
 
 /**
