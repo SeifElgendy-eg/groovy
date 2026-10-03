@@ -2,6 +2,7 @@
 // slider values and session state. Read-only with respect to the effects.
 import type { LipParams } from "../effects/lips/geometry";
 import { state } from "../app/state";
+import { matchAcnePreset, type AcnePlan } from "../effects/acne/presets";
 import { dom } from "./dom";
 
 export function showPercent(label: HTMLElement, slider: HTMLInputElement): void {
@@ -41,14 +42,29 @@ export function syncWrinklesPreset(): void {
   dom.wrinklesSelection.textContent = `Selected: ${label} · ${value}%`;
 }
 
+/** The acne sliders' current values. */
+export function readAcnePlan(): AcnePlan {
+  return {
+    spots: Number(dom.acneSlider.value),
+    redness: Number(dom.rednessSlider.value),
+    pores: Number(dom.poresSlider.value),
+    scars: Number(dom.scarsSlider.value),
+  };
+}
+
+/** A month chip is active only while every acne slider still matches its plan. */
 export function syncAcnePreset(): void {
-  const value = Number(dom.acneSlider.value);
-  const label = syncPresetChips(
-    dom.acnePresetButtons,
-    value,
-    (b) => b.dataset.acnePreset,
-  );
-  dom.acneSelection.textContent = `Selected: ${label} · ${value}%`;
+  const plan = readAcnePlan();
+  const match = matchAcnePreset(plan);
+  const label = syncPresetChips(dom.acnePresetButtons, match === undefined ? NaN : Number(match), (b) => b.dataset.acnePreset);
+  for (const [slider, out] of [
+    [dom.acneSlider, dom.acneValue],
+    [dom.scarsSlider, dom.scarsValue],
+    [dom.poresSlider, dom.poresValue],
+    [dom.rednessSlider, dom.rednessValue],
+  ] as const)
+    showPercent(out, slider);
+  dom.acneSelection.textContent = `Selected: ${label.trim()} · ${plan.spots}%`;
 }
 
 export function syncLipPreset(): void {

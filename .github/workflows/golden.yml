@@ -60,9 +60,16 @@ jobs:
       - name: Compare the head ref against them
         run: |
           npm run build
-          # Intentional visual changes: honoured only when this PR edits the list itself.
-          if git diff --name-only "$BASE_REF" "$HEAD_REF" -- tests/golden/expected-changes.txt | grep -q .; then
-            node tests/golden/run.mjs --allow-changes tests/golden/expected-changes.txt
+          # Intentional visual changes: each PR lists them in its own file under
+          # tests/golden/expected-changes/ (so two open PRs never edit the same file). Only files
+          # this PR adds or edits count; lists from earlier PRs never carry over. The old single
+          # file is still honoured when a PR edits it.
+          lists=$(git diff --name-only --diff-filter=AM "$BASE_REF" "$HEAD_REF" -- \
+            'tests/golden/expected-changes/*.txt' tests/golden/expected-changes.txt)
+          if [ -n "$lists" ]; then
+            echo "Expected changes from: $lists"
+            cat $lists > "$RUNNER_TEMP/expected-changes.txt"
+            node tests/golden/run.mjs --allow-changes "$RUNNER_TEMP/expected-changes.txt"
           else
             npm run golden
           fi
