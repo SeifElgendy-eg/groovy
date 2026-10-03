@@ -61,6 +61,12 @@ interface AsyncEffect {
  * result for the current input is ready to draw; when one arrives later the stage redraws itself.
  * `body[data-effects-busy]` is set meanwhile, so tests can wait for the final picture.
  */
+// Layers for a newly chosen set of botox areas arrive asynchronously: redraw then.
+wrinkles.onChange = () => {
+  if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
+  renderAll();
+};
+
 function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
   if (effect.dirty && !effect.busy) {
     document.body.dataset.effectsBusy = "1";
@@ -68,7 +74,7 @@ function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
       .prepare(skinInput(w, h))
       .catch((err) => console.error("effect preparation failed", err))
       .finally(() => {
-        if (!acne.busy && !wrinkles.busy) delete document.body.dataset.effectsBusy;
+        if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
         renderAll();
       });
   }

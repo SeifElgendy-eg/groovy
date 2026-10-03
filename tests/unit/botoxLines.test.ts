@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { linesCompute, MAX_SOFTEN, type Zone } from "../../src/effects/wrinkles/lines";
+import { beforeAll, describe, expect, it } from "vitest";
+import { linesCompute, linesLayers, MAX_SOFTEN, type Zone } from "../../src/effects/wrinkles/lines";
 
 const W = 240,
   H = 160;
@@ -66,11 +66,43 @@ describe("botox line finder", () => {
     expect(after.sd).toBeLessThan(before.sd * 1.6);
   });
 
-  it("does nothing in areas with no zone", () => {
-    const empty = new Uint8ClampedArray(px.length);
-    for (let i = 3; i < empty.length; i += 4) empty[i] = 255;
-    const o2 = apply(px, r.frown);
+  it("leaves a line alone that lies outside an area's zones", () => {
+    const z2: Zone[] = [...zones.map((z) => ({ ...z, id: "frown" as const, cx: 210, cy: 140, rx: 20, ry: 15 }))];
+    const r2 = linesCompute({ pixels: px, mask, width: W, height: H, faceWidth: 400, zones: z2 });
+    const o2 = apply(px, r2.frown);
     expect(Math.abs(lum(o2, at(75, 50)) - lum(px, at(75, 50)))).toBeLessThan(0.5);
+  });
+});
+
+describe("overlapping areas", () => {
+  // Forehead and frown zones both cover the horizontal line.
+  const px = skin();
+  const mask = new Uint8ClampedArray(px.length).fill(255);
+  const zones: Zone[] = [
+    { id: "forehead", cx: 120, cy: 60, rx: 400, ry: 400, angle: 0, lineAngle: 0 },
+    { id: "frown", cx: 75, cy: 50, rx: 120, ry: 120, angle: 0, anyDirection: true },
+  ];
+  // (Computed right before these tests: linesLayers reads the last linesCompute's result.)
+  beforeAll(() => {
+    linesCompute({ pixels: px, mask, width: W, height: H, faceWidth: 400, zones });
+  });
+  const lift = (areas: ("forehead" | "frown")[]) => {
+    const layers = linesLayers(areas)!;
+    let out: ArrayLike<number> = px;
+    for (const id of areas) out = apply(Uint8ClampedArray.from(out), layers[id]!);
+    const i = (50 * W + 75) * 4;
+    return lum(out, i) - lum(px, i);
+  };
+
+  it("treats an overlap once with both areas on", () => {
+    expect(lift(["forehead", "frown"])).toBeLessThan(lift(["forehead"]) * 1.25);
+  });
+
+  it("treats it fully when one of them is switched off (no half-treated band)", () => {
+    const one = lift(["forehead"]),
+      both = lift(["forehead", "frown"]);
+    expect(one).toBeGreaterThan(10);
+    expect(one).toBeGreaterThan(both * 0.8);
   });
 });
 

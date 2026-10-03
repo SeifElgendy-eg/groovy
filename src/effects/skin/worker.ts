@@ -3,7 +3,7 @@
 import { expose, transfer } from "comlink";
 import { acneCompute, wrinklesCompute, type AcneJob, type WrinklesJob } from "./compute";
 import { textureCompute, type TextureJob } from "../acne/texture";
-import { linesCompute, type LinesJob } from "../wrinkles/lines";
+import { linesCompute, linesLayers, type AreaId, type LinesJob } from "../wrinkles/lines";
 
 const api = {
   acne(job: AcneJob) {
@@ -21,6 +21,10 @@ const api = {
   lines(job: LinesJob) {
     const r = linesCompute(job);
     return transfer(r, Object.values(r).flatMap((l) => [l.mul.buffer, l.add.buffer]));
+  },
+  linesLayers(enabled: AreaId[]) {
+    const r = linesLayers(enabled);
+    return r ? transfer(r, Object.values(r).flatMap((l) => (l ? [l.mul.buffer, l.add.buffer] : []))) : null;
   },
 };
 

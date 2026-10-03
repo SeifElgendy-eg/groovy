@@ -11,7 +11,7 @@ import {
 } from "./compute";
 import type { SkinWorkerApi } from "./worker";
 import { textureCompute, type TextureJob, type TextureResult } from "../acne/texture";
-import { linesCompute, type LinesJob, type LinesResult } from "../wrinkles/lines";
+import { linesCompute, linesLayers, type AreaId, type LinesJob, type LinesResult } from "../wrinkles/lines";
 
 interface Handle {
   api: Remote<SkinWorkerApi>;
@@ -67,3 +67,7 @@ export const runTexture = (job: TextureJob): Promise<TextureResult> =>
 
 export const runLines = (job: LinesJob): Promise<LinesResult> =>
   run(job, (h) => h.api.lines(job) as Promise<LinesResult>, linesCompute);
+
+/** Layers for the botox areas that are on, from the last runLines (null: recompute). */
+export const runLinesLayers = (enabled: AreaId[]): Promise<Partial<LinesResult> | null> =>
+  run(enabled, (h) => h.api.linesLayers(enabled) as Promise<Partial<LinesResult> | null>, linesLayers);

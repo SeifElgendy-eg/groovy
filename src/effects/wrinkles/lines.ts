@@ -83,6 +83,7 @@ export const DIRECTION_TOLERANCE = 25;
 export const DIRECTION_LIMIT = 50;
 
 const smoothstep = (e0: number, e1: number, x: number) => {
+  if (e1 === e0) return x < e0 ? 0 : 1;
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 };
@@ -286,11 +287,10 @@ export function linesCompute(j: LinesJob): LinesResult {
   const healed = healTexture(fineBand, lowBand, clean, need, w, h, fw);
   for (let p = 0; p < n; p++)
     if (!Number.isNaN(healed[p])) healed[p] = Math.max(-HEAL.darkCap * amp, Math.min(HEAL.brightCap * amp, healed[p]));
-  const result = {} as LinesResult;
   // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
-  // area's layer is computed from the original photo and they are drawn on top of each other, so
-  // in an overlap the correction would be applied twice (pale streaks). Each pixel's correction is
-  // shared out instead: mostly to the area it is most central to, summing to one.
+  // area's correction is computed from the original photo and the layers are drawn on top of each
+  // other, so an overlap would be treated twice (pale streaks). Each area's weight over the crop is
+  // kept, and linesLayers shares each pixel out among the areas that are switched on.
   const areaWeight = {} as Record<AreaId, Float32Array>;
   for (const id of AREAS) {
     const zs = j.zones.filter((z) => z.id === id);
@@ -303,11 +303,8 @@ export function linesCompute(j: LinesJob): LinesResult {
       }
     areaWeight[id] = e;
   }
-  const shareOf = (id: AreaId, p: number) => {
-    let sum = 0;
-    for (const a of AREAS) sum += areaWeight[a][p];
-    return sum > 1e-6 ? areaWeight[id][p] / Math.max(sum, areaWeight[id][p]) : 0;
-  };
+  const rawFill = {} as Record<AreaId, Float32Array>,
+    rawRecolour = {} as Record<AreaId, Float32Array>;
   for (const id of AREAS) {
     const zones = j.zones.filter((z) => z.id === id);
     const fill = new Float32Array(n),
@@ -337,6 +334,9 @@ export function linesCompute(j: LinesJob): LinesResult {
           }
         }
         if (zw <= 0 || dw <= 0) continue;
+        // Not a line where anything round is (deliberately broader than spotFree, which decides
+        // what keeps its own pixels): lash tips crossing the lid line and similar dots must never
+        // count as line, or the lid's lashes get painted over (unit test).
         const notSpot = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] + spotNear[p]));
         const isLine = smoothstep(0.12, 0.45, strength[p] / Math.max(1e-6, ref)) * notSpot;
         weight[p] = isLine * dw * zw * m;
@@ -492,12 +492,61 @@ export function linesCompute(j: LinesJob): LinesResult {
       fill[p] = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, fill[p]));
     }
     // Under the eyes only lift: the lower lid's lighter skin and the cheek's highlights are not
-    // ridges to flatten (lowering them reads as a darker eye bag).
+    // ridges to flatten (lowering them reads as a darker eye bag). That holds for any area
+    // reaching there (the crow's feet's lower zone covers the same band).
     if (id === "undereye") for (let p = 0; p < n; p++) fill[p] = Math.max(-1, fill[p]);
-    for (let p = 0; p < n; p++) if (fill[p] !== 0) fill[p] *= shareOf(id, p);
-    result[id] = toLayers(pixels, lum, fill, skin, recolour);
+    else
+      for (let p = 0; p < n; p++) {
+        if (fill[p] >= -1) continue;
+        const u = smoothstep(0, 0.3, areaWeight.undereye[p]);
+        if (u > 0) fill[p] = fill[p] * (1 - u) - u;
+      }
+    rawFill[id] = fill;
+    rawRecolour[id] = recolour;
   }
-  return result;
+  cached = { pixels, lum, skin, areaWeight, rawFill, rawRecolour };
+  return linesLayers(AREAS) as LinesResult;
+}
+
+/** The last linesCompute's per-area corrections, before sharing (see linesLayers). */
+let cached: {
+  pixels: Pixels;
+  lum: Float32Array;
+  skin: Float32Array[];
+  areaWeight: Record<AreaId, Float32Array>;
+  rawFill: Record<AreaId, Float32Array>;
+  rawRecolour: Record<AreaId, Float32Array>;
+} | null = null;
+
+/**
+ * Correction layers for the areas that are switched on, from the last linesCompute. Areas overlap
+ * (forehead and frown lines between the brows; crow's feet and under-eyes); each pixel's correction
+ * is shared out among the areas that are on, mostly to the one it is most central to, summing to
+ * one, so an overlap is treated once whichever areas are on. Null when nothing is cached (e.g. the
+ * worker was restarted): the caller recomputes.
+ */
+export function linesLayers(enabled: readonly AreaId[]): Partial<LinesResult> | null {
+  const c = cached;
+  if (!c) return null;
+  const n = c.lum.length;
+  const out: Partial<LinesResult> = {};
+  for (const id of enabled) {
+    const fill = new Float32Array(n),
+      recolour = new Float32Array(n);
+    const own = c.areaWeight[id];
+    for (let p = 0; p < n; p++) {
+      const f = c.rawFill[id][p],
+        r = c.rawRecolour[id][p];
+      if (f === 0 && r === 0) continue;
+      let sum = 0;
+      for (const a of enabled) sum += c.areaWeight[a][p];
+      const share = sum > 1e-6 ? own[p] / Math.max(sum, own[p]) : 0;
+      fill[p] = f * share;
+      recolour[p] = r * share;
+    }
+    out[id] = toLayers(c.pixels, c.lum, fill, c.skin, recolour);
+  }
+  return out;
 }
 
 /** Change lightness by `fill` per pixel (lift lines, lower ridges); the more a pixel changes, the more it takes the skin's colour. */
@@ -804,7 +853,10 @@ export function strayHairs(
         for (let dx = -3; dx <= 3; dx++) {
           const xx = x + dx,
             yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !inside(yy * w + xx)) {
+          // The hair is the mask's outside within the photo; the crop's or photo's own edge is
+          // not (a forehead cut off by the top of the photo has no hairline there).
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          if (!inside(yy * w + xx)) {
             edge = true;
             break;
           }

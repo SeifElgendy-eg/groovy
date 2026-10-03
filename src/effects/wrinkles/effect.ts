@@ -12,8 +12,8 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { runLines, runWrinkles } from "../skin/client";
-import { AREAS, type AreaId, type Layers } from "./lines";
+import { runLines, runLinesLayers, runWrinkles } from "../skin/client";
+import { AREAS, type AreaId, type Layers, type LinesResult } from "./lines";
 import { botoxZones } from "./regions";
 
 export class WrinklesEffect {
@@ -35,8 +35,19 @@ export class WrinklesEffect {
       this.gen++; // any prepare() still running is now out of date
     }
   }
-  /** Per-area correction layers over the face crop at (x, y), full resolution. */
-  private areas: { x: number; y: number; layers: Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }> } | null = null;
+  /**
+   * Correction layers over the face crop at (x, y), full resolution, per set of areas that are on
+   * (keyed by the areas' names): where areas overlap, each set shares the correction differently.
+   */
+  private areas: { x: number; y: number; w: number; h: number; sets: Map<string, AreaLayers> } | null = null;
+  /** A set of areas whose layers are being made. */
+  private pendingSet: string | null = null;
+  /** Layers for a newly chosen set of areas are being made. */
+  get layersPending(): boolean {
+    return this.pendingSet !== null;
+  }
+  /** Called when layers for a new set of areas arrive (the stage redraws). */
+  onChange: (() => void) | null = null;
   private work = scratch(true);
   private mask = scratch(true);
 
@@ -188,7 +199,7 @@ export class WrinklesEffect {
       y = Math.max(0, Math.floor(minY - pad));
     const cw = Math.min(w, Math.ceil(maxX + pad)) - x,
       ch = Math.min(h, Math.ceil(maxY + pad)) - y;
-    if (cw < 8 || ch < 8) return null;
+    if (!(cw >= 8 && ch >= 8)) return null; // also NaN, from a degenerate face
     const crop = scratch(true);
     crop.canvas.width = cw;
     crop.canvas.height = ch;
@@ -201,31 +212,69 @@ export class WrinklesEffect {
     const maskPixels = crop.ctx.getImageData(0, 0, cw, ch).data;
     const local = zones.map((z) => ({ ...z, cx: z.cx - x, cy: z.cy - y, from: z.from && { x: z.from.x - x, y: z.from.y - y } }));
     const r = await runLines({ pixels, mask: maskPixels, width: cw, height: ch, faceWidth, zones: local });
-    const toCanvas = (data: Uint8ClampedArray<ArrayBuffer>) => {
-      const c = document.createElement("canvas");
-      c.width = cw;
-      c.height = ch;
-      c.getContext("2d")!.putImageData(new ImageData(data, cw, ch), 0, 0);
-      return c;
-    };
-    const layers = (l: Layers) => ({ mul: toCanvas(l.mul), add: toCanvas(l.add) });
-    return { x, y, layers: Object.fromEntries(AREAS.map((id) => [id, layers(r[id])])) as Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }> };
+    return { x, y, w: cw, h: ch, sets: new Map([[AREAS.join(","), toAreaLayers(r, cw, ch)]]) };
+  }
+
+  /** Make the layers for this set of areas (the overlap shares differ per set), then redraw. */
+  private requestSet(enabled: AreaId[], key: string): void {
+    const a = this.areas;
+    if (!a || this.pendingSet === key) return;
+    this.pendingSet = key;
+    const gen = this.gen;
+    document.body.dataset.effectsBusy = "1";
+    void runLinesLayers(enabled)
+      .then((r) => {
+        if (gen !== this.gen || this.areas !== a) return;
+        if (!r) this.dirty = true; // the worker lost its cache: recompute everything
+        else a.sets.set(key, toAreaLayers(r, a.w, a.h));
+      })
+      .catch((err) => console.error("botox layers failed", err))
+      .finally(() => {
+        if (this.pendingSet === key) this.pendingSet = null;
+        this.onChange?.();
+      });
   }
 
   /** Composite each area's softening over `target` at its own dose (0..1; 0 = untreated). */
   draw(target: CanvasRenderingContext2D, doses: Partial<Record<AreaId, number>>): void {
     const a = this.areas;
     if (!a) return;
+    const enabled = AREAS.filter((id) => (doses[id] ?? 0) > 0);
+    if (!enabled.length) return;
+    const key = enabled.join(",");
+    const layers = a.sets.get(key);
+    if (!layers) {
+      this.requestSet(enabled, key);
+      return;
+    }
     target.save();
-    for (const id of AREAS) {
-      const dose = Math.max(0, Math.min(1, doses[id] ?? 0));
-      if (dose <= 0) continue;
-      target.globalAlpha = dose;
+    for (const id of enabled) {
+      const l = layers[id];
+      if (!l) continue;
+      target.globalAlpha = Math.max(0, Math.min(1, doses[id] ?? 0));
       target.globalCompositeOperation = "multiply";
-      target.drawImage(a.layers[id].mul, a.x, a.y);
+      target.drawImage(l.mul, a.x, a.y);
       target.globalCompositeOperation = "lighter";
-      target.drawImage(a.layers[id].add, a.x, a.y);
+      target.drawImage(l.add, a.x, a.y);
     }
     target.restore();
   }
+}
+
+type AreaLayers = Partial<Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }>>;
+
+function toAreaLayers(r: Partial<LinesResult>, w: number, h: number): AreaLayers {
+  const toCanvas = (data: Uint8ClampedArray<ArrayBuffer>) => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d")!.putImageData(new ImageData(data, w, h), 0, 0);
+    return c;
+  };
+  const out: AreaLayers = {};
+  for (const id of AREAS) {
+    const l: Layers | undefined = r[id];
+    if (l) out[id] = { mul: toCanvas(l.mul), add: toCanvas(l.add) };
+  }
+  return out;
 }

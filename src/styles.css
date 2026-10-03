@@ -963,3 +963,7 @@ body:not(.home-screen) .stage-wrap {
   color: #0b1000;
   border-color: var(--accent);
 }
+/* The only area still on: it cannot be switched off. */
+.area-chip[aria-disabled="true"] {
+  cursor: not-allowed;
+}

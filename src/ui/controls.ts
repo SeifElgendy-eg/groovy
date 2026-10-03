@@ -58,7 +58,15 @@ export function syncWrinklesPreset(): void {
 
 /** Toggle state of the botox area chips. */
 export function syncBotoxAreas(): void {
-  for (const btn of dom.botoxAreaButtons) btn.classList.toggle("active", btn.getAttribute("aria-pressed") === "true");
+  const on = dom.botoxAreaButtons.filter((b) => b.getAttribute("aria-pressed") === "true");
+  for (const btn of dom.botoxAreaButtons) {
+    const pressed = on.includes(btn);
+    btn.classList.toggle("active", pressed);
+    // The last area that is on cannot be switched off: say so instead of ignoring the tap.
+    const last = pressed && on.length === 1;
+    btn.setAttribute("aria-disabled", String(last));
+    btn.title = last ? "At least one area stays selected" : "";
+  }
 }
 
 /** Per-area strength (0..1) from the dose slider and the area chips. */
