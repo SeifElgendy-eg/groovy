@@ -44,8 +44,9 @@ describe("botox line finder", () => {
     expect(lift(75, 50)).toBeLessThan(depth * (MAX_SOFTEN + 0.1));
   });
 
-  it("leaves lines running the wrong way for the area", () => {
-    expect(lift(70, 110)).toBeLessThan(lift(75, 50) * 0.25);
+  it("softens lines running the wrong way for the area less", () => {
+    // Softened too (crepey texture runs every way), but clearly less than the area's own lines.
+    expect(lift(70, 110)).toBeLessThan(lift(75, 50) * 0.5);
   });
 
   it("leaves a freckle (round, not a line)", () => {

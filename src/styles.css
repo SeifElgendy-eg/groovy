@@ -943,7 +943,7 @@ body:not(.home-screen) .stage-wrap {
 /* Botox areas: toggle chips (all on by default). */
 .area-chips {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 7px;
   margin-top: 12px;
 }

@@ -13,7 +13,7 @@ import {
   type SkinInput,
 } from "../skin/input";
 import { runLines, runWrinkles } from "../skin/client";
-import type { AreaId, Layers } from "./lines";
+import { AREAS, type AreaId, type Layers } from "./lines";
 import { botoxZones } from "./regions";
 
 export class WrinklesEffect {
@@ -181,7 +181,7 @@ export class WrinklesEffect {
       return c;
     };
     const layers = (l: Layers) => ({ mul: toCanvas(l.mul), add: toCanvas(l.add) });
-    return { x, y, layers: { forehead: layers(r.forehead), frown: layers(r.frown), crows: layers(r.crows) } };
+    return { x, y, layers: Object.fromEntries(AREAS.map((id) => [id, layers(r[id])])) as Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }> };
   }
 
   /** Composite each area's softening over `target` at its own dose (0..1; 0 = untreated). */
@@ -189,7 +189,7 @@ export class WrinklesEffect {
     const a = this.areas;
     if (!a) return;
     target.save();
-    for (const id of ["forehead", "frown", "crows"] as AreaId[]) {
+    for (const id of AREAS) {
       const dose = Math.max(0, Math.min(1, doses[id] ?? 0));
       if (dose <= 0) continue;
       target.globalAlpha = dose;

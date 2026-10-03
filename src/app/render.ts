@@ -86,7 +86,7 @@ function renderWrinkles(w: number, h: number): void {
   }
   status.textContent = "Compare Before and After to preview smoother skin.";
   const doses = readBotoxDoses();
-  const any = doses.forehead > 0 || doses.frown > 0 || doses.crows > 0;
+  const any = Object.values(doses).some((d) => d > 0);
   if (!any && !dom.skinDebug.checked) return;
   const ready = ensurePrepared(wrinkles, w, h);
   // Photos: draw the native photo first. Camera frames are already on the stage.

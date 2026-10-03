@@ -11,7 +11,8 @@ import { blurLike, slide } from "../acne/texture";
 
 type Pixels = Uint8ClampedArray<ArrayBuffer>;
 
-export type AreaId = "forehead" | "frown" | "crows";
+export type AreaId = "forehead" | "frown" | "crows" | "undereye";
+export const AREAS: AreaId[] = ["forehead", "frown", "crows", "undereye"];
 
 /** A treated area: a soft ellipse, and the direction its lines run (fixed, or fanning out). */
 export interface Zone {
@@ -26,6 +27,10 @@ export interface Zone {
   lineAngle?: number;
   /** ...or fan out from this point (crow's feet). */
   from?: { x: number; y: number };
+  /** Lines here are very fine (crepe under the eyes, crow's feet): soften finer detail too. */
+  fine?: boolean;
+  /** Lines here run every way (under the eyes): no direction preference. */
+  anyDirection?: boolean;
   /** Direction tolerance (degrees): fully treated within the first, nothing past the second. */
   tolerance?: [number, number];
 }
@@ -48,15 +53,15 @@ export interface Layers {
 export type LinesResult = Record<AreaId, Layers>;
 
 /** Share of a line's depth removed at full dose (botox softens, it does not erase). */
-export const MAX_SOFTEN = 0.92;
+export const MAX_SOFTEN = 1;
 /** Share of the raised ridge between deep lines lowered at full dose (the fold's other half). */
-export const RIDGE_FLATTEN = 0.85;
+export const RIDGE_FLATTEN = 0.95;
 /** Ridges brighter than this above the skin are shine; only this much of them is lowered. */
 export const RIDGE_CAP = 35;
 /** Share of the mid band (crepey texture between lines) softened at full dose. */
-export const TEXTURE_SOFTEN = 0.5;
+export const TEXTURE_SOFTEN = 0.85;
 /** Largest lift of a line (levels). */
-export const MAX_LIFT = 32;
+export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
 export const MIN_DEPTH: [number, number] = [3, 8];
 /** A line within this angle of the area's expected direction is fully treated (degrees)... */
@@ -186,6 +191,8 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Frequency separation: the mid band (lines and crepey texture) is what botox softens; the fine
   // band (pores, grain) and the low band (the face's shading) are kept.
   const fineTop = blurLike(lum, w, h, Math.max(0.8, fw * 0.0022));
+  // For fine-line areas only the very finest grain is kept.
+  const finestTop = blurLike(lum, w, h, Math.max(0.5, fw * 0.0009));
   const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
   const spotFree = new Float32Array(n);
   for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
@@ -193,7 +200,7 @@ export function linesCompute(j: LinesJob): LinesResult {
   const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
   const result = {} as LinesResult;
-  for (const id of ["forehead", "frown", "crows"] as AreaId[]) {
+  for (const id of AREAS) {
     const zones = j.zones.filter((z) => z.id === id);
     const fill = new Float32Array(n),
       weight = new Float32Array(n),
@@ -211,7 +218,7 @@ export function linesCompute(j: LinesJob): LinesResult {
           if (e <= 0) continue;
           const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
           const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
-          const d = smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
+          const d = z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
           if (e * d > zw * dw) {
             zw = e;
             dw = d;
@@ -235,7 +242,7 @@ export function linesCompute(j: LinesJob): LinesResult {
           if (e <= 0) continue;
           const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
           const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
-          best = Math.max(best, e * smoothstep(lo, hi, Math.abs(Math.cos(edgeDir[p] - expected))));
+          best = Math.max(best, e * (z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(edgeDir[p] - expected)))));
         }
         edgeWeight[p] = best * smoothstep(0.35, 0.8, edge[p] / Math.max(1e-6, edgeRef)) * m;
       }
@@ -269,12 +276,18 @@ export function linesCompute(j: LinesJob): LinesResult {
       // (crepey texture); bright detail only near lines (ridges), never shine beyond RIDGE_CAP.
       const x = p % w,
         y = (p / w) | 0;
-      let zone = 0;
-      for (const z of zones) zone = Math.max(zone, ellipseWeight(z, x, y));
+      let zone = 0,
+        fineZone = 0;
+      for (const z of zones) {
+        const e = ellipseWeight(z, x, y);
+        zone = Math.max(zone, e);
+        if (z.fine) fineZone = Math.max(fineZone, e);
+      }
       const m = mask[p * 4 + 3] / 255;
       let band = 0;
       if (zone > 0 && m > 0) {
-        const mid = fineTop[p] - lowBand[p];
+        const top = fineTop[p] + (finestTop[p] - fineTop[p]) * fineZone;
+        const mid = top - lowBand[p];
         const onLine = Math.min(1, cover[p]);
         band =
           mid < 0

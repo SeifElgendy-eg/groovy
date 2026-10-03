@@ -20,7 +20,7 @@ const api = {
   },
   lines(job: LinesJob) {
     const r = linesCompute(job);
-    return transfer(r, [r.forehead.mul.buffer, r.forehead.add.buffer, r.frown.mul.buffer, r.frown.add.buffer, r.crows.mul.buffer, r.crows.add.buffer]);
+    return transfer(r, Object.values(r).flatMap((l) => [l.mul.buffer, l.add.buffer]));
   },
 };
 

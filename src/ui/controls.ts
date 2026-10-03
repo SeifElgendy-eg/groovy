@@ -62,10 +62,15 @@ export function syncBotoxAreas(): void {
 }
 
 /** Per-area strength (0..1) from the dose slider and the area chips. */
-export function readBotoxDoses(): Record<"forehead" | "frown" | "crows", number> {
+export function readBotoxDoses(): Record<"forehead" | "frown" | "crows" | "undereye", number> {
   const dose = Math.min(1, Number(dom.wrinklesSlider.value) / FULL_DOSE_UNITS);
   const on = (id: string) => dom.botoxAreaButtons.some((b) => b.dataset.botoxArea === id && b.getAttribute("aria-pressed") === "true");
-  return { forehead: on("forehead") ? dose : 0, frown: on("frown") ? dose : 0, crows: on("crows") ? dose : 0 };
+  return {
+    forehead: on("forehead") ? dose : 0,
+    frown: on("frown") ? dose : 0,
+    crows: on("crows") ? dose : 0,
+    undereye: on("undereye") ? dose : 0,
+  };
 }
 
 /** The acne sliders' current values. */

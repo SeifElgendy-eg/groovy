@@ -54,6 +54,25 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
       from: { x: P[outer].x - ux * side * ew * 0.1, y: P[outer].y - uy * side * ew * 0.1 },
       // Crow's feet curve as they fan out: a wider direction tolerance than the forehead's.
       tolerance: [35, 65],
+      fine: true,
+    });
+  }
+  // Under the eyes: the crepey band below the lower lid, inner to outer corner (lashes and the
+  // lid margin are carved out of the skin mask). Lines here run every way.
+  for (const [outer, inner, lower] of [
+    [33, 133, 145],
+    [263, 362, 374],
+  ]) {
+    const ew = Math.hypot(P[outer].x - P[inner].x, P[outer].y - P[inner].y);
+    zones.push({
+      id: "undereye",
+      cx: (P[outer].x + P[inner].x) / 2 + vx * ew * 0.12,
+      cy: P[lower].y + vy * ew * 0.55,
+      rx: ew * 0.85,
+      ry: ew * 0.55,
+      angle,
+      anyDirection: true,
+      fine: true,
     });
   }
   return zones;
