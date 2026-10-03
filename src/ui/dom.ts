@@ -71,7 +71,7 @@ export const dom = {
   wrinklesStatus: el<HTMLElement>("wrinklesStatus"),
   wrinklesValue: el<HTMLElement>("wrinklesValue"),
   // Groups selected by class / attribute rather than id.
-  lipPresetButtons: [...document.querySelectorAll<HTMLButtonElement>(".preset-btn")],
+  lipPresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-lip-preset]")],
   shadeButtons: [...document.querySelectorAll<HTMLButtonElement>(".shade-btn")],
   finishButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-finish]")],
   acnePresetButtons: [...document.querySelectorAll<HTMLButtonElement>("[data-acne-preset]")],

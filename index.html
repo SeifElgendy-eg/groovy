@@ -247,20 +247,22 @@
             >
               <div class="eyebrow">LIPS</div>
               <h3>Filler (lips)</h3>
-              <div class="preset-grid">
-                <button class="preset-btn" data-lip-preset="0">Original</button>
-                <button class="preset-btn" data-lip-preset="1">1 ml</button>
-                <button class="preset-btn" data-lip-preset="2">2 ml</button>
-                <button class="preset-btn" data-lip-preset="3">3 ml</button>
-                <button class="preset-btn" data-lip-preset="4">4 ml</button>
-              </div>
-
-              <div class="control">
+              <div class="control ml-control">
                 <div class="row">
                   <strong>Volume</strong>
                   <span id="lipValue" class="value">0 ml</span>
                 </div>
-                <input id="lipSlider" aria-label="Filler volume in ml" type="range" min="0" max="4" step="0.25" value="0" />
+                <input id="lipSlider" class="ml-slider" aria-label="Filler volume in ml" type="range" min="0" max="4" step="0.25" value="0" />
+                <div class="ml-scale">
+                  <div class="ml-ticks" aria-hidden="true"><i class="major" style="left:0%"></i><i class="" style="left:6.25%"></i><i class="" style="left:12.5%"></i><i class="" style="left:18.75%"></i><i class="major" style="left:25%"></i><i class="" style="left:31.25%"></i><i class="" style="left:37.5%"></i><i class="" style="left:43.75%"></i><i class="major" style="left:50%"></i><i class="" style="left:56.25%"></i><i class="" style="left:62.5%"></i><i class="" style="left:68.75%"></i><i class="major" style="left:75%"></i><i class="" style="left:81.25%"></i><i class="" style="left:87.5%"></i><i class="" style="left:93.75%"></i><i class="major" style="left:100%"></i></div>
+                  <div class="ml-stops" role="radiogroup" aria-label="Filler volume presets">
+                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="0" style="left:0%">None</button>
+                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="1" style="left:25%">1 ml</button>
+                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="2" style="left:50%">2 ml</button>
+                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="3" style="left:75%">3 ml</button>
+                  <button class="ml-stop" type="button" role="radio" aria-checked="false" data-lip-preset="4" style="left:100%">4 ml</button>
+                  </div>
+                </div>
               </div>
 
               <div class="control">

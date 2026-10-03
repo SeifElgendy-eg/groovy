@@ -74,8 +74,13 @@ export const formatMl = (v: number): string => `${Number(v.toFixed(2))} ml`;
 export function syncLipPreset(): void {
   const v = Number(dom.lipSlider.value);
   dom.lipValue.textContent = formatMl(v);
+  // The track fills up to the value; the ml label at that stop (if any) is the checked "radio".
+  const max = Number(dom.lipSlider.max) || 4;
+  dom.lipSlider.parentElement?.style.setProperty("--fill", `${(v / max) * 100}%`);
   for (const btn of dom.lipPresetButtons) {
-    btn.classList.toggle("active", Number(btn.dataset.lipPreset) === v);
+    const on = Number(btn.dataset.lipPreset) === v;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-checked", String(on));
   }
 }
 
