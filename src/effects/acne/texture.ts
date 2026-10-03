@@ -198,34 +198,49 @@ export function slide(src: Float32Array, w: number, h: number, k: number, isMax:
     lines = vertical ? w : h;
   const win = 2 * k + 1;
   const n = len + 2 * k;
-  const g = new Float32Array(n),
-    hh = new Float32Array(n),
-    v = new Float32Array(n).fill(isMax ? -Infinity : Infinity); // the line, padded k each side
+  // (Doubles: the values are all float32 ones, so nothing changes, and no conversions are needed.)
+  const g = new Float64Array(n),
+    hh = new Float64Array(n),
+    v = new Float64Array(n).fill(isMax ? -Infinity : Infinity); // the line, padded k each side
   const step = vertical ? w : 1,
     stride = vertical ? 1 : w;
   for (let line = 0; line < lines; line++) {
     const base = line * stride;
     for (let i = 0; i < len; i++) v[k + i] = src[base + i * step];
-    // Running max (or min) from the start of each window-sized block forwards (g) and from its
-    // end backwards (hh); any window spans at most two blocks.
+    // Running max (or min) from the end of each window-sized block backwards (hh), then from its
+    // start forwards (g), and out of the two: any window spans at most two blocks. (The output
+    // for i needs g at i + 2k, so it trails the forward pass.)
+    const k2 = 2 * k;
     if (isMax) {
       for (let b = 0; b < n; b += win) {
         const e = Math.min(n, b + win);
-        g[b] = v[b];
-        for (let i = b + 1; i < e; i++) g[i] = Math.max(g[i - 1], v[i]);
         hh[e - 1] = v[e - 1];
         for (let i = e - 2; i >= b; i--) hh[i] = Math.max(hh[i + 1], v[i]);
       }
-      for (let i = 0; i < len; i++) out[base + i * step] = Math.max(hh[i], g[i + 2 * k]);
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        let m = (g[b] = v[b]);
+        if (b >= k2) out[base + (b - k2) * step] = Math.max(hh[b - k2], m);
+        for (let i = b + 1; i < e; i++) {
+          m = g[i] = Math.max(g[i - 1], v[i]);
+          if (i >= k2) out[base + (i - k2) * step] = Math.max(hh[i - k2], m);
+        }
+      }
     } else {
       for (let b = 0; b < n; b += win) {
         const e = Math.min(n, b + win);
-        g[b] = v[b];
-        for (let i = b + 1; i < e; i++) g[i] = Math.min(g[i - 1], v[i]);
         hh[e - 1] = v[e - 1];
         for (let i = e - 2; i >= b; i--) hh[i] = Math.min(hh[i + 1], v[i]);
       }
-      for (let i = 0; i < len; i++) out[base + i * step] = Math.min(hh[i], g[i + 2 * k]);
+      for (let b = 0; b < n; b += win) {
+        const e = Math.min(n, b + win);
+        let m = (g[b] = v[b]);
+        if (b >= k2) out[base + (b - k2) * step] = Math.min(hh[b - k2], m);
+        for (let i = b + 1; i < e; i++) {
+          m = g[i] = Math.min(g[i - 1], v[i]);
+          if (i >= k2) out[base + (i - k2) * step] = Math.min(hh[i - k2], m);
+        }
+      }
     }
   }
   return out;
@@ -234,50 +249,49 @@ export function slide(src: Float32Array, w: number, h: number, k: number, isMax:
 /** slide down the columns, all columns at once (a row at a time, in memory order). Same result. */
 function slideColumns(src: Float32Array, w: number, h: number, k: number, isMax: boolean): Float32Array {
   const out = new Float32Array(src.length);
-  const win = 2 * k + 1;
-  const n = h + 2 * k; // padded rows: row i is the source row i - k
-  const g = new Float32Array(n * w),
-    hh = new Float32Array(n * w);
+  const win = 2 * k + 1,
+    k2 = 2 * k;
+  const n = h + k2; // padded rows: row i is the source row i - k
   const pad = isMax ? -Infinity : Infinity;
   const pick = isMax ? Math.max : Math.min;
-  // Row i of the padded column set, written into dst at row i.
-  const load = (dst: Float32Array, i: number) => {
-    const j = i - k;
-    if (j < 0 || j >= h) dst.fill(pad, i * w, i * w + w);
-    else dst.set(src.subarray(j * w, j * w + w), i * w);
-  };
+  // Backwards from the end of each window-sized block of rows (all of them kept), then forwards
+  // from its start (only the current row kept), each output row trailing by 2k rows.
+  const hh = new Float32Array(n * w),
+    g = new Float32Array(w);
   for (let b = 0; b < n; b += win) {
     const e = Math.min(n, b + win);
-    load(g, b);
-    for (let i = b + 1; i < e; i++) {
+    for (let i = e - 1; i >= b; i--) {
       const j = i - k,
-        r = i * w,
-        r0 = r - w;
-      if (j < 0 || j >= h) for (let x = 0; x < w; x++) g[r + x] = pick(g[r0 + x], pad);
-      else {
+        r = i * w;
+      if (j < 0 || j >= h) {
+        if (i === e - 1) hh.fill(pad, r, r + w);
+        else for (let x = 0; x < w; x++) hh[r + x] = pick(hh[r + w + x], pad);
+      } else {
         const s0 = j * w;
-        if (isMax) for (let x = 0; x < w; x++) g[r + x] = Math.max(g[r0 + x], src[s0 + x]);
-        else for (let x = 0; x < w; x++) g[r + x] = Math.min(g[r0 + x], src[s0 + x]);
-      }
-    }
-    load(hh, e - 1);
-    for (let i = e - 2; i >= b; i--) {
-      const j = i - k,
-        r = i * w,
-        r1 = r + w;
-      if (j < 0 || j >= h) for (let x = 0; x < w; x++) hh[r + x] = pick(hh[r1 + x], pad);
-      else {
-        const s0 = j * w;
-        if (isMax) for (let x = 0; x < w; x++) hh[r + x] = Math.max(hh[r1 + x], src[s0 + x]);
-        else for (let x = 0; x < w; x++) hh[r + x] = Math.min(hh[r1 + x], src[s0 + x]);
+        if (i === e - 1) hh.set(src.subarray(s0, s0 + w), r);
+        else if (isMax) for (let x = 0; x < w; x++) hh[r + x] = Math.max(hh[r + w + x], src[s0 + x]);
+        else for (let x = 0; x < w; x++) hh[r + x] = Math.min(hh[r + w + x], src[s0 + x]);
       }
     }
   }
-  for (let y = 0; y < h; y++) {
-    const a = y * w,
-      c = (y + 2 * k) * w;
-    if (isMax) for (let x = 0; x < w; x++) out[a + x] = Math.max(hh[a + x], g[c + x]);
-    else for (let x = 0; x < w; x++) out[a + x] = Math.min(hh[a + x], g[c + x]);
+  for (let b = 0; b < n; b += win) {
+    const e = Math.min(n, b + win);
+    for (let i = b; i < e; i++) {
+      const j = i - k;
+      if (j < 0 || j >= h) {
+        if (i === b) g.fill(pad);
+        else for (let x = 0; x < w; x++) g[x] = pick(g[x], pad);
+      } else {
+        const s0 = j * w;
+        if (i === b) g.set(src.subarray(s0, s0 + w));
+        else if (isMax) for (let x = 0; x < w; x++) g[x] = Math.max(g[x], src[s0 + x]);
+        else for (let x = 0; x < w; x++) g[x] = Math.min(g[x], src[s0 + x]);
+      }
+      if (i < k2) continue;
+      const o = (i - k2) * w;
+      if (isMax) for (let x = 0; x < w; x++) out[o + x] = Math.max(hh[o + x], g[x]);
+      else for (let x = 0; x < w; x++) out[o + x] = Math.min(hh[o + x], g[x]);
+    }
   }
   return out;
 }

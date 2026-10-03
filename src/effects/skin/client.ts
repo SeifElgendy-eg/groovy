@@ -16,6 +16,7 @@ import {
   type WrinklesResult,
 } from "./compute";
 import type { SkinWorkerApi } from "./worker";
+import { noteWork } from "../../app/activity";
 import { textureCompute, type TextureJob, type TextureResult } from "../acne/texture";
 import { linesCompute, linesLayers, type AreaId, type LinesJob, type LinesResult } from "../wrinkles/lines";
 
@@ -93,28 +94,30 @@ export function cancel(lane: Lane): void {
 
 // Inputs are copied to the worker (not transferred), so a failed worker can be retried, or fall
 // back to the main thread, with the same data. Outputs are transferred back without copying.
-async function run<J, R>(lane: Lane, job: J, remoteCall: (h: Handle) => Promise<R>, local: (j: J) => R): Promise<R> {
+async function run<J, R>(label: string, lane: Lane, job: J, remoteCall: (h: Handle) => Promise<R>, local: (j: J) => R): Promise<R> {
+  const start = performance.now();
+  const runLocal = () => {
+    document.body.dataset.skinCompute = "main";
+    const result = local(job);
+    noteWork(`${label} (main thread)`, performance.now() - start);
+    return result;
+  };
   for (let attempt = 0; ; attempt++) {
     const h = worker(lane);
-    if (!h) {
-      document.body.dataset.skinCompute = "main";
-      return local(job);
-    }
+    if (!h) return runLocal();
     h.running++;
     try {
       const result = await Promise.race([remoteCall(h), h.failed]);
       h.answered = true;
       document.body.dataset.skinCompute = "worker"; // lets tests confirm the worker really ran
+      noteWork(label, performance.now() - start);
       return result;
     } catch (err) {
       if (err instanceof Cancelled) throw err;
       console.warn(`skin job failed in the worker (${lane}, attempt ${attempt + 1})`, err);
       // Start over in a fresh worker (its memory starts clean); a second failure runs it here.
       h.stop(new Error("skin worker restarted"));
-      if (attempt >= 1) {
-        document.body.dataset.skinCompute = "main";
-        return local(job);
-      }
+      if (attempt >= 1) return runLocal();
     } finally {
       h.running--;
     }
@@ -122,16 +125,16 @@ async function run<J, R>(lane: Lane, job: J, remoteCall: (h: Handle) => Promise<
 }
 
 export const runAcne = (job: AcneJob): Promise<AcneResult> =>
-  run("acne", job, (h) => h.api.acne(job) as Promise<AcneResult>, acneCompute);
+  run("acne spots", "acne", job, (h) => h.api.acne(job) as Promise<AcneResult>, acneCompute);
 
 export const runWrinkles = (job: WrinklesJob): Promise<WrinklesResult> =>
-  run("botox", job, (h) => h.api.wrinkles(job) as Promise<WrinklesResult>, wrinklesCompute);
+  run("botox mask", "botox", job, (h) => h.api.wrinkles(job) as Promise<WrinklesResult>, wrinklesCompute);
 
 export const runTexture = (job: TextureJob): Promise<TextureResult> =>
-  run("acne", job, (h) => h.api.texture(job) as Promise<TextureResult>, textureCompute);
+  run("pores and scars", "acne", job, (h) => h.api.texture(job) as Promise<TextureResult>, textureCompute);
 
 export const runLines = (job: LinesJob): Promise<LinesResult> =>
-  run("botox", job, (h) => h.api.lines(job) as Promise<LinesResult>, linesCompute);
+  run("botox", "botox", job, (h) => h.api.lines(job) as Promise<LinesResult>, linesCompute);
 
 /**
  * Layers for the botox areas that are on, from the last runLines (null: recompute). Never retried

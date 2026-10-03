@@ -12,7 +12,7 @@ import { clearFace, processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { state } from "./state";
 import { cameraTuning } from "./cameraTuning";
-import { tracked } from "./activity";
+import { noteWork, tracked } from "./activity";
 import { drawLifted } from "../io/softwareLift";
 
 let stream: MediaStream | null = null;
@@ -78,7 +78,12 @@ export function stopCamera(): void {
 
 /** Shared tail of loading a photo: size the stage, run the models, draw. */
 async function onPhotoReady(loadedStatus: string): Promise<void> {
-  return tracked("analysing the photo", () => photoReady(loadedStatus));
+  const start = performance.now();
+  try {
+    return await tracked("analysing the photo", () => photoReady(loadedStatus));
+  } finally {
+    noteWork("photo analysis", performance.now() - start);
+  }
 }
 
 async function photoReady(loadedStatus: string): Promise<void> {

@@ -57,6 +57,20 @@ function labelFor(start: number, end: number): string {
   return best || "page work (unlabelled)";
 }
 
+/** How long the last run of each kind of heavy work took (ms), for the diagnostics panel. */
+const lastWork = new Map<string, number>();
+
+/** Note how long a piece of heavy work took (e.g. "botox" in the worker). */
+export function noteWork(label: string, ms: number): void {
+  lastWork.set(label, Math.round(ms));
+  for (const fn of listeners) fn();
+}
+
+/** The last time taken by each kind of heavy work, in the order first seen. */
+export function recentWork(): [string, number][] {
+  return [...lastWork];
+}
+
 /** The longest freeze in the last `windowMs`, if any. */
 export function worstRecentFreeze(windowMs = 30000): Freeze | null {
   const since = performance.now() - windowMs;
