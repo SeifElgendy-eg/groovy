@@ -1,5 +1,11 @@
 # Golden scenarios this PR changes on purpose, one per line. CI only honours this file when the
 # PR itself edits it, so an entry never silently carries over to later PRs. Clear it after merging.
-lips-preset-16
-lips-preset-28
-lips-preset-50
+# This PR: scars/pores keep highlights and hair; month presets now also set redness, pores, scars.
+acne-50
+acne-80
+acne-100
+acne-pores-100
+acne-scars-100
+acne-real-scars-100
+acne-real-pores-100
+acne-real-redness-100

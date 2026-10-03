@@ -1,5 +1,6 @@
 // Composition root: mounts the overlay UI, wires controls to actions, and starts the models.
 import { metaOf } from "../effects/registry";
+import { ACNE_PRESETS } from "../effects/acne/presets";
 import {
   showPercent,
   syncAcnePreset,
@@ -72,17 +73,8 @@ function resetAll(): void {
   dom.skinDebug.checked = false;
   dom.wrinklesSlider.value = "100";
   syncWrinklesPreset();
-  dom.acneSlider.value = "0";
-  dom.acneValue.textContent = "0%";
+  for (const slider of [dom.acneSlider, dom.scarsSlider, dom.poresSlider, dom.rednessSlider]) slider.value = "0";
   syncAcnePreset();
-  for (const [slider, label] of [
-    [dom.scarsSlider, dom.scarsValue],
-    [dom.poresSlider, dom.poresValue],
-    [dom.rednessSlider, dom.rednessValue],
-  ] as const) {
-    slider.value = "0";
-    label.textContent = "0%";
-  }
   dom.brightnessSlider.value = "0";
   dom.brightnessValue.textContent = "0%";
   dom.lipSlider.value = "0";
@@ -142,18 +134,23 @@ function bindControls(): void {
 
   // Acne
   bindSlider(dom.acneSlider, dom.acneValue, syncAcnePreset);
+  // A month sets every acne slider (spots, redness, pores, scars) to that month's plan.
   for (const btn of dom.acnePresetButtons)
     btn.addEventListener("click", () => {
-      dom.acneSlider.value = btn.dataset.acnePreset!;
-      showPercent(dom.acneValue, dom.acneSlider);
+      const plan = ACNE_PRESETS[btn.dataset.acnePreset!];
+      if (!plan) return;
+      dom.acneSlider.value = String(plan.spots);
+      dom.rednessSlider.value = String(plan.redness);
+      dom.poresSlider.value = String(plan.pores);
+      dom.scarsSlider.value = String(plan.scars);
       syncAcnePreset();
       userChanged();
     });
 
-  // Acne scars and pores
-  bindSlider(dom.scarsSlider, dom.scarsValue);
-  bindSlider(dom.poresSlider, dom.poresValue);
-  bindSlider(dom.rednessSlider, dom.rednessValue);
+  // Acne scars, pores and redness (fine-tuning after a month is picked)
+  bindSlider(dom.scarsSlider, dom.scarsValue, syncAcnePreset);
+  bindSlider(dom.poresSlider, dom.poresValue, syncAcnePreset);
+  bindSlider(dom.rednessSlider, dom.rednessValue, syncAcnePreset);
 
   // Skin brightness
   bindSlider(dom.brightnessSlider, dom.brightnessValue);
