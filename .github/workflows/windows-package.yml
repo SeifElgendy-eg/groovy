@@ -23,8 +23,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -68,7 +68,7 @@ jobs:
           'launcher OK'
           Stop-Process -Id $p.Id -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Groovy-Windows
           path: release/Groovy-Windows.zip
@@ -83,7 +83,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Groovy-Windows
       - name: Create the release
