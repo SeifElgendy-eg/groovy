@@ -13,6 +13,7 @@ import {
 import { dom } from "../ui/dom";
 import { mountFaceGuide } from "../ui/faceGuide";
 import { mountCameraPanel } from "../ui/cameraPanel";
+import { mountLipTuning } from "../ui/lipTuning";
 import { mountStatusToast, setStatus } from "../ui/status";
 import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
@@ -189,6 +190,7 @@ export function start(): void {
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();
+  mountLipTuning();
   bindControls();
   setStatus("Loading models…");
   dom.stageWrap.classList.add("camera-mode");
