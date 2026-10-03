@@ -89,11 +89,38 @@ export class WrinklesEffect {
   // 2. Lashes and eyebrows: full loops grown outward, with a rounded edge.
   mask.ctx.lineJoin = "round";
   mask.ctx.lineWidth = Math.max(1.5, faceWidth * 0.008);
-  for (const poly of guardContours(points, faceWidth, { lowerLid: 0.09 })) {
+  // Botox reaches the crow's feet right at the outer eye corner: the guard past the corners is
+  // small, and only the upper lashes' outward flare (above the corner) keeps a wider guard.
+  for (const poly of guardContours(points, faceWidth, { lowerLid: 0.09, corner: 0.03 })) {
     mask.ctx.beginPath();
     addClosedContour(mask.ctx, poly);
     mask.ctx.fill();
     mask.ctx.stroke();
+  }
+  {
+    const angle = Math.atan2(points[263].y - points[33].y, points[263].x - points[33].x);
+    const ux = Math.cos(angle),
+      uy = Math.sin(angle),
+      vx = -uy,
+      vy = ux; // v points down the face
+    for (const [outer, inner, side] of [
+      [33, 133, -1],
+      [263, 362, 1],
+    ]) {
+      const ew = Math.hypot(points[outer].x - points[inner].x, points[outer].y - points[inner].y);
+      const c = points[outer];
+      mask.ctx.beginPath();
+      mask.ctx.ellipse(
+        c.x + ux * side * ew * 0.04 - vx * ew * 0.1,
+        c.y + uy * side * ew * 0.04 - vy * ew * 0.1,
+        ew * 0.16,
+        ew * 0.13,
+        angle,
+        0,
+        Math.PI * 2,
+      );
+      mask.ctx.fill();
+    }
   }
   // The bridge and sidewalls are facial shape, not wrinkle creases.
   // Protect the complete nose, with an inward feather below.
@@ -155,7 +182,8 @@ export class WrinklesEffect {
       minY = Math.min(minY, z.cy - r);
       maxY = Math.max(maxY, z.cy + r);
     }
-    const pad = faceWidth * 0.04;
+    // Extra room so the grain transplant can borrow from the cheeks and temples.
+    const pad = faceWidth * 0.1;
     const x = Math.max(0, Math.floor(minX - pad)),
       y = Math.max(0, Math.floor(minY - pad));
     const cw = Math.min(w, Math.ceil(maxX + pad)) - x,

@@ -64,11 +64,11 @@ export const RIDGE_FLATTEN = 0.95;
 /** Ridges brighter than this above the skin are shine; only this much of them is lowered. */
 export const RIDGE_CAP = 35;
 /** Share of the mid band (crepey texture between lines) softened at full dose. */
-export const TEXTURE_SOFTEN = 0.85;
+export const TEXTURE_SOFTEN = 0.95;
 /** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
 export const FINEST_LINES = 0.85;
-/** Share of the fine detail replaced by transplanted grain at full dose. */
-export const GRAIN_REPLACE = 0.9;
+/** Share of the fine detail replaced by fresh grain at full dose (main areas). */
+export const GRAIN_REPLACE = 0.8;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -177,7 +177,26 @@ export function linesCompute(j: LinesJob): LinesResult {
   // Round dark spots light up the line measure on their rims; find each spot (its centre curves
   // both ways) and switch the treatment off over its whole extent.
   const spotR = Math.max(2, Math.round(fw * 0.008));
-  const spotNear = slide(slide(spots, w, h, spotR, true, false), w, h, spotR, true, true);
+  // A freckle or mole stands alone; where several lines meet (crow's feet at the eye corner) the
+  // junction is round and dark too, but has lines running out of it: those are not protected.
+  // Line signal in a ring around each spot, ignoring the spot's own rim (which lights up the line
+  // measure too): normalised blur of the line strength with the spot areas left out.
+  const rawNear = slide(slide(spots, w, h, Math.round(spotR * 1.5), true, false), w, h, Math.round(spotR * 1.5), true, true);
+  const spotRef = percentile(spots, mask, j.zones, w, h, 0.9);
+  const ringKeep = new Float32Array(n),
+    ringLine = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    ringKeep[p] = 1 - smoothstep(0.15, 0.4, rawNear[p] / Math.max(1e-6, spotRef));
+    ringLine[p] = strength[p] * ringKeep[p];
+  }
+  const ringNum = blurLike(ringLine, w, h, spotR * 3),
+    ringDen = blurLike(ringKeep, w, h, spotR * 3);
+  const isolated = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    const around = ringDen[p] > 1e-3 ? ringNum[p] / ringDen[p] : 0;
+    isolated[p] = spots[p] * (1 - smoothstep(0.25, 0.6, around));
+  }
+  const spotNear = slide(slide(isolated, w, h, spotR, true, false), w, h, spotR, true, true);
 
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
@@ -207,17 +226,39 @@ export function linesCompute(j: LinesJob): LinesResult {
   const lineShaped = blobWeight(lum, w, h, Math.max(1, fw * 0.003));
   for (let p = 0; p < n; p++) lineShaped[p] = 1 - lineShaped[p];
   const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
-  // Grain transplant: the fine detail of treated skin is replaced by real grain copied from clean,
-  // line-free skin of the same face (see transplantGrain).
   const fineBand = new Float32Array(n);
   for (let p = 0; p < n; p++) fineBand[p] = lum[p] - fineTop[p];
-  const donorGrain = transplantGrain(fineBand, lowBand, strength, mask, w, h, fw, j.zones);
+  // Fresh grain for the treated skin: the face's own fine texture grew along its creases and
+  // keeps tracing them, so it is replaced by new, directionless grain of the same scale and
+  // strength as this face's least-lined skin.
+  const donorGrain = synthGrain(fineBand, lineShaped, mask, w, h, fw);
   const spotFree = new Float32Array(n);
   for (let p = 0; p < n; p++) spotFree[p] = 1 - smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * scaleRef[0] + spotNear[p]));
 
   const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
   const result = {} as LinesResult;
+  // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
+  // area's layer is computed from the original photo and they are drawn on top of each other, so
+  // in an overlap the correction would be applied twice (pale streaks). Each pixel's correction is
+  // shared out instead: mostly to the area it is most central to, summing to one.
+  const areaWeight = {} as Record<AreaId, Float32Array>;
+  for (const id of AREAS) {
+    const zs = j.zones.filter((z) => z.id === id);
+    const e = new Float32Array(n);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        let m = 0;
+        for (const z of zs) m = Math.max(m, ellipseWeight(z, x, y));
+        e[y * w + x] = m * m;
+      }
+    areaWeight[id] = e;
+  }
+  const shareOf = (id: AreaId, p: number) => {
+    let sum = 0;
+    for (const a of AREAS) sum += areaWeight[a][p];
+    return sum > 1e-6 ? areaWeight[id][p] / Math.max(sum, areaWeight[id][p]) : 0;
+  };
   for (const id of AREAS) {
     const zones = j.zones.filter((z) => z.id === id);
     const fill = new Float32Array(n),
@@ -270,6 +311,17 @@ export function linesCompute(j: LinesJob): LinesResult {
     // The line mask, widened to cover the whole line (its centre is where the measure peaks).
     const r = Math.max(1, Math.round(fw * 0.0025));
     const cover = slide(slide(weight, w, h, r, true, false), w, h, r, true, true);
+    // Main areas: the plain skin level, with lines (and bright ridges, clipped) left out of the
+    // average. Each pixel there goes to this level plus fresh grain: one target, so nothing stacks.
+    const sb = Math.max(4, fw * 0.022);
+    const exW = new Float32Array(n),
+      exL = new Float32Array(n);
+    for (let p = 0; p < n; p++) {
+      exW[p] = 1 - Math.min(1, cover[p]);
+      exL[p] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * exW[p];
+    }
+    const baseNum = blurLike(exL, w, h, sb),
+      baseDen = blurLike(exW, w, h, sb);
     // The skin level around each line, leaving the lines (and the shine) out of the average
     // (normalised convolution): the depth is then right at the line's centre and zero beside it,
     // so the fill never leaves a light halo next to a line.
@@ -300,6 +352,7 @@ export function linesCompute(j: LinesJob): LinesResult {
       let zone = 0,
         fineZone = 0,
         loose = 0,
+        looseSoft = 0,
         strictOk = 0;
       for (const z of zones) {
         const e = ellipseWeight(z, x, y);
@@ -308,7 +361,10 @@ export function linesCompute(j: LinesJob): LinesResult {
           const expected = z.lineAngle ?? 0;
           const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
           strictOk = Math.max(strictOk, e * smoothstep(lo, hi, Math.abs(Math.cos(fine.dir[p] - expected))) * (fine.strength[p] > 0 ? 1 : 0));
-        } else loose = Math.max(loose, e);
+        } else {
+          loose = Math.max(loose, e);
+          looseSoft = Math.max(looseSoft, ellipseWeight(z, x, y, 0.7));
+        }
         zone = Math.max(zone, e);
         if (z.fine) fineZone = Math.max(fineZone, e);
       }
@@ -322,11 +378,11 @@ export function linesCompute(j: LinesJob): LinesResult {
         band =
           mid < 0
             ? -mid * MAX_SOFTEN * Math.max(TEXTURE_SOFTEN * loose, onLine * zone) * spotFree[p]
-            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * 0.6 * loose + RIDGE_FLATTEN * Math.min(1, nearLine[p]) * zone);
+            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * loose + RIDGE_FLATTEN * Math.min(1, nearLine[p]) * zone);
         // The faint leftover lines in the finest grain (both dark and light ones).
         const finest = lum[p] - finestTop[p];
         band -= finest * FINEST_LINES * lineShaped[p] * strictOk * spotFree[p];
-        // Loose zones: swap the fine detail (with the lines' last traces) for transplanted grain.
+        // Main areas: swap the fine detail (with the lines' last traces) for fresh grain.
         // Freckles and moles keep their own detail.
         band += (donorGrain[p] - fineBand[p]) * GRAIN_REPLACE * loose * spotFree[p];
         band *= m;
@@ -352,8 +408,20 @@ export function linesCompute(j: LinesJob): LinesResult {
       fill[p] -= lower * notLine * RIDGE_FLATTEN;
       // Whichever change is larger (in its own direction) wins: line fill, ridge lowering, band.
       fill[p] = band > 0 ? Math.max(fill[p], band) : Math.min(fill[p], band);
+      if (looseSoft > 0 && m > 0) {
+        const base = baseDen[p] > 0.05 ? baseNum[p] / baseDen[p] : lowBand[p];
+        const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, base + donorGrain[p] * GRAIN_REPLACE - lum[p]));
+        // Wide, gentle hand-over at the area's edge.
+        const edge = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
+        // Freckles and moles keep their own look, but only their dark core: the skin around them
+        // goes to the target like everywhere else (no pale halo).
+        const core = smoothstep(2, 6, base - lum[p]);
+        const k = edge * (1 - (1 - spotFree[p]) * core);
+        fill[p] = fill[p] * (1 - edge) + toTarget * k;
+      }
       fill[p] = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, fill[p]));
     }
+    for (let p = 0; p < n; p++) if (fill[p] !== 0) fill[p] *= shareOf(id, p);
     result[id] = toLayers(pixels, lum, fill, skin);
   }
   return result;
@@ -403,107 +471,45 @@ function percentile(v: Float32Array, mask: Pixels, zones: Zone[], w: number, h: 
 }
 
 /**
- * Grain transplant. For a grid of overlapping blocks over the treated zones, find a donor block
- * nearby whose skin is clean (no lines), of similar brightness, inside the skin mask, and copy
- * its fine detail. Blocks are blended with tent weights, rescaled so the blend keeps the grain's
- * strength (averaging overlapping patches would flatten it). Returns the new fine detail per
- * pixel (0 outside the zones).
+ * New skin grain: random noise band-limited to the fine band's scale (two octaves: grain and
+ * pores), with the amplitude of this face's least line-like fine detail (robust median of its
+ * magnitude where the texture is not line-shaped). Seeded per pixel position, so the same photo
+ * always gets the same grain. No direction, so it cannot carry a line.
  */
-export function transplantGrain(
+export function synthGrain(
   fineBand: Float32Array,
-  lowBand: Float32Array,
-  lineStrength: Float32Array,
+  lineShaped: Float32Array,
   mask: Pixels,
   w: number,
   h: number,
   fw: number,
-  zones: Zone[],
-  seed = 1,
 ): Float32Array {
   const n = w * h;
-  // Clean skin: inside the mask and far from anything line-like.
-  const lineNear = blurLike(lineStrength, w, h, Math.max(1.5, fw * 0.006));
-  const clean = new Float32Array(n);
-  for (let p = 0; p < n; p++) clean[p] = mask[p * 4 + 3] > 200 ? 1 - smoothstep(0.12, 0.35, lineNear[p]) : 0;
-  const B = Math.max(6, Math.round(fw * 0.028)); // block spacing; blocks are 2B wide (overlap)
-  const R = Math.max(B * 3, Math.round(fw * 0.22)); // search radius
-  const gx = Math.ceil(w / B) + 1,
-    gy = Math.ceil(h / B) + 1;
-  const offX = new Int32Array(gx * gy),
-    offY = new Int32Array(gx * gy),
-    use = new Uint8Array(gx * gy);
-  let rnd = seed >>> 0 || 1;
-  const rand = () => ((rnd = (Math.imul(rnd, 1664525) + 1013904223) >>> 0) / 4294967296);
-  for (let by = 0; by < gy; by++)
-    for (let bx = 0; bx < gx; bx++) {
-      const cx = bx * B,
-        cy = by * B;
-      if (!zones.some((z) => ellipseWeight(z, Math.min(w - 1, cx), Math.min(h - 1, cy), 0) > 0 || ellipseWeight(z, cx, cy) > 0)) continue;
-      const target = lowBand[Math.min(h - 1, cy) * w + Math.min(w - 1, cx)];
-      let best = -Infinity,
-        bdx = 0,
-        bdy = 0;
-      for (let k = 0; k < 40; k++) {
-        const dx = Math.round((rand() * 2 - 1) * R),
-          dy = Math.round((rand() * 2 - 1) * R);
-        let sc = 0,
-          cnt = 0,
-          bright = 0;
-        for (let yy = -B; yy <= B; yy += 2)
-          for (let xx = -B; xx <= B; xx += 2) {
-            const sx = cx + dx + xx,
-              sy = cy + dy + yy;
-            if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
-              sc -= 1;
-              cnt++;
-              continue;
-            }
-            const q = sy * w + sx;
-            sc += clean[q];
-            bright += lowBand[q];
-            cnt++;
-          }
-        if (!cnt) continue;
-        const score = sc / cnt - Math.abs(bright / cnt - target) / 25;
-        if (score > best) {
-          best = score;
-          bdx = dx;
-          bdy = dy;
-        }
-      }
-      if (best < 0.6) continue; // no clean skin nearby: keep this block's own detail
-      const g = by * gx + bx;
-      offX[g] = bdx;
-      offY[g] = bdy;
-      use[g] = 1;
+  const ref: number[] = [];
+  for (let p = 0; p < n; p += 3)
+    if (mask[p * 4 + 3] > 200 && lineShaped[p] < 0.3) ref.push(Math.abs(fineBand[p]));
+  ref.sort((a, b) => a - b);
+  // Median |x| of zero-mean noise is ~0.674 sigma.
+  const target = ref.length ? ref[Math.floor(ref.length / 2)] / 0.674 : 2;
+  const noise = (salt: number) => {
+    const v = new Float32Array(n);
+    for (let p = 0; p < n; p++) {
+      let x = Math.imul(p ^ salt, 2654435761) >>> 0;
+      x = Math.imul(x ^ (x >>> 15), 2246822519) >>> 0;
+      x ^= x >>> 13;
+      v[p] = (x & 0xffff) / 65535 - 0.5;
     }
+    return v;
+  };
+  const fineS = Math.max(0.5, fw * 0.0008),
+    poreS = Math.max(0.8, fw * 0.0018);
+  const a = blurLike(noise(0x9e37), w, h, fineS),
+    b = blurLike(noise(0x7f4a), w, h, poreS);
   const out = new Float32Array(n);
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const p = y * w + x;
-      const bx0 = Math.floor(x / B),
-        by0 = Math.floor(y / B);
-      let sum = 0,
-        wsum = 0,
-        w2 = 0;
-      for (let by = by0; by <= by0 + 1; by++)
-        for (let bx = bx0; bx <= bx0 + 1; bx++) {
-          if (bx >= gx || by >= gy) continue;
-          const g = by * gx + bx;
-          const wt = (1 - Math.abs(x - bx * B) / B) * (1 - Math.abs(y - by * B) / B);
-          if (wt <= 0) continue;
-          let v = fineBand[p];
-          if (use[g]) {
-            const sx = Math.min(w - 1, Math.max(0, x + offX[g])),
-              sy = Math.min(h - 1, Math.max(0, y + offY[g]));
-            v = fineBand[sy * w + sx];
-          }
-          sum += v * wt;
-          wsum += wt;
-          w2 += wt * wt;
-        }
-      // Keep the grain's strength through the blend (uncorrelated patches).
-      out[p] = wsum > 0 ? (sum / wsum) * Math.min(1.3, wsum / Math.sqrt(Math.max(1e-6, w2))) : fineBand[p];
-    }
+  for (let p = 0; p < n; p++) out[p] = a[p] + 0.7 * b[p];
+  let sum = 0;
+  for (let p = 0; p < n; p++) sum += out[p] * out[p];
+  const sd = Math.sqrt(sum / n) || 1;
+  for (let p = 0; p < n; p++) out[p] *= target / sd;
   return out;
 }
