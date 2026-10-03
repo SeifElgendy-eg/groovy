@@ -69,6 +69,10 @@ export const TEXTURE_SOFTEN = 0.95;
 export const FINEST_LINES = 0.85;
 /** Share of the fine detail replaced by fresh grain at full dose (main areas). */
 export const GRAIN_REPLACE = 0.65;
+/** How much of the photo's own fine detail is dropped where it is line-shaped (0..1). */
+export const PORE_LINE_DROP = 0.8;
+/** Share of the skin's mid-scale relief kept away from the lines. */
+export const MID_KEEP = 0.6;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -356,6 +360,8 @@ export function linesCompute(j: LinesJob): LinesResult {
     const ridgeLevel = smooth[2];
     const r1 = Math.max(1, Math.round(fw * 0.002));
     const onEdge = slide(slide(edgeWeight, w, h, r1, true, false), w, h, r1, true, true);
+    // The lines themselves (their full width, softened by a pixel or two).
+    const onLineSoft = blurLike(cover, w, h, Math.max(1, fw * 0.004));
     const nearLine = blurLike(slide(slide(weight, w, h, rf, true, false), w, h, rf, true, true), w, h, Math.max(1, fw * 0.006));
     for (let p = 0; p < n; p++) {
       const skinLevel = den[p] > 1e-3 ? num[p] / den[p] : around[p];
@@ -426,7 +432,15 @@ export function linesCompute(j: LinesJob): LinesResult {
         // Never below the area's own average: botox never darkens skin (dark circles stay as
         // they are rather than turning darker or blotchy).
         const base = Math.max(lowBand[p], baseDen[p] > 0.05 ? baseNum[p] / baseDen[p] : lowBand[p]);
-        const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, base + donorGrain[p] * GRAIN_REPLACE - lum[p]));
+        // The skin's own pores and grain stay wherever they do not trace a line: off the lines
+        // themselves, and where the fine detail is round or random rather than long. Only on the
+        // lines is the detail replaced (it traces the creases there).
+        const keep = (1 - Math.min(1, onLineSoft[p])) * (1 - PORE_LINE_DROP * lineShaped[p]);
+        const texture = keep * fineBand[p] + (1 - keep) * donorGrain[p] * GRAIN_REPLACE;
+        // The skin's gentle relief between pore and line size, kept where no line is near (the
+        // plain base alone reads as flat, airbrushed skin).
+        const relief = (fineTop[p] - base) * MID_KEEP * (1 - Math.min(1, nearLine[p]));
+        const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, base + relief + texture - lum[p]));
         // Wide, gentle hand-over at the area's edge.
         const edge = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
         // Freckles and moles keep their own look, but only their dark core: the skin around them
