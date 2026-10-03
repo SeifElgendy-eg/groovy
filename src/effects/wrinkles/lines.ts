@@ -263,7 +263,8 @@ export function linesCompute(j: LinesJob): LinesResult {
     const zones = j.zones.filter((z) => z.id === id);
     const fill = new Float32Array(n),
       weight = new Float32Array(n),
-      edgeWeight = new Float32Array(n);
+      edgeWeight = new Float32Array(n),
+      recolour = new Float32Array(n);
     const ref = 1; // strengths are already relative to their width's typical value
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
@@ -409,7 +410,9 @@ export function linesCompute(j: LinesJob): LinesResult {
       // Whichever change is larger (in its own direction) wins: line fill, ridge lowering, band.
       fill[p] = band > 0 ? Math.max(fill[p], band) : Math.min(fill[p], band);
       if (looseSoft > 0 && m > 0) {
-        const base = baseDen[p] > 0.05 ? baseNum[p] / baseDen[p] : lowBand[p];
+        // Never below the area's own average: botox never darkens skin (dark circles stay as
+        // they are rather than turning darker or blotchy).
+        const base = Math.max(lowBand[p], baseDen[p] > 0.05 ? baseNum[p] / baseDen[p] : lowBand[p]);
         const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, base + donorGrain[p] * GRAIN_REPLACE - lum[p]));
         // Wide, gentle hand-over at the area's edge.
         const edge = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
@@ -418,17 +421,21 @@ export function linesCompute(j: LinesJob): LinesResult {
         const core = smoothstep(2, 6, base - lum[p]);
         const k = edge * (1 - (1 - spotFree[p]) * core);
         fill[p] = fill[p] * (1 - edge) + toTarget * k;
+        recolour[p] = k;
       }
       fill[p] = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, fill[p]));
     }
+    // Under the eyes only lift: the lower lid's lighter skin and the cheek's highlights are not
+    // ridges to flatten (lowering them reads as a darker eye bag).
+    if (id === "undereye") for (let p = 0; p < n; p++) fill[p] = Math.max(-1, fill[p]);
     for (let p = 0; p < n; p++) if (fill[p] !== 0) fill[p] *= shareOf(id, p);
-    result[id] = toLayers(pixels, lum, fill, skin);
+    result[id] = toLayers(pixels, lum, fill, skin, recolour);
   }
   return result;
 }
 
 /** Change lightness by `fill` per pixel (lift lines, lower ridges); the more a pixel changes, the more it takes the skin's colour. */
-function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: Float32Array[]): Layers {
+function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: Float32Array[], recolour?: Float32Array): Layers {
   const n = lum.length;
   const mul = new Uint8ClampedArray(n * 4).fill(255);
   const add = new Uint8ClampedArray(n * 4);
@@ -436,12 +443,14 @@ function toLayers(pixels: Pixels, lum: Float32Array, fill: Float32Array, skin: F
     const i = p * 4;
     add[i + 3] = 255;
     const f = fill[p];
-    if (Math.abs(f) < 0.25 || lum[p] < 1) continue;
+    if ((Math.abs(f) < 0.25 && !(recolour && recolour[p] > 0.05)) || lum[p] < 1) continue;
     const target = lum[p] + f;
     const sl = 0.2126 * skin[0][p] + 0.7152 * skin[1][p] + 0.0722 * skin[2][p];
     // Lifted creases take the skin's colour; lowered ridges (often shine) mostly keep their own.
     // Creases are redder than the skin around them: even small lifts take most of its colour.
-    const a = f > 0 ? Math.min(0.8, f / 6) : Math.min(0.5, -f / 30);
+    let a = f > 0 ? Math.min(0.55, f / 8) : Math.min(0.5, -f / 30);
+    // Main areas: the colour is the plain skin's too, so a removed fold leaves no tinted trace.
+    if (recolour) a = Math.max(a, recolour[p] * 0.85);
     for (let c = 0; c < 3; c++) {
       const v = pixels[i + c];
       const own = v / lum[p],
