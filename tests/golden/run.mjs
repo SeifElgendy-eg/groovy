@@ -1,6 +1,10 @@
-// Golden-image harness. Drives the app through its stable DOM ids and snapshots #stage.
-//   node tests/golden/run.mjs --url http://127.0.0.1:8080/ --update   (write goldens)
-//   node tests/golden/run.mjs --url http://127.0.0.1:8080/            (compare)
+// Golden-image harness: drives the app through its stable DOM ids and snapshots #stage for every
+// scenario. Normally run through scripts/golden-ab.mjs (npm run golden), which renders a base build
+// with --update and then compares the current build against it. Renders go to tests/golden/out.
+//   --url <url>          app to render (default: preview of the freshly built dist/)
+//   --update             write the renders as the reference (tests/golden/golden-images, not stored)
+//   --allow-changes <f>  scenarios listed in <f> may differ (reported, not failed)
+//   --only a,b           just these scenarios
 // The DOM ids / data-attributes used below are the test contract: keep them stable in any refactor.
 import { chromium } from "playwright";
 import { preview } from "vite";

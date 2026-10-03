@@ -9,8 +9,10 @@ line (`#` starts a comment):
 lips-color-28
 ```
 
-CI (`.github/workflows/golden.yml`) honours only the files the PR itself adds or edits, so a list
-never carries over to later PRs, and two open PRs never touch the same file (no merge conflicts).
-Old files can be deleted at any time; deleting one has no effect on CI.
+The check (`npm run golden` locally, the **ci** workflow on GitHub; both run
+`scripts/golden-ab.mjs`) honours only the files added or edited since the base, so a list never
+carries over to later PRs, and two open PRs never touch the same file (no merge conflicts). Old
+files can be deleted at any time; deleting one has no effect.
 
-The changed renders are still produced and uploaded as the `golden-renders` artifact for review.
+The changed renders are still produced (`tests/golden/out` vs `tests/golden/out-base`; on GitHub,
+the `golden-renders` artifact) for review.
