@@ -1,0 +1,2 @@
+# Lips: colour outline snapped to the real lip border, softer edge
+lips-color-28

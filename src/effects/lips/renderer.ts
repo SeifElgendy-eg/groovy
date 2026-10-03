@@ -6,18 +6,19 @@ import { computeLipTargets, type LipData, type LipParams } from "./geometry";
 import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
+import { SNAP_REACH, snapLipOutline } from "./lipMask";
 
-function scratch(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+function scratch(read = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
-  return { canvas, ctx: canvas.getContext("2d")! };
+  return { canvas, ctx: canvas.getContext("2d", { willReadFrequently: read })! };
 }
 
 /** True when the volume warp runs, i.e. the caller must supply a fresh display frame. */
 export const needsWarp = (p: LipParams): boolean => p.amount > 0.001;
 
 export class LipRenderer {
-  private mask = scratch();
-  private feather = scratch();
+  private mask = scratch(true);
+  private feather = scratch(true);
   /** The frame's warp ROI (input), and the CPU fallback's output. */
   private roiFrame = scratch();
   private warped = scratch();
@@ -25,10 +26,9 @@ export class LipRenderer {
   private gl: GlWarp | null | undefined;
 
   resize(w: number, h: number): void {
-    for (const { canvas } of [this.mask, this.feather]) {
-      canvas.width = w;
-      canvas.height = h;
-    }
+    // The mask canvases are sized to the lips on each render; nothing else is frame-sized.
+    void w;
+    void h;
   }
 
   /**
@@ -110,22 +110,47 @@ export class LipRenderer {
     target.drawImage(patch, roi.x, roi.y);
   }
 
-  private buildFeather(targetOuter: Point[], targetInner: Point[], blend: number, w: number, h: number): void {
-    const { ctx: maskCtx, canvas: maskCanvas } = this.mask;
-    maskCtx.clearRect(0, 0, w, h);
-    maskCtx.beginPath();
-    addClosedContour(maskCtx, targetOuter);
-    addClosedContour(maskCtx, targetInner);
-    maskCtx.fillStyle = "white";
-    maskCtx.fill("evenodd");
+  /**
+   * The lip colour mask over `roi`: the landmark outline snapped to the photo's real lip border
+   * (lipMask.ts), filled minus the mouth opening, then feathered by Edge Blend. ROI-sized canvases.
+   */
+  private buildFeather(
+    roiPixels: Uint8ClampedArray,
+    roi: { x: number; y: number; w: number; h: number },
+    targetOuter: Point[],
+    targetInner: Point[],
+    blend: number,
+  ): Uint8ClampedArray {
+    const snap = snapLipOutline({
+      pixels: roiPixels,
+      x0: roi.x,
+      y0: roi.y,
+      width: roi.w,
+      height: roi.h,
+      outer: targetOuter,
+      inner: targetInner,
+    });
+    document.body.dataset.lipSeparation = snap.separation.toFixed(2);
+    const { canvas: maskCanvas, ctx: m } = this.mask;
+    maskCanvas.width = roi.w;
+    maskCanvas.height = roi.h;
+    m.setTransform(1, 0, 0, 1, -roi.x, -roi.y);
+    m.beginPath();
+    addClosedContour(m, snap.outer);
+    addClosedContour(m, targetInner);
+    m.fillStyle = "white";
+    m.fill("evenodd");
+    m.setTransform(1, 0, 0, 1, 0, 0);
 
-    const f = this.feather.ctx;
-    f.clearRect(0, 0, w, h);
-    f.save();
-    f.filter = `blur(${Math.max(0.35, boundsOfPoints(targetOuter).width * (0.002 + blend * 0.004))}px)`;
-    f.drawImage(maskCanvas, 0, 0, w, h);
-    f.restore();
+    const { canvas: featherCanvas, ctx: f } = this.feather;
+    featherCanvas.width = roi.w;
+    featherCanvas.height = roi.h;
+    const mouthWidth = boundsOfPoints(targetOuter).width;
+    // Soft edge, like real lipstick fading into the skin (Edge Blend 0..1 sets how soft).
+    f.filter = `blur(${Math.max(0.5, mouthWidth * (0.006 + blend * 0.014))}px)`;
+    f.drawImage(maskCanvas, 0, 0);
     f.filter = "none";
+    return f.getImageData(0, 0, roi.w, roi.h).data;
   }
 
   private renderColor(
@@ -139,16 +164,16 @@ export class LipRenderer {
     const intensity = p.colorIntensity;
     if (!p.shadeHex || intensity <= 0.001) return;
 
-    this.buildFeather(targetOuter, targetInner, p.blend, w, h);
     const bounds = boundsOfPoints(targetOuter);
-    const pad = Math.ceil(bounds.width * 0.02 + 3);
+    // Room for the snapping band and the skin colour samples outside it, plus the feather.
+    const pad = Math.ceil(bounds.width * (SNAP_REACH[0] * 3.2 + 0.02) + 3);
     const x = Math.max(0, Math.floor(bounds.minX - pad)),
       y = Math.max(0, Math.floor(bounds.minY - pad));
     const rw = Math.min(w - x, Math.ceil(bounds.maxX + pad) - x);
     const rh = Math.min(h - y, Math.ceil(bounds.maxY + pad) - y);
     if (rw <= 0 || rh <= 0) return;
     const pixels = target.getImageData(x, y, rw, rh);
-    const mask = this.feather.ctx.getImageData(x, y, rw, rh).data;
+    const mask = this.buildFeather(pixels.data, { x, y, w: rw, h: rh }, targetOuter, targetInner, p.blend);
     colorLips(pixels.data, mask, p.shadeHex, intensity, p.finish);
     target.putImageData(pixels, x, y);
   }
