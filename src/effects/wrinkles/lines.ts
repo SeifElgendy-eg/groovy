@@ -157,7 +157,8 @@ export function linesCompute(j: LinesJob): LinesResult {
     spots = new Float32Array(n),
     level = new Float32Array(n),
     edge = new Float32Array(n),
-    edgeDir = new Float32Array(n);
+    edgeDir = new Float32Array(n),
+    widthOf = new Uint8Array(n);
   // Each width is judged against its own typical strength on this face (90th percentile over
   // the skin), so the broad width cannot drown the fine lines just by being broad.
   const scaleRef = scales.map((sc) => percentile(sc.strength, mask, j.zones, w, h, 0.9));
@@ -167,6 +168,7 @@ export function linesCompute(j: LinesJob): LinesResult {
     // A wider width wins only when it clearly dominates (a broad fold, not a fine line).
     for (let i = 1; i < 3; i++) if (rel[i] > rel[k] * 1.5) k = i;
     strength[p] = rel[k];
+    widthOf[p] = k;
     dir[p] = scales[k].dir[p];
     // Depth on a copy one step finer than the line's width: fine lines stay deep enough to fill,
     // broad folds keep their skin texture on top.
@@ -246,61 +248,8 @@ export function linesCompute(j: LinesJob): LinesResult {
 
   const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
     tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
-  // Stray hairs: a thin, strong dark line that no area's lines run along (a strand across the
-  // forehead runs down or diagonally, the forehead's lines run across). The main areas would
-  // otherwise paint it over in part and leave broken pieces; it is left whole instead.
-  const strayLine = new Float32Array(n);
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const p = y * w + x;
-      const fr = fine.strength[p] / Math.max(1e-6, scaleRef[0]);
-      if (fr <= 0.8 || fine.strength[p] / Math.max(1e-6, scaleRef[0]) < deep.strength[p] / Math.max(1e-6, scaleRef[1])) continue;
-      let along = 0,
-        inside = 0;
-      for (const z of j.zones) {
-        const e = ellipseWeight(z, x, y);
-        if (e <= 0) continue;
-        inside = Math.max(inside, e);
-        if (z.anyDirection) {
-          along = 1;
-          break;
-        }
-        const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
-        const [lo, hi] = z.tolerance ? [Math.cos((z.tolerance[1] * Math.PI) / 180), Math.cos((z.tolerance[0] * Math.PI) / 180)] : [tolLo, tolHi];
-        along = Math.max(along, smoothstep(lo, hi, Math.abs(Math.cos(fine.dir[p] - expected))));
-      }
-      if (inside > 0) strayLine[p] = smoothstep(0.8, 1.6, fr) * (1 - along);
-    }
-  // A hair is long: keep only stray line that continues along its own direction (short pieces
-  // are bits of creases that bend, and protecting those left dashes of crease behind).
-  const len = Math.max(4, Math.round(fw * 0.04));
-  const longStray = new Float32Array(n);
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const p = y * w + x;
-      if (strayLine[p] <= 0.2) continue;
-      const dx = Math.cos(fine.dir[p]),
-        dy = Math.sin(fine.dir[p]);
-      let sum = 0,
-        cnt = 0;
-      for (let t = -len; t <= len; t++) {
-        const xx = Math.round(x + dx * t),
-          yy = Math.round(y + dy * t);
-        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-        // Best of the pixel and its neighbours across the line (a curved strand drifts sideways).
-        let b = 0;
-        for (let o = -1; o <= 1; o++) {
-          const qx = Math.round(xx - dy * o),
-            qy = Math.round(yy + dx * o);
-          if (qx >= 0 && qy >= 0 && qx < w && qy < h) b = Math.max(b, strayLine[qy * w + qx]);
-        }
-        sum += b;
-        cnt++;
-      }
-      longStray[p] = strayLine[p] * smoothstep(0.45, 0.7, cnt ? sum / cnt : 0);
-    }
-  const hr = Math.max(1, Math.round(fw * 0.003));
-  const strayNear = slide(slide(longStray, w, h, hr, true, false), w, h, hr, true, true);
+  // Stray hairs lying on the skin (wisps, a curl hanging over the forehead): left whole.
+  const strayNear = strayHairs(lum, around, mask, j.zones, w, h, fw, (p) => widthOf[p] > 0 && strength[p] > 0.45);
   const result = {} as LinesResult;
   // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
   // area's layer is computed from the original photo and they are drawn on top of each other, so
@@ -488,7 +437,7 @@ export function linesCompute(j: LinesJob): LinesResult {
         recolour[p] = k;
       }
       // Stray hairs keep their own pixels (only their dark strand, not the skin beside it).
-      const hair = Math.min(1, strayNear[p]) * smoothstep(3, 8, around[p] - lum[p]);
+      const hair = strayNear[p];
       if (hair > 0) {
         fill[p] *= 1 - hair;
         recolour[p] *= 1 - hair;
@@ -724,4 +673,182 @@ export function lightDirection(shading: Float32Array, mask: Pixels, w: number, h
     y = (sy / len) * t + -1 * (1 - t);
   const l = Math.hypot(x, y) || 1;
   return { x: x / l, y: y / l, strength: Math.max(0.4, c) };
+}
+
+/**
+ * Hair thresholds: thin dark line strength relative to the median fine-line response on this
+ * face's skin (a steady reference: it does not move with how deep the face's folds are), and
+ * darkness below the surrounding skin, in levels and in multiples of the local skin grain (so
+ * growth never spreads through grainy skin, e.g. a noisy camera frame).
+ */
+export const HAIR = { seed: 1.6, grow: 0.25, seedDark: 3, growDark: 0.8, seedGrain: 3, growGrain: 0.6, bridge: 2, turn: 50 };
+
+/**
+ * Stray hairs over the skin, 0..1. A loose hair, a wisp or a curl lying on the forehead is a thin
+ * dark line like a crease, and may bend any way (a curl's loop runs across the forehead too), so
+ * neither shape nor direction tells it apart. What does: it is connected to the hair. Starting
+ * from strong thin lines touching the hairline (the skin mask's edge in the forehead's upper half),
+ * the region grows along fainter thin dark lines (bridging one-pixel gaps); creases, which start
+ * and end on the skin, are never reached. The strand is widened by a pixel for its soft edge.
+ */
+export function strayHairs(
+  lum: Float32Array,
+  around: Float32Array,
+  mask: Uint8ClampedArray,
+  zones: Zone[],
+  w: number,
+  h: number,
+  fw: number,
+  /** Pixels of a broader line (a crease): growth never passes through them. */
+  crease: (p: number) => boolean = () => false,
+): Float32Array {
+  const n = w * h;
+  const out = new Float32Array(n);
+  const forehead = zones.filter((z) => z.id === "forehead" && !z.strict);
+  if (!forehead.length) return out;
+  // Any skin, the mask's faded edge included: strands cross that fade on their way from the hair.
+  const inside = (p: number) => mask[p * 4 + 3] > 8;
+  // Its own sharp line measure: a strand is one or two pixels wide on a 1k photo, finer than the
+  // creases' finest width (whose box blur is wider than its nominal size).
+  const sigma = Math.max(0.7, fw * 0.0028);
+  const thin = thinLine(lum, w, h, sigma);
+  const fineStrength = thin.strength,
+    lineDir = thin.dir,
+    deepStrength = thinLine(lum, w, h, sigma * 2.3).strength;
+  // Local grain: mean absolute fine detail around each pixel.
+  const g1 = binomial(lum, w, h, sigma);
+  const detail = new Float32Array(n);
+  for (let p = 0; p < n; p++) detail[p] = Math.abs(lum[p] - g1[p]);
+  const grain = blurLike(detail, w, h, Math.max(3, fw * 0.02));
+  const sample: number[] = [];
+  for (let p = 0; p < n; p += 3) if (inside(p) && fineStrength[p] > 0) sample.push(fineStrength[p]);
+  if (sample.length < 50) return out;
+  sample.sort((a, b) => a - b);
+  const fineRef = sample[sample.length >> 1];
+  // Thin (the finest width at least as strong as the next: hair, not a fold's edge) and darker
+  // than the skin around, by more than the skin's own grain.
+  const level = (p: number) => {
+    if (fineStrength[p] < deepStrength[p] * 0.8) return 0;
+    const rel = fineStrength[p] / fineRef,
+      dark = around[p] - lum[p];
+    const g = Math.max(0.5, grain[p]);
+    return rel > HAIR.seed && dark > Math.max(HAIR.seedDark, HAIR.seedGrain * g)
+      ? 2
+      : rel > HAIR.grow && dark > Math.max(HAIR.growDark, HAIR.growGrain * g)
+        ? 1
+        : 0;
+  };
+  const lv = new Uint8Array(n);
+  for (let p = 0; p < n; p++) if (inside(p) && !crease(p)) lv[p] = level(p);
+  // Seeds: strong pixels within 3 px of the outside (hair), in the forehead's upper half.
+  const seen = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  let qh = 0,
+    qt = 0;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (lv[p] !== 2) continue;
+      let upper = false;
+      for (const z of forehead) if (ellipseWeight(z, x, y) > 0 && y < z.cy) upper = true;
+      if (!upper) continue;
+      let edge = false;
+      for (let dy = -3; dy <= 3 && !edge; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
+          const xx = x + dx,
+            yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !inside(yy * w + xx)) {
+            edge = true;
+            break;
+          }
+        }
+      if (edge) {
+        seen[p] = 1;
+        queue[qt++] = p;
+      }
+    }
+  // Follow the strand: to candidates within a short gap (a strand fades where it catches light)
+  // whose direction agrees with this pixel's, stepping along the line rather than across it.
+  // Grain has no steady direction, so growth cannot spread through it.
+  const br = HAIR.bridge;
+  const turn = Math.cos((HAIR.turn * Math.PI) / 180);
+  while (qh < qt) {
+    const p = queue[qh++];
+    const x = p % w,
+      y = (p / w) | 0;
+    const dx0 = Math.cos(lineDir[p]),
+      dy0 = Math.sin(lineDir[p]);
+    for (let dy = -br; dy <= br; dy++)
+      for (let dx = -br; dx <= br; dx++) {
+        if (!dx && !dy) continue;
+        const xx = x + dx,
+          yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const q = yy * w + xx;
+        if (seen[q] || !lv[q]) continue;
+        if (Math.abs(Math.cos(lineDir[q] - lineDir[p])) < turn) continue;
+        const len = Math.hypot(dx, dy);
+        if (len > 1.5 && Math.abs(dx * dx0 + dy * dy0) / len < 0.7) continue;
+        seen[q] = 1;
+        queue[qt++] = q;
+      }
+  }
+  // The strand itself, plus a softer pixel around it.
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!seen[p] || !lv[p]) continue;
+      out[p] = 1;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx,
+            yy = y + dy;
+          if (xx >= 0 && yy >= 0 && xx < w && yy < h) out[yy * w + xx] = Math.max(out[yy * w + xx], 0.6);
+        }
+    }
+  return out;
+}
+
+/** Repeated [1 2 1]/4 passes (each adds variance 1/2): a close Gaussian for small sigmas. */
+function binomial(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  const passes = Math.max(1, Math.round(2 * sigma * sigma));
+  let a = src.slice(),
+    b = new Float32Array(src.length);
+  for (let k = 0; k < passes; k++) {
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        b[p] = (a[x > 0 ? p - 1 : p] + 2 * a[p] + a[x < w - 1 ? p + 1 : p]) / 4;
+      }
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        a[p] = (b[y > 0 ? p - w : p] + 2 * b[p] + b[y < h - 1 ? p + w : p]) / 4;
+      }
+  }
+  void b;
+  b = a;
+  return b;
+}
+
+/** Scale-normalised dark-line strength (curvature across minus along) at `sigma`, and the line's direction. */
+function thinLine(lum: Float32Array, w: number, h: number, sigma: number): { strength: Float32Array; dir: Float32Array } {
+  const g = binomial(lum, w, h, sigma);
+  const strength = new Float32Array(w * h),
+    dir = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++)
+    for (let x = 1; x < w - 1; x++) {
+      const p = y * w + x;
+      const hxx = g[p - 1] - 2 * g[p] + g[p + 1];
+      const hyy = g[p - w] - 2 * g[p] + g[p + w];
+      const hxy = (g[p + w + 1] - g[p + w - 1] - g[p - w + 1] + g[p - w - 1]) / 4;
+      const mean = (hxx + hyy) / 2,
+        diff = Math.sqrt(((hxx - hyy) / 2) ** 2 + hxy * hxy);
+      const s = mean + diff - Math.abs(mean - diff);
+      if (s > 0) {
+        strength[p] = s * sigma * sigma;
+        dir[p] = 0.5 * Math.atan2(2 * hxy, hxx - hyy) + Math.PI / 2;
+      }
+    }
+  return { strength, dir };
 }
