@@ -11,6 +11,7 @@ import {
 } from "./compute";
 import type { SkinWorkerApi } from "./worker";
 import { textureCompute, type TextureJob, type TextureResult } from "../acne/texture";
+import { linesCompute, type LinesJob, type LinesResult } from "../wrinkles/lines";
 
 interface Handle {
   api: Remote<SkinWorkerApi>;
@@ -63,3 +64,6 @@ export const runWrinkles = (job: WrinklesJob): Promise<WrinklesResult> =>
 
 export const runTexture = (job: TextureJob): Promise<TextureResult> =>
   run(job, (h) => h.api.texture(job) as Promise<TextureResult>, textureCompute);
+
+export const runLines = (job: LinesJob): Promise<LinesResult> =>
+  run(job, (h) => h.api.lines(job) as Promise<LinesResult>, linesCompute);

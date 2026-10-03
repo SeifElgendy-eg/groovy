@@ -3,7 +3,7 @@
 import { needsWarp } from "../effects/lips/renderer";
 import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
 import type { SkinInput } from "../effects/skin/input";
-import { readLipParams } from "../ui/controls";
+import { readBotoxDoses, readLipParams } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
@@ -85,8 +85,9 @@ function renderWrinkles(w: number, h: number): void {
     return;
   }
   status.textContent = "Compare Before and After to preview smoother skin.";
-  const amount = Number(dom.wrinklesSlider.value) / 100;
-  if (amount <= 0 && !dom.skinDebug.checked) return;
+  const doses = readBotoxDoses();
+  const any = doses.forehead > 0 || doses.frown > 0 || doses.crows > 0;
+  if (!any && !dom.skinDebug.checked) return;
   const ready = ensurePrepared(wrinkles, w, h);
   // Photos: draw the native photo first. Camera frames are already on the stage.
   if (state.sourceMode === "photo") {
@@ -95,7 +96,7 @@ function renderWrinkles(w: number, h: number): void {
     drawForDisplay(ctx, w, h);
     ctx.restore();
   }
-  if (ready) wrinkles.draw(ctx, w, h, amount);
+  if (ready) wrinkles.draw(ctx, doses);
 }
 
 function renderAcne(w: number, h: number): void {
@@ -128,7 +129,7 @@ const effectRender: Partial<Record<ModuleId, Draw>> = {
 };
 
 const effectActive: Record<ServiceId, () => boolean> = {
-  wrinkles: () => Number(dom.wrinklesSlider.value) > 0,
+  wrinkles: () => Object.values(readBotoxDoses()).some((d) => d > 0),
   acne: () =>
     Number(dom.acneSlider.value) > 0 ||
     Number(dom.scarsSlider.value) > 0 ||

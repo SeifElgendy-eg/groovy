@@ -3,6 +3,7 @@
 import { expose, transfer } from "comlink";
 import { acneCompute, wrinklesCompute, type AcneJob, type WrinklesJob } from "./compute";
 import { textureCompute, type TextureJob } from "../acne/texture";
+import { linesCompute, type LinesJob } from "../wrinkles/lines";
 
 const api = {
   acne(job: AcneJob) {
@@ -15,7 +16,11 @@ const api = {
   },
   wrinkles(job: WrinklesJob) {
     const r = wrinklesCompute(job);
-    return transfer(r, [r.faded.buffer, r.add.buffer, r.mul.buffer]);
+    return transfer(r, [r.faded.buffer]);
+  },
+  lines(job: LinesJob) {
+    const r = linesCompute(job);
+    return transfer(r, [r.forehead.mul.buffer, r.forehead.add.buffer, r.frown.mul.buffer, r.frown.add.buffer, r.crows.mul.buffer, r.crows.add.buffer]);
   },
 };
 

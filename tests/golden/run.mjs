@@ -45,7 +45,12 @@ const scenarios = [
     steps: [`[data-lip-preset="${ml}"]`],
   })),
   { name: "lips-color-28", module: "#chooseLipsBtn", sample: "#sampleBtn", steps: ['[data-shade="brightred"]'] },
-  { name: "wrinkles-100", module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn", steps: [] },
+  ...[20, 40].map((u) => ({
+    name: `wrinkles-${u}u`, module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn",
+    steps: [`[data-wrinkles-preset="${u}"]`],
+  })),
+  { name: "wrinkles-forehead-40u", module: "#chooseWrinklesBtn", sample: "#wrinklesSampleBtn",
+    steps: ['[data-botox-area="frown"]', '[data-botox-area="crows"]', '[data-wrinkles-preset="40"]'] },
   { name: "skin-brightness-60", hiddenEntry: true, module: "#chooseSkinBtn", sample: "#sampleBtn", steps: ["set:#brightnessSlider=60"] },
   { name: "acne-pores-100", module: "#chooseAcneBtn", sample: "#acneSampleBtn", steps: ["set:#poresSlider=100"] },
   // A real photo with acne scars and enlarged pores (tests/golden/fixtures), loaded as an upload.

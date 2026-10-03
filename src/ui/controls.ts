@@ -32,15 +32,40 @@ function syncPresetChips(
   return label;
 }
 
+/**
+ * A stepped slider (lip volume, botox dose): the value label, the filled track, and the
+ * radio-style stop labels under the ticks (checked when the slider sits on them).
+ */
+function syncStepper(slider: HTMLInputElement, stops: HTMLButtonElement[], label: HTMLElement, text: string, stopValue: (b: HTMLButtonElement) => string | undefined): void {
+  const v = Number(slider.value);
+  label.textContent = text;
+  const max = Number(slider.max) || 1;
+  slider.parentElement?.style.setProperty("--fill", `${(v / max) * 100}%`);
+  for (const btn of stops) {
+    const on = Number(stopValue(btn)) === v;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-checked", String(on));
+  }
+}
+
+/** Botox dose (units) that gives the full softening of an area. */
+export const FULL_DOSE_UNITS = 40;
+
 export function syncWrinklesPreset(): void {
-  const value = Number(dom.wrinklesSlider.value);
-  const label = syncPresetChips(
-    dom.wrinklesPresetButtons,
-    value,
-    (b) => b.dataset.wrinklesPreset,
-  );
-  dom.wrinklesValue.textContent = `${value}%`;
-  dom.wrinklesSelection.textContent = `Selected: ${label} · ${value}%`;
+  const v = Number(dom.wrinklesSlider.value);
+  syncStepper(dom.wrinklesSlider, dom.wrinklesPresetButtons, dom.wrinklesValue, `${v} U`, (b) => b.dataset.wrinklesPreset);
+}
+
+/** Toggle state of the botox area chips. */
+export function syncBotoxAreas(): void {
+  for (const btn of dom.botoxAreaButtons) btn.classList.toggle("active", btn.getAttribute("aria-pressed") === "true");
+}
+
+/** Per-area strength (0..1) from the dose slider and the area chips. */
+export function readBotoxDoses(): Record<"forehead" | "frown" | "crows", number> {
+  const dose = Math.min(1, Number(dom.wrinklesSlider.value) / FULL_DOSE_UNITS);
+  const on = (id: string) => dom.botoxAreaButtons.some((b) => b.dataset.botoxArea === id && b.getAttribute("aria-pressed") === "true");
+  return { forehead: on("forehead") ? dose : 0, frown: on("frown") ? dose : 0, crows: on("crows") ? dose : 0 };
 }
 
 /** The acne sliders' current values. */
@@ -73,15 +98,7 @@ export const formatMl = (v: number): string => `${Number(v.toFixed(2))} ml`;
 
 export function syncLipPreset(): void {
   const v = Number(dom.lipSlider.value);
-  dom.lipValue.textContent = formatMl(v);
-  // The track fills up to the value; the ml label at that stop (if any) is the checked "radio".
-  const max = Number(dom.lipSlider.max) || 4;
-  dom.lipSlider.parentElement?.style.setProperty("--fill", `${(v / max) * 100}%`);
-  for (const btn of dom.lipPresetButtons) {
-    const on = Number(btn.dataset.lipPreset) === v;
-    btn.classList.toggle("active", on);
-    btn.setAttribute("aria-checked", String(on));
-  }
+  syncStepper(dom.lipSlider, dom.lipPresetButtons, dom.lipValue, formatMl(v), (b) => b.dataset.lipPreset);
 }
 
 export function syncFinishButtons(): void {

@@ -1,5 +1,6 @@
-// Wrinkle ("botox") smoothing. Builds a face-only skin mask, finds the treatable regions, and
-// computes a signed correction (multiply + add layers) that the caller composites over the photo.
+// Botox. Builds a face-only treatable-skin mask (analysis resolution), then finds and softens the
+// expression lines of each botox area at the photo's full resolution (lines.ts). Each area keeps
+// its own correction layers, so areas and dose change instantly, without a recompute.
 import { addClosedContour, carveContours } from "../../imaging/contours";
 import { WRINKLE_EXCLUSION_CONTOURS } from "../../core/landmarks";
 import { faceOval, guardContours } from "../../face/mask";
@@ -11,7 +12,9 @@ import {
   toDisplayPoints,
   type SkinInput,
 } from "../skin/input";
-import { runWrinkles } from "../skin/client";
+import { runLines, runWrinkles } from "../skin/client";
+import type { AreaId, Layers } from "./lines";
+import { botoxZones } from "./regions";
 
 export class WrinklesEffect {
   private stale = true;
@@ -32,10 +35,8 @@ export class WrinklesEffect {
       this.gen++; // any prepare() still running is now out of date
     }
   }
-  /** "add" layer: light that fills creases. */
-  private addLayer = scratch();
-  /** "multiply" layer: gain that darkens ridges. */
-  private mulLayer = scratch();
+  /** Per-area correction layers over the face crop at (x, y), full resolution. */
+  private areas: { x: number; y: number; layers: Record<AreaId, { mul: HTMLCanvasElement; add: HTMLCanvasElement }> } | null = null;
   private work = scratch(true);
   private mask = scratch(true);
 
@@ -57,8 +58,8 @@ export class WrinklesEffect {
 
   private async run(input: SkinInput, gen: number): Promise<boolean> {
     const { aw, ah } = analysisSize(input.w, input.h, input.mirrored);
-    const { addLayer, mulLayer, work, mask } = this;
-    for (const c of [addLayer, mulLayer, work, mask]) {
+    const { work, mask } = this;
+    for (const c of [work, mask]) {
       c.canvas.width = aw;
       c.canvas.height = ah;
     }
@@ -125,30 +126,78 @@ export class WrinklesEffect {
     mask: mask.ctx.getImageData(0, 0, aw, ah).data,
     aw,
     ah,
-    points,
     faceWidth,
   });
   if (gen !== this.gen) return false;
   mask.ctx.putImageData(new ImageData(result.faded, aw, ah), 0, 0);
-  addLayer.ctx.putImageData(new ImageData(result.add, aw, ah), 0, 0);
-  mulLayer.ctx.putImageData(new ImageData(result.mul, aw, ah), 0, 0);
+  const areas = await this.prepareLines(input, mask.canvas, aw, ah);
+  if (gen !== this.gen) return false;
+  this.areas = areas;
   this.stale = false;
   this.ready = true;
   return true;
   }
 
-  /**
-   * Composite the correction over `target` at the given strength (0..1). Only these smooth maps
-   * are upscaled, so the full-resolution photo keeps its own texture.
-   */
-  draw(target: CanvasRenderingContext2D, w: number, h: number, amount: number): void {
+  /** Find and soften the lines at full resolution, on the face crop around the botox areas. */
+  private async prepareLines(input: SkinInput, faded: HTMLCanvasElement, aw: number, ah: number) {
+    const { w, h } = input;
+    const points = toDisplayPoints(input.landmarks, w, h, input.mirrored);
+    const faceWidth = faceWidthOf(points);
+    const zones = botoxZones(points, faceWidth);
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const z of zones) {
+      const r = Math.max(z.rx, z.ry);
+      minX = Math.min(minX, z.cx - r);
+      maxX = Math.max(maxX, z.cx + r);
+      minY = Math.min(minY, z.cy - r);
+      maxY = Math.max(maxY, z.cy + r);
+    }
+    const pad = faceWidth * 0.04;
+    const x = Math.max(0, Math.floor(minX - pad)),
+      y = Math.max(0, Math.floor(minY - pad));
+    const cw = Math.min(w, Math.ceil(maxX + pad)) - x,
+      ch = Math.min(h, Math.ceil(maxY + pad)) - y;
+    if (cw < 8 || ch < 8) return null;
+    const crop = scratch(true);
+    crop.canvas.width = cw;
+    crop.canvas.height = ch;
+    crop.ctx.translate(-x, -y);
+    input.drawFrame(crop.ctx, w, h);
+    const pixels = crop.ctx.getImageData(0, 0, cw, ch).data;
+    crop.ctx.clearRect(x, y, cw, ch);
+    crop.ctx.imageSmoothingEnabled = true;
+    crop.ctx.drawImage(faded, 0, 0, aw, ah, 0, 0, w, h);
+    const maskPixels = crop.ctx.getImageData(0, 0, cw, ch).data;
+    const local = zones.map((z) => ({ ...z, cx: z.cx - x, cy: z.cy - y, from: z.from && { x: z.from.x - x, y: z.from.y - y } }));
+    const r = await runLines({ pixels, mask: maskPixels, width: cw, height: ch, faceWidth, zones: local });
+    const toCanvas = (data: Uint8ClampedArray<ArrayBuffer>) => {
+      const c = document.createElement("canvas");
+      c.width = cw;
+      c.height = ch;
+      c.getContext("2d")!.putImageData(new ImageData(data, cw, ch), 0, 0);
+      return c;
+    };
+    const layers = (l: Layers) => ({ mul: toCanvas(l.mul), add: toCanvas(l.add) });
+    return { x, y, layers: { forehead: layers(r.forehead), frown: layers(r.frown), crows: layers(r.crows) } };
+  }
+
+  /** Composite each area's softening over `target` at its own dose (0..1; 0 = untreated). */
+  draw(target: CanvasRenderingContext2D, doses: Partial<Record<AreaId, number>>): void {
+    const a = this.areas;
+    if (!a) return;
     target.save();
-    target.globalAlpha = amount;
-    target.imageSmoothingEnabled = true;
-    target.globalCompositeOperation = "multiply";
-    target.drawImage(this.mulLayer.canvas, 0, 0, w, h); // darken ridges
-    target.globalCompositeOperation = "lighter";
-    target.drawImage(this.addLayer.canvas, 0, 0, w, h); // fill creases
+    for (const id of ["forehead", "frown", "crows"] as AreaId[]) {
+      const dose = Math.max(0, Math.min(1, doses[id] ?? 0));
+      if (dose <= 0) continue;
+      target.globalAlpha = dose;
+      target.globalCompositeOperation = "multiply";
+      target.drawImage(a.layers[id].mul, a.x, a.y);
+      target.globalCompositeOperation = "lighter";
+      target.drawImage(a.layers[id].add, a.x, a.y);
+    }
     target.restore();
   }
 }
