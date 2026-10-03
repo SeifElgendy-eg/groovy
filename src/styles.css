@@ -849,3 +849,93 @@ body:not(.home-screen) .stage-wrap {
   object-fit: contain;
   background: #08090b;
 }
+
+/* Lip filler volume: one stepped slider (0-4 ml, 0.25 ml stops) with radio-style ml labels.
+   The thumb is 26px, so the scale is inset by half of it to line the ticks up with the stops. */
+.ml-control {
+  --thumb: 26px;
+  --fill: 0%;
+}
+.ml-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: var(--thumb);
+  background: transparent;
+  cursor: pointer;
+}
+.ml-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--line) var(--fill));
+}
+.ml-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--line) var(--fill));
+}
+.ml-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc(3px - var(--thumb) / 2);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--panel2);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+.ml-slider::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--panel2);
+}
+.ml-scale {
+  position: relative;
+  margin: 2px calc(var(--thumb) / 2) 0;
+  height: 54px;
+}
+.ml-ticks i {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 6px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.ml-ticks i.major {
+  height: 11px;
+  background: var(--muted);
+}
+.ml-stop {
+  position: absolute;
+  top: 14px;
+  transform: translateX(-50%);
+  min-width: 52px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.ml-stop:first-child {
+  transform: translateX(-26%);
+}
+.ml-stop:last-child {
+  transform: translateX(-74%);
+}
+.ml-stop[aria-checked="true"] {
+  background: var(--accent);
+  color: #0b1000;
+  border-color: var(--accent);
+}
+.ml-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 14px;
+}

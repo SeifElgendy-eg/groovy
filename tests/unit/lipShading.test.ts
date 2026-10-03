@@ -1,0 +1,97 @@
+import { describe, expect, it } from "vitest";
+import type { Point } from "../../src/core/types";
+import { lipShading } from "../../src/effects/lips/shading";
+
+function ring(u: number, d: number, width = 300, cx = 400, cy = 300): Point[] {
+  return Array.from({ length: 20 }, (_, i) => {
+    const t = (i % 10) / 10;
+    const upper = i < 10;
+    const x = upper ? cx - width / 2 + width * t : cx + width / 2 - width * t;
+    const s = Math.sin(Math.PI * t);
+    return { x, y: upper ? cy - u * s : cy + d * s };
+  });
+}
+const outer = ring(45, 70),
+  inner = ring(3, 3);
+
+describe("lip volume shading", () => {
+  it("adds nothing without filler", () => {
+    expect(lipShading(outer, inner, 0)).toEqual([]);
+  });
+
+  it("grows in strength with the filler level", () => {
+    const a = lipShading(outer, inner, 0.3).map((s) => s.alpha);
+    const b = lipShading(outer, inner, 0.9).map((s) => s.alpha);
+    a.forEach((v, i) => expect(b[i]).toBeGreaterThan(v));
+  });
+
+  it("puts the gloss on the lower lip and the shadow on the skin below it", () => {
+    const spots = lipShading(outer, inner, 1);
+    const gloss = spots.find((s) => s.kind === "light" && s.region === "lips" && s.cy > 300)!;
+    expect(gloss.cy).toBeGreaterThan(303);
+    expect(gloss.cy).toBeLessThan(370);
+    const shadow = spots.filter((s) => s.kind === "shadow").sort((a, b) => b.cy - a.cy)[0];
+    expect(shadow.region).toBe("skin");
+    expect(shadow.cy).toBeGreaterThan(370);
+  });
+});
+
+import { glintAlpha } from "../../src/effects/lips/shading";
+
+describe("gloss glints", () => {
+  const w = 60, h = 40;
+  /** Lip with bright vertical ridges every 6 px. */
+  const px = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const v = x % 6 === 0 ? 200 : 150;
+      px.set([v, v * 0.6, v * 0.6, 255], (y * w + x) * 4);
+    }
+  const spot = { cx: 30, cy: 20, rx: 25, ry: 15, angle: 0 };
+
+  it("follows the lip's own ridges (broken highlight, not a blob)", () => {
+    const a = glintAlpha(px, w, h, spot, 1);
+    expect(a[20 * w + 30]).toBeGreaterThan(a[20 * w + 32] + 40); // ridge vs between ridges
+  });
+
+  it("is zero outside the gloss area and without filler", () => {
+    expect(glintAlpha(px, w, h, spot, 1)[2 * w + 2]).toBe(0);
+    expect(Math.max(...glintAlpha(px, w, h, spot, 0))).toBe(0);
+  });
+});
+
+import { BORDER_SKIN_REF, borderLightTone } from "../../src/effects/lips/shading";
+
+describe("border light follows the skin", () => {
+  const swatch = (rgb: number[]) => Array.from({ length: 20 }, () => rgb);
+
+  it("full strength on light skin, gentler on darker skin", () => {
+    const light = borderLightTone(swatch([235, 190, 170]));
+    const dark = borderLightTone(swatch([120, 80, 60]));
+    expect(light.scale).toBe(1);
+    expect(dark.scale).toBeLessThan(0.6);
+    expect(dark.scale).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it("is tinted from the skin itself (keeps its hue), lighter than it", () => {
+    const t = borderLightTone(swatch([120, 80, 60]));
+    expect(t.rgb[0]).toBeGreaterThan(t.rgb[1]);
+    expect(t.rgb[1]).toBeGreaterThan(t.rgb[2]);
+    expect(t.rgb[0]).toBeGreaterThan(120);
+  });
+
+  it("falls back to the default warm light with no samples", () => {
+    expect(borderLightTone([]).scale).toBe(1);
+    expect(BORDER_SKIN_REF).toBeGreaterThan(0.5);
+  });
+});
+
+describe("border light does not double a natural highlight", () => {
+  const swatch = (rgb: number[]) => Array.from({ length: 20 }, () => rgb);
+  it("adds less light where the photo's lip border is already brighter than the skin", () => {
+    const skin = swatch([220, 175, 150]);
+    const plain = borderLightTone(skin, swatch([215, 170, 148])).scale;
+    const lit = borderLightTone(skin, swatch([245, 215, 195])).scale;
+    expect(lit).toBeLessThan(plain * 0.6);
+  });
+});
