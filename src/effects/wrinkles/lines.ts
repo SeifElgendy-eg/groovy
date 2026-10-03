@@ -118,8 +118,8 @@ export function hypot(a: number, b: number): number {
  * Valley-line strength and direction at one width: from the Hessian of the lightness blurred at
  * `sigma`. A dark line curves up strongly across it and hardly along it.
  */
-function lineness(lum: Float32Array, w: number, h: number, sigma: number) {
-  const g = blurLike(lum, w, h, sigma);
+function lineness(blur: (sigma: number) => Float32Array, w: number, h: number, sigma: number) {
+  const g = blur(sigma);
   const n = w * h;
   const strength = new Float32Array(n),
     dir = new Float32Array(n),
@@ -215,24 +215,34 @@ export function linesCompute(j: LinesJob): LinesResult {
   const lum = new Float32Array(n);
   for (let p = 0; p < n; p++) lum[p] = 0.2126 * pixels[p * 4] + 0.7152 * pixels[p * 4 + 1] + 0.0722 * pixels[p * 4 + 2];
 
+  // Blurred copies of the lightness, by blur radius: different sizes often round to the same
+  // radius, and then the same copy serves them all (read-only).
+  const lumBlurs = new Map<number, Float32Array>();
+  const lumBlur = (sigma: number) => {
+    const r = boxRadius(sigma);
+    let b = lumBlurs.get(r);
+    if (!b) lumBlurs.set(r, (b = blurLike(lum, w, h, sigma)));
+    return b;
+  };
   // Each stage is its own function, so its working arrays are freed when it returns (a 4K
   // photo's face crop needs a lot of them).
-  const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, mask, geoms, w, h, fw);
+  const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, lumBlur, mask, geoms, w, h, fw);
   const { spotNear, spotRef } = spotProtection(spots, strength, mask, geoms, w, h, fw);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
-  const around = blurLike(lum, w, h, Math.max(3, fw * 0.02));
+  const around = lumBlur(Math.max(3, fw * 0.02));
   const skin = plainSkinColour(pixels, lum, around, w, h, fw);
   // Frequency separation: the mid band (lines and crepey texture) is what botox softens; the fine
   // band (pores, grain) and the low band (the face's shading) are kept.
-  const fineTop = blurLike(lum, w, h, Math.max(0.8, fw * 0.0022));
+  const fineTop = lumBlur(Math.max(0.8, fw * 0.0022));
   // For fine-line areas only the very finest grain is kept.
-  const finestTop = blurLike(lum, w, h, Math.max(0.5, fw * 0.0009));
+  const finestTop = lumBlur(Math.max(0.5, fw * 0.0009));
   // The faint lines left in the finest grain: line-shaped detail (pores and grain are round or
   // random, lines are long), with its direction for the strict zones.
   const lineShaped = blobWeight(lum, w, h, Math.max(1, fw * 0.003));
   for (let p = 0; p < n; p++) lineShaped[p] = 1 - lineShaped[p];
-  const lowBand = blurLike(lum, w, h, Math.max(3, fw * 0.012));
+  const lowBand = lumBlur(Math.max(3, fw * 0.012));
+  lumBlurs.clear(); // (the copies still in use stay; the rest can be freed)
   const fineBand = new Float32Array(n);
   for (let p = 0; p < n; p++) fineBand[p] = lum[p] - fineTop[p];
   // Fresh grain for the treated skin: the face's own fine texture grew along its creases and
@@ -515,16 +525,16 @@ export function linesCompute(j: LinesJob): LinesResult {
 }
 
 /** The line measures at three widths, combined: per pixel the width that dominates, its strength (relative to this face's typical one), direction and depth level; plus the round-spot and bright-edge measures. */
-function lineMeasures(lum: Float32Array, mask: Pixels, geoms: ZoneGeom[], w: number, h: number, fw: number) {
+function lineMeasures(lum: Float32Array, lumBlur: (sigma: number) => Float32Array, mask: Pixels, geoms: ZoneGeom[], w: number, h: number, fw: number) {
   const n = w * h;
   // Three widths: fine lines, deeper lines, and broad folds (e.g. a raised-brow forehead).
-  const fine = lineness(lum, w, h, Math.max(0.8, fw * 0.0028));
-  const deep = lineness(lum, w, h, Math.max(1.5, fw * 0.0065));
-  const fold = lineness(lum, w, h, Math.max(2.5, fw * 0.013));
+  const fine = lineness(lumBlur, w, h, Math.max(0.8, fw * 0.0028));
+  const deep = lineness(lumBlur, w, h, Math.max(1.5, fw * 0.0065));
+  const fold = lineness(lumBlur, w, h, Math.max(2.5, fw * 0.013));
   const scales = [fine, deep, fold];
   // Lightness at each width's own scale: depth is measured on these, so the correction is smooth
   // and the skin's texture stays on top of it (inside a filled fold too).
-  const smooth = [0.0014, 0.003, 0.0065].map((k) => blurLike(lum, w, h, Math.max(0.5, fw * k)));
+  const smooth = [0.0014, 0.003, 0.0065].map((k) => lumBlur(Math.max(0.5, fw * k)));
   const strength = new Float32Array(n),
     dir = new Float32Array(n),
     spots = new Float32Array(n),
@@ -661,8 +671,8 @@ function healLines(
   // skipped and what still comes through is capped.
   const amps: number[] = [];
   for (let p = 0; p < n; p += 2) if (clean[p]) amps.push(Math.abs(fineBand[p]));
-  amps.sort((a, b) => a - b);
-  const amp = Math.max(0.5, amps.length ? amps[amps.length >> 1] : 1);
+  const sortedAmps = sorted(amps);
+  const amp = Math.max(0.5, sortedAmps.length ? sortedAmps[sortedAmps.length >> 1] : 1);
   for (let p = 0; p < n; p++) if (clean[p] && fineBand[p] > HEAL.shine * amp) clean[p] = 0;
   const healed = healTexture(fineBand, lowBand, clean, need, w, h, fw);
   for (let p = 0; p < n; p++)
@@ -780,8 +790,12 @@ function percentile(v: Float32Array, mask: Pixels, zones: ZoneGeom[], w: number,
     if (zones.some((g) => zoneWeight(g, x, y, 0) > 0)) xs.push(v[p]);
   }
   if (!xs.length) return 1;
-  xs.sort((a, b) => a - b);
-  return xs[Math.floor(xs.length * q)];
+  return sorted(xs)[Math.floor(xs.length * q)];
+}
+
+/** The numbers in ascending order (a typed array's numeric sort: much faster than Array sort). */
+function sorted(xs: number[]): Float64Array {
+  return Float64Array.from(xs).sort();
 }
 
 /**
@@ -803,9 +817,9 @@ export function synthGrain(
   const ref: number[] = [];
   for (let p = 0; p < n; p += 3)
     if (mask[p * 4 + 3] > 200 && lineShaped[p] < 0.3) ref.push(Math.abs(fineBand[p]));
-  ref.sort((a, b) => a - b);
+  const refSorted = sorted(ref);
   // Median |x| of zero-mean noise is ~0.674 sigma.
-  const target = ref.length ? ref[Math.floor(ref.length / 2)] / 0.674 : 2;
+  const target = ref.length ? refSorted[Math.floor(ref.length / 2)] / 0.674 : 2;
   const noise = (salt: number) => {
     const v = new Float32Array(n);
     for (let p = 0; p < n; p++) {
@@ -1076,12 +1090,13 @@ export function strayHairs(
   // Its own sharp line measure: a strand is one or two pixels wide on a 1k photo, finer than the
   // creases' finest width (whose box blur is wider than its nominal size).
   const sigma = Math.max(0.7, fw * 0.0028);
-  // (The wider smoothing continues the narrower one's passes: one run gives both.)
-  const [g1, g2] = binomial(lum, w, h, [sigma, sigma * 2.3]);
+  const [g1] = binomial(lum, w, h, [sigma]);
   const thin = thinLine(g1, w, h, sigma);
   const fineStrength = thin.strength,
-    lineDir = thin.dir,
-    deepStrength = thinLine(g2, w, h, sigma * 2.3).strength;
+    lineDir = thin.dir;
+  // The next width's strength is only needed for thin dark pixels near the hairline and along
+  // strands: worked out there only, a tile at a time (its smoothing is many passes).
+  const deepStrength = lazyThinLine(lum, w, h, sigma * 2.3);
   // Local grain: mean absolute fine detail around each pixel.
   const detail = new Float32Array(n);
   for (let p = 0; p < n; p++) detail[p] = Math.abs(lum[p] - g1[p]);
@@ -1089,12 +1104,11 @@ export function strayHairs(
   const sample: number[] = [];
   for (let p = 0; p < n; p += 3) if (inside(p) && fineStrength[p] > 0) sample.push(fineStrength[p]);
   if (sample.length < 50) return out;
-  sample.sort((a, b) => a - b);
-  const fineRef = sample[sample.length >> 1];
+  const fineRef = sorted(sample)[sample.length >> 1];
   // Thin (the finest width at least as strong as the next: hair, not a fold's edge) and darker
   // than the skin around, by more than the skin's own grain.
-  const level = (p: number) => {
-    if (fineStrength[p] < deepStrength[p] * 0.8) return 0;
+  // (Strength and darkness first: the width test is only needed where they pass.)
+  const strong = (p: number) => {
     const rel = fineStrength[p] / fineRef,
       dark = around[p] - lum[p];
     const g = Math.max(0.5, grain[p]);
@@ -1104,8 +1118,17 @@ export function strayHairs(
         ? 1
         : 0;
   };
-  const lv = new Uint8Array(n);
-  for (let p = 0; p < n; p++) if (inside(p) && !crease(p)) lv[p] = level(p);
+  // Each pixel's level (0 none, 1 grow, 2 seed), worked out when first asked for (kept + 1).
+  const lvKept = new Uint8Array(n);
+  const lv = (p: number) => {
+    let v = lvKept[p];
+    if (!v) {
+      let l = inside(p) && !crease(p) ? strong(p) : 0;
+      if (l && fineStrength[p] < deepStrength(p) * 0.8) l = 0;
+      lvKept[p] = v = l + 1;
+    }
+    return v - 1;
+  };
   // Seeds: strong pixels within 3 px of the outside (hair), in the forehead's upper half.
   const seen = new Uint8Array(n);
   const queue = new Int32Array(n);
@@ -1114,7 +1137,7 @@ export function strayHairs(
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = y * w + x;
-      if (lv[p] !== 2) continue;
+      if (!inside(p) || strong(p) !== 2) continue;
       let upper = false;
       for (const z of forehead) if (ellipseWeight(z, x, y) > 0 && y < z.cy) upper = true;
       if (!upper) continue;
@@ -1131,7 +1154,7 @@ export function strayHairs(
             break;
           }
         }
-      if (edge) {
+      if (edge && lv(p) === 2) {
         seen[p] = 1;
         queue[qt++] = p;
       }
@@ -1154,7 +1177,7 @@ export function strayHairs(
           yy = y + dy;
         if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
         const q = yy * w + xx;
-        if (seen[q] || !lv[q]) continue;
+        if (seen[q] || !lv(q)) continue;
         if (Math.abs(Math.cos(lineDir[q] - lineDir[p])) < turn) continue;
         const len = Math.hypot(dx, dy);
         if (len > 1.5 && Math.abs(dx * dx0 + dy * dy0) / len < 0.7) continue;
@@ -1166,7 +1189,7 @@ export function strayHairs(
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = y * w + x;
-      if (!seen[p] || !lv[p]) continue;
+      if (!seen[p] || !lv(p)) continue;
       out[p] = 1;
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
@@ -1219,6 +1242,57 @@ export function binomial(src: Float32Array, w: number, h: number, sigmas: number
     });
   }
   return outs;
+}
+
+/**
+ * thinLine's strength at `sigma` (from the lightness binomial-smoothed at it), as a function of the
+ * pixel, worked out a tile at a time when first asked for. Each tile smooths a window reaching as
+ * many pixels past it as there are passes (each pass reaches one pixel further), so its values are
+ * exactly those of smoothing the whole picture.
+ */
+function lazyThinLine(lum: Float32Array, w: number, h: number, sigma: number): (p: number) => number {
+  const passes = Math.max(1, Math.round(2 * sigma * sigma));
+  const T = 128,
+    M = passes + 2;
+  const tw = Math.ceil(w / T);
+  const tiles = new Map<number, Float32Array>();
+  const tile = (tx: number, ty: number) => {
+    const x0 = tx * T,
+      y0 = ty * T,
+      x1 = Math.min(w, x0 + T),
+      y1 = Math.min(h, y0 + T);
+    const wx0 = Math.max(0, x0 - M),
+      wy0 = Math.max(0, y0 - M),
+      ww = Math.min(w, x1 + M) - wx0,
+      wh = Math.min(h, y1 + M) - wy0;
+    const win = new Float32Array(ww * wh);
+    for (let y = 0; y < wh; y++) win.set(lum.subarray((y + wy0) * w + wx0, (y + wy0) * w + wx0 + ww), y * ww);
+    const g = binomial(win, ww, wh, [sigma])[0];
+    const out = new Float32Array(T * T);
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue; // as thinLine: no border pixels
+        const q = (y - wy0) * ww + x - wx0;
+        const hxx = g[q - 1] - 2 * g[q] + g[q + 1];
+        const hyy = g[q - ww] - 2 * g[q] + g[q + ww];
+        const hxy = (g[q + ww + 1] - g[q + ww - 1] - g[q - ww + 1] + g[q - ww - 1]) / 4;
+        const mean = (hxx + hyy) / 2,
+          diff = Math.sqrt(((hxx - hyy) / 2) ** 2 + hxy * hxy);
+        const s = mean + diff - Math.abs(mean - diff);
+        if (s > 0) out[(y - y0) * T + x - x0] = s * sigma * sigma;
+      }
+    return out;
+  };
+  return (p) => {
+    const x = p % w,
+      y = (p / w) | 0;
+    const tx = (x / T) | 0,
+      ty = (y / T) | 0,
+      k = ty * tw + tx;
+    let t = tiles.get(k);
+    if (!t) tiles.set(k, (t = tile(tx, ty)));
+    return t[(y - ty * T) * T + x - tx * T];
+  };
 }
 
 /** Scale-normalised dark-line strength (curvature across minus along) at `sigma` (from the lightness `g` smoothed at it), and the line's direction. */
