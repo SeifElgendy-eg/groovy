@@ -8,7 +8,7 @@
 // construction (shared mesh vertices), zero on its border, and is what both the WebGL2 renderer and
 // the CPU fallback sample.
 import type { Point } from "../../core/types";
-import type { LipData, LipParams } from "./geometry";
+import { rollProfile, type LipData, type LipParams } from "./geometry";
 
 export interface Roi {
   x: number;
@@ -75,9 +75,8 @@ export function buildMesh(lip: LipData, targetOuter: Point[], p: LipParams): War
     tOuter = densify(targetOuter, SUBDIVIDE);
   const pts = lip.outerPts;
   const width = Math.hypot(pts[10].x - pts[0].x, pts[10].y - pts[0].y);
-  const roll = Math.max(0, Math.min(1, (p.roll - 0.2) / 0.8));
-  // Nonlinear cross-section: the tissue rolls outward instead of stretching evenly.
-  const rolled = (t: number) => t + p.amount * (0.04 + roll * 0.44) * Math.sin(Math.PI * t);
+  // Cross-section: a gentle outward roll (see rollProfile).
+  const rolled = rollProfile(p.amount, p.roll);
   const dst: Point[][] = [],
     src: Point[][] = [];
   for (let r = 0; r <= LIP_RINGS; r++) {

@@ -36,7 +36,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const scenarios = [
   { name: "lips-original", module: "#chooseLipsBtn", sample: "#sampleBtn", steps: [] },
-  ...[16, 28, 50].map((p) => ({
+  ...[16, 28, 50, 55].map((p) => ({
     name: `lips-preset-${p}`, module: "#chooseLipsBtn", sample: "#sampleBtn",
     steps: [`[data-lip-preset="${p}"]`],
   })),

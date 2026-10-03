@@ -51,6 +51,7 @@ const lipPresetDefaults: Record<string, { roll: number; blend: number }> = {
   16: { roll: 60, blend: 55 },
   28: { roll: 84, blend: 57 },
   50: { roll: 76, blend: 55 },
+  55: { roll: 80, blend: 55 },
 };
 
 function setShade(name: string, hex: string): void {

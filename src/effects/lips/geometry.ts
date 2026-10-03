@@ -47,8 +47,25 @@ export function buildLipData(
   return { outerPts, innerPts, outer, inner, cy: (outer.cy + inner.cy) / 2 };
 }
 
-// Work in the mouth's local coordinate system. Cap lower-lip growth by
-// mouth width, so a naturally thick lower lip is not multiplied into a droop.
+/**
+ * Lower : upper lip height ratio that filler steers toward. Natural lips are ~1.6; filled lips
+ * end nearer 1.3 because the upper lip takes more volume (it is usually the thinner one).
+ */
+export const FILLED_RATIO = 1.3;
+
+/** Volume per unit of filler level, as a share of each lip's own height (before steering). */
+const GROWTH = 0.55;
+/** Largest growth per unit level, as a share of mouth width: upper, lower (no droop). */
+const CAP = { upper: 0.06, lower: 0.055 };
+
+const bump = (t: number, c: number, s: number) => Math.exp(-(((t - c) / s) ** 2));
+
+/**
+ * Grow the outer lip contour, in the mouth's own coordinate system (like the 1-4 ml clinic
+ * ladder): both lips gain volume in proportion to their height, steered toward FILLED_RATIO, so
+ * the upper lip usually grows more. The upper lip's volume peaks under the Cupid's bow; the lower
+ * lip's in its two central lobes; both taper to fixed corners. The mouth opening stays put.
+ */
 export function transformOuterLip(
   pts: Point[],
   inner: Point[],
@@ -67,34 +84,42 @@ export function transformOuterLip(
     nx = -nx;
     ny = -ny;
   }
+  const heightAt = (i: number) => Math.abs((pts[i].x - inner[i].x) * nx + (pts[i].y - inner[i].y) * ny);
+  const r = Math.max(1, heightAt(15)) / Math.max(1, heightAt(5));
+  const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+  const bias = { upper: clamp(r / FILLED_RATIO, 0.6, 1.6), lower: clamp(FILLED_RATIO / r, 0.6, 1.6) };
   const level = amount / 0.4;
+  const roll = 0.35 + 1.3 * clamp((verticalBias - 0.2) / 0.8, 0, 1);
   return pts.map((p, i) => {
     if (i === 0 || i === 10) return { ...p };
     const t = (i % 10) / 10;
     const edge = Math.pow(Math.sin(Math.PI * t), 0.9);
     const upper = i < 10;
-    const thickness = Math.abs(
-      (p.x - inner[i].x) * nx + (p.y - inner[i].y) * ny,
-    );
-    // Upper lobes lift; lower volume spreads across the shoulders with a
-    // restrained centre. The inner mouth and corners remain unchanged.
-    const lobes = upper
-      ? 0.62 + 0.38 * Math.pow(Math.sin(2 * Math.PI * t), 2)
-      : 0.55 + 0.45 * Math.pow(Math.sin(2 * Math.PI * t), 2);
-    const cap = width * (upper ? 0.052 : 0.026);
+    // Where the volume goes along each lip (1 = average).
+    const shape = upper
+      ? 0.72 + 0.4 * (bump(t, 0.36, 0.12) + bump(t, 0.64, 0.12))
+      : 0.75 + 0.3 * (bump(t, 0.38, 0.15) + bump(t, 0.62, 0.15));
     const growth =
-      Math.min(thickness * (upper ? 0.55 : 0.25), cap) *
-      level *
-      edge *
-      lobes *
-      (0.35 + 1.3 * Math.max(0, Math.min(1, (verticalBias - 0.2) / 0.8)));
+      Math.min(heightAt(i) * GROWTH * (upper ? bias.upper : bias.lower), width * (upper ? CAP.upper : CAP.lower)) *
+      level * edge * shape * roll;
     const side = (t < 0.5 ? -1 : 1) * (upper ? 1 : -1);
-    const spread = width * level * 0.012 * edge * Math.abs(2 * t - 1) * side;
+    const spread = width * level * 0.01 * edge * Math.abs(2 * t - 1) * side;
     return {
       x: p.x + nx * growth * (upper ? -1 : 1) + ux * spread,
       y: p.y + ny * growth * (upper ? -1 : 1) + uy * spread,
     };
   });
+}
+
+/**
+ * Cross-section of the grown lip: where tissue at fraction t (0 mouth opening .. 1 lip edge) ends
+ * up, as a fraction of the new height. A gentle outward roll; kept mild so the stretch is spread
+ * through the lip instead of smearing the lip lines near the opening.
+ */
+export function rollProfile(amount: number, roll: number): (t: number) => number {
+  const r = Math.max(0, Math.min(1, (roll - 0.2) / 0.8));
+  const k = amount * (0.03 + r * 0.14);
+  return (t: number) => t + k * Math.sin(Math.PI * t);
 }
 
 /** Where the lip contours end up for the given settings. */

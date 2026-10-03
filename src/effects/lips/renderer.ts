@@ -7,6 +7,7 @@ import { colorLips } from "./color";
 import { cpuWarp, GlWarp } from "./glWarp";
 import { buildMesh, sampleGrid, warpRoi } from "./warpField";
 import { SNAP_REACH, snapLipOutline } from "./lipMask";
+import { lipShading } from "./shading";
 
 function scratch(read = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
@@ -45,7 +46,11 @@ export class LipRenderer {
   ): void {
     const { targetOuter, targetInner } = computeLipTargets(lip, p);
 
-    if (needsWarp(p)) this.warp(target, frame, lip, targetOuter, p, w, h);
+    if (needsWarp(p)) {
+      this.warp(target, frame, lip, targetOuter, p, w, h);
+      // Light and shadow of fuller lips, under any lipstick colour (which keeps the lightness).
+      this.shade(target, targetOuter, targetInner, p);
+    }
 
     this.renderColor(target, targetOuter, targetInner, p, w, h);
     // Preserve the photographed lighting; do not add synthetic reflections.
@@ -61,6 +66,38 @@ export class LipRenderer {
       target.beginPath();
       addClosedContour(target, targetInner);
       target.stroke();
+      target.restore();
+    }
+  }
+
+  /** Draw the volume shading (see shading.ts): soft light on the lips, light and shadow on the skin. */
+  private shade(target: CanvasRenderingContext2D, outer: Point[], inner: Point[], p: LipParams): void {
+    const spots = lipShading(outer, inner, Math.min(1, p.amount / 0.55));
+    if (!spots.length) return;
+    const b = boundsOfPoints(outer);
+    for (const sp of spots) {
+      target.save();
+      // Clip to the lips (outline minus opening) or to the skin around them.
+      target.beginPath();
+      if (sp.region === "lips") {
+        addClosedContour(target, outer);
+        addClosedContour(target, inner);
+      } else {
+        target.rect(b.minX - b.width, b.minY - b.width, b.width * 3, b.height + b.width * 2);
+        addClosedContour(target, outer);
+      }
+      target.clip("evenodd");
+      target.translate(sp.cx, sp.cy);
+      target.rotate(sp.angle);
+      target.scale(sp.rx, sp.ry);
+      const g = target.createRadialGradient(0, 0, 0, 0, 0, 1);
+      const rgb = sp.kind === "light" ? "255,250,245" : "95,55,45";
+      g.addColorStop(0, `rgba(${rgb},${sp.alpha})`);
+      g.addColorStop(0.55, `rgba(${rgb},${sp.alpha * 0.45})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      target.globalCompositeOperation = sp.kind === "light" ? "screen" : "multiply";
+      target.fillStyle = g;
+      target.fillRect(-1, -1, 2, 2);
       target.restore();
     }
   }
