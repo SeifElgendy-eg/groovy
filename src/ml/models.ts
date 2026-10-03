@@ -32,6 +32,8 @@ export async function loadVideoLandmarker(): Promise<FaceLandmarker> {
     minFaceDetectionConfidence: 0.5,
     minFacePresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
+    // Head pose for the capture guide (face/alignment.ts headPose).
+    outputFacialTransformationMatrixes: true,
   };
   const fs = await vision();
   try {
@@ -68,8 +70,8 @@ export async function loadModels(): Promise<Models> {
   const segmentOptions = {
     baseOptions: { modelAssetPath: SEG_MODEL },
     runningMode: "IMAGE" as const,
-    outputCategoryMask: true,
-    outputConfidenceMasks: false,
+    outputCategoryMask: false,
+    outputConfidenceMasks: true, // soft per-class probabilities (face/segmentation.ts)
   };
   let segmenter: ImageSegmenter;
   try {

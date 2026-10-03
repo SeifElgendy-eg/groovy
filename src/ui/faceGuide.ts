@@ -1,5 +1,5 @@
 // The oval capture guide and the "Take photo" button shown over the live camera.
-import { evaluateAlignment } from "../face/alignment";
+import { evaluateAlignment, type HeadPose } from "../face/alignment";
 import { getSourceDims } from "../app/frames";
 import { state } from "../app/state";
 import type { NormalizedLandmark } from "../effects/skin/input";
@@ -25,7 +25,12 @@ export function mountFaceGuide(): void {
   window.addEventListener("resize", () => updateFaceGuide(state.facePoints));
 }
 
-export function updateFaceGuide(points: NormalizedLandmark[] | null): void {
+/** Last head pose seen (re-used when the guide is only re-laid out, e.g. on resize). */
+let lastPose: HeadPose | null = null;
+
+export function updateFaceGuide(points: NormalizedLandmark[] | null, pose?: HeadPose | null): void {
+  if (pose !== undefined) lastPose = pose;
+  if (!points) lastPose = null;
   const { stageWrap, video } = dom;
   const camera = state.sourceMode === "camera" && state.module !== "home";
   faceGuide.hidden = faceGuideLabel.hidden = !camera;
@@ -40,7 +45,7 @@ export function updateFaceGuide(points: NormalizedLandmark[] | null): void {
   faceGuide.style.height = `${dh * 0.82}px`;
   faceGuide.style.left = `${(stageWrap.clientWidth - dw) / 2 + dw * 0.28}px`;
   faceGuide.style.top = `${(stageWrap.clientHeight - dh) / 2 + dh * 0.07}px`;
-  const result = evaluateAlignment(points, state.alignment);
+  const result = evaluateAlignment(points, state.alignment, lastPose);
   state.alignment = result.state;
   state.faceAligned = result.aligned;
   faceGuide.classList.toggle("aligned", state.faceAligned);

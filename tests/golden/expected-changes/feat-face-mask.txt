@@ -1,0 +1,12 @@
+# Skin mask from the model's soft probabilities, re-run on a crop around the face
+# (anti-aliased, more detailed edges): every service that uses the skin mask.
+wrinkles-100
+skin-brightness-60
+acne-pores-100
+acne-real-scars-100
+acne-real-pores-100
+acne-real-redness-100
+acne-scars-100
+acne-50
+acne-80
+acne-100
