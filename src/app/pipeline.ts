@@ -2,8 +2,11 @@
 // the results into `state` and the shared masks.
 import { buildLipData } from "../effects/lips/geometry";
 import { metaOf } from "../effects/registry";
+import { headPose } from "../face/alignment";
+import { faceCropRect, mergeCrop, probToAlpha } from "../face/segmentation";
+import type { NormalizedLandmark } from "../effects/skin/input";
 import { insetSkinMask } from "../imaging/maskOps";
-import type { FaceLandmarker } from "@mediapipe/tasks-vision";
+import type { FaceLandmarker, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
 import { loadModels, loadVideoLandmarker, type Models } from "../ml/models";
 import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
@@ -42,7 +45,7 @@ export async function initModels(): Promise<void> {
       warm.width = warm.height = 256;
       const m = models!;
       m.faceLandmarker.detect(warm);
-      m.segmenter.segment(warm).categoryMask?.close();
+      closeSegmentation(m.segmenter.segment(warm));
       lipRenderer.warmUp();
     });
     state.modelReady = true;
@@ -79,16 +82,51 @@ export function clearFace(): void {
   markEffectsDirty();
 }
 
-function publishSkinMask(mask: { width: number; height: number; getAsUint8Array(): Uint8Array; close(): void }): void {
-  const { width, height } = mask;
+/** Face-skin class of the multiclass selfie model. */
+const FACE_SKIN = 3;
+
+function closeSegmentation(r: ImageSegmenterResult): void {
+  r.categoryMask?.close();
+  r.confidenceMasks?.forEach((m) => m.close());
+}
+
+/** Face-skin probability over the whole result (mask size), or null. */
+function skinProbability(r: ImageSegmenterResult): { prob: Float32Array; width: number; height: number } | null {
+  const m = r.confidenceMasks?.[FACE_SKIN];
+  const out = m ? { prob: new Float32Array(m.getAsFloat32Array()), width: m.width, height: m.height } : null;
+  closeSegmentation(r);
+  return out;
+}
+
+const cropCanvas = document.createElement("canvas");
+const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: false })!;
+
+/**
+ * Skin segmentation of `source`: the whole frame, then (when the face is known) the face's crop
+ * at the model's full resolution, merged in (see face/segmentation.ts).
+ */
+function segmentSkin(segmenter: ImageSegmenter, source: HTMLCanvasElement, points: NormalizedLandmark[] | null): void {
+  const full = skinProbability(segmenter.segment(source));
+  if (!full) return;
+  const rect = points ? faceCropRect(points, full.width, full.height) : null;
+  if (rect) {
+    // The mask is the source's size; map the rect back in case it is not.
+    const sx = source.width / full.width,
+      sy = source.height / full.height;
+    cropCanvas.width = rect.w;
+    cropCanvas.height = rect.h;
+    cropCtx.drawImage(source, rect.x * sx, rect.y * sy, rect.w * sx, rect.h * sy, 0, 0, rect.w, rect.h);
+    const crop = skinProbability(segmenter.segment(cropCanvas));
+    if (crop && crop.width === rect.w && crop.height === rect.h) mergeCrop(full.prob, full.width, full.height, crop.prob, rect);
+  }
+  publishSkinMask(full.prob, full.width, full.height);
+}
+
+function publishSkinMask(prob: Float32Array, width: number, height: number): void {
   segMask.canvas.width = width;
   segMask.canvas.height = height;
   const pixels = segMask.ctx.createImageData(width, height);
-  const labels = mask.getAsUint8Array();
-  for (let i = 0; i < labels.length; i++) {
-    pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255;
-    pixels.data[i * 4 + 3] = labels[i] === 3 ? 255 : 0;
-  }
+  probToAlpha(prob, pixels.data);
   segMask.ctx.putImageData(pixels, 0, 0);
   skinEffectMask.canvas.width = width;
   skinEffectMask.canvas.height = height;
@@ -100,7 +138,6 @@ function publishSkinMask(mask: { width: number; height: number; getAsUint8Array(
     Math.max(3, Math.min(width, height) * 0.025),
   );
   skinEffectMask.ctx.putImageData(new ImageData(faded, width, height), 0, 0);
-  mask.close();
   state.skinMaskReady = true;
   markEffectsDirty();
 }
@@ -128,17 +165,17 @@ export async function processCurrentSource(): Promise<void> {
       (state.sourceMode === "photo" || cameraNeedsEffect()) &&
       metaOf(state.module).usesSkinMask;
     // (Live camera frames never need the skin mask: effects run on the captured photo.)
-    const segmentation = wantsMask ? tracked.sync("skin segmentation", () => segmenter.segment(sourceCanvas)) : null;
-    if (segmentation?.categoryMask) publishSkinMask(segmentation.categoryMask);
-
     const faceRes = live
       ? tracked.sync("live face tracking", () => live.detectForVideo(sourceCanvas, timestamp))
       : tracked.sync("photo face detection", () => faceLandmarker.detect(sourceCanvas));
+    if (wantsMask)
+      tracked.sync("skin segmentation", () => segmentSkin(segmenter, sourceCanvas, faceRes.faceLandmarks?.[0] ?? null));
     if (faceRes.faceLandmarks?.length) {
       const landmarks = faceRes.faceLandmarks[0];
       state.facePoints = landmarks;
       markEffectsDirty();
-      updateFaceGuide(landmarks);
+      const matrix = faceRes.facialTransformationMatrixes?.[0]?.data;
+      updateFaceGuide(landmarks, matrix ? headPose(matrix) : null);
       state.lipData = buildLipData(landmarks, w, h, camera);
       dom.faceBadge.textContent = "Face detected";
       dom.faceBadge.classList.add("detected");
