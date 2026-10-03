@@ -101,21 +101,18 @@ export class LipRenderer {
       target.fillRect(-1, -1, 2, 2);
       target.restore();
     }
-    // The light line along the upper border: one soft stroke, fading toward the corners.
+    // The light along the upper border: one soft stroke across the border, fading to the corners.
     const line = borderLight(outer, inner, Math.min(1, p.amount / 0.55));
     if (line.alpha > 0) {
       const a = line.points[0],
         z = line.points[line.points.length - 1];
       const g = target.createLinearGradient(a.x, a.y, z.x, z.y);
-      g.addColorStop(0, "rgba(255,250,245,0)");
-      g.addColorStop(0.3, `rgba(255,250,245,${line.alpha})`);
-      g.addColorStop(0.7, `rgba(255,250,245,${line.alpha})`);
-      g.addColorStop(1, "rgba(255,250,245,0)");
+      // Warm light, not white; no clip: it straddles the border and blends lip into skin.
+      g.addColorStop(0, "rgba(255,236,224,0)");
+      g.addColorStop(0.3, `rgba(255,236,224,${line.alpha})`);
+      g.addColorStop(0.7, `rgba(255,236,224,${line.alpha})`);
+      g.addColorStop(1, "rgba(255,236,224,0)");
       target.save();
-      target.beginPath();
-      target.rect(b.minX - b.width, b.minY - b.width, b.width * 3, b.height + b.width * 2);
-      addClosedContour(target, outer);
-      target.clip("evenodd");
       target.globalCompositeOperation = "screen";
       target.filter = `blur(${line.blur}px)`;
       target.strokeStyle = g;

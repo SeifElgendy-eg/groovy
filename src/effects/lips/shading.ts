@@ -25,7 +25,7 @@ export interface ShadeSpot {
 export const SHADE = {
   lowerGloss: 0.3,
   upperGloss: 0.2,
-  borderLight: 0.24,
+  borderLight: 0.18,
   underShadow: 0.6,
   /** The upper lip turning inward toward the lip line, and the lower lip rolling away at its edge. */
   upperTuck: 0.28,
@@ -83,11 +83,11 @@ export function borderLight(outer: Point[], inner: Point[], strength: number) {
     nx = -nx;
     ny = -ny;
   }
-  const off = upperH * 0.1;
+  const off = upperH * 0.03; // straddles the border: half on the lip, half on the skin
   return {
     points: outer.slice(1, 10).map((q) => ({ x: q.x + nx * off, y: q.y + ny * off })),
-    width: Math.max(1.5, upperH * 0.16),
-    blur: Math.max(0.5, upperH * 0.06),
+    width: Math.max(2, upperH * 0.22),
+    blur: Math.max(1, upperH * 0.12),
     alpha: SHADE.borderLight * s,
   };
 }
