@@ -68,7 +68,7 @@ export const TEXTURE_SOFTEN = 0.95;
 /** Share of the line-shaped finest detail (faint leftover lines) removed at full dose. */
 export const FINEST_LINES = 0.85;
 /** Share of the fine detail replaced by fresh grain at full dose (main areas). */
-export const GRAIN_REPLACE = 0.6;
+export const GRAIN_REPLACE = 0.65;
 /** Largest lift of a line (levels). */
 export const MAX_LIFT = 45;
 /** Depth (levels below the skin around it) over which a dip goes from "grain" to "line". */
@@ -501,28 +501,83 @@ export function synthGrain(
     }
     return v;
   };
-  // Skin texture is pores (small, soft, slightly dark dots, scattered irregularly) on a very fine
-  // smooth grain, not blurred noise (which reads as digital mottling).
-  const fine = blurLike(noise(0x9e37), w, h, Math.max(0.7, fw * 0.0007));
-  const poreR = Math.max(0.7, fw * 0.0009);
-  const seeds = new Float32Array(n);
-  const u = noise(0x7f4a);
-  // About one pore per (5 pore widths)^2.
-  const density = 1 / Math.max(9, (poreR * 5) ** 2);
-  for (let p = 0; p < n; p++) if (u[p] + 0.5 < density) seeds[p] = 0.6 + (u[(p * 7) % n] + 0.5) * 0.8;
-  const pores = blurLike(seeds, w, h, poreR);
-  let pm = 0;
-  for (let p = 0; p < n; p++) pm += pores[p];
-  pm /= n;
-  let ps = 0;
-  for (let p = 0; p < n; p++) ps += (pores[p] - pm) ** 2;
-  const psd = Math.sqrt(ps / n) || 1;
+  // Skin micro-relief: a network of small polygonal cells separated by thin, shallow furrows
+  // (the skin's surface lines), with pores where furrows meet, over a very fine smooth grain.
+  // Cells: jittered points on a grid (Worley noise); a pixel's distance to its nearest point vs
+  // its second nearest tells how close it is to a cell border.
+  const cell = Math.max(4.5, fw * 0.011);
+  const gw = Math.ceil(w / cell) + 2,
+    gh = Math.ceil(h / cell) + 2;
+  const hash = (i: number, salt: number) => {
+    let x = Math.imul(i ^ salt, 2654435761) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 2246822519) >>> 0;
+    x ^= x >>> 13;
+    return (x & 0xffff) / 65535;
+  };
+  const px = new Float32Array(gw * gh),
+    py = new Float32Array(gw * gh);
+  for (let j = 0; j < gh; j++)
+    for (let i = 0; i < gw; i++) {
+      const k = j * gw + i;
+      // Full jitter: no trace of the grid.
+      px[k] = (i - 1 + hash(k, 0x51ed)) * cell;
+      py[k] = (j - 1 + hash(k, 0x2c1b)) * cell;
+    }
+  // Per pixel: how close to a cell border (furrow) and to a point where three cells meet
+  // (junction). Each border gets its own depth and only some junctions a pore (hashed from the
+  // cells involved), so the network is uneven like real skin without any large-scale blotches.
+  const relief = new Float32Array(n);
+  const fw2 = cell * 0.11; // furrow half-width
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const ci = Math.floor(x / cell) + 1,
+        cj = Math.floor(y / cell) + 1;
+      let d1 = Infinity,
+        d2 = Infinity,
+        d3 = Infinity,
+        k1 = 0,
+        k2 = 0,
+        k3 = 0;
+      for (let j = cj - 2; j <= cj + 2; j++)
+        for (let i = ci - 2; i <= ci + 2; i++) {
+          if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
+          const k = j * gw + i;
+          const d = Math.hypot(x - px[k], y - py[k]);
+          if (d < d1) {
+            d3 = d2; k3 = k2;
+            d2 = d1; k2 = k1;
+            d1 = d; k1 = k;
+          } else if (d < d2) {
+            d3 = d2; k3 = k2;
+            d2 = d; k2 = k;
+          } else if (d < d3) {
+            d3 = d; k3 = k;
+          }
+        }
+      const furrow = 1 - smoothstep(0, fw2, (d2 - d1) / 2);
+      const junction = 1 - smoothstep(0, fw2 * 1.5, (d3 - d1) / 2);
+      const a = Math.min(k1, k2),
+        b = Math.max(k1, k2);
+      const depth = 0.45 + 0.9 * hash(a * 7919 + b, 0x3a7d);
+      const ids = [k1, k2, k3].sort((u, v) => u - v);
+      const pore = junction * (hash(ids[0] * 104729 + ids[1] * 7919 + ids[2], 0x6b2f) < 0.15 ? 1 : 0);
+      // Cell tops catch a little light; furrows and pores sit in shadow.
+      relief[y * w + x] = 0.3 * (1 - furrow) - furrow * depth - 1.0 * pore;
+    }
+  const fine = blurLike(noise(0x9e37), w, h, Math.max(0.6, fw * 0.0006));
   let fs = 0;
   for (let p = 0; p < n; p++) fs += fine[p] * fine[p];
   const fsd = Math.sqrt(fs / n) || 1;
+  // Soft edges (furrows are rounded, never a hard pixel line), then the fine grain.
+  const soft = blurLike(relief, w, h, Math.max(0.5, cell * 0.06));
+  let rm = 0;
+  for (let p = 0; p < n; p++) rm += soft[p];
+  rm /= n;
+  let rs = 0;
+  for (let p = 0; p < n; p++) rs += (soft[p] - rm) ** 2;
+  const rsd = Math.sqrt(rs / n) || 1;
   const out = new Float32Array(n);
-  // Pores dark (minus), fine grain a little under half of the texture.
-  for (let p = 0; p < n; p++) out[p] = -0.7 * ((pores[p] - pm) / psd) + 0.7 * (fine[p] / fsd);
+  for (let p = 0; p < n; p++) out[p] = (soft[p] - rm) / rsd + 0.3 * (fine[p] / fsd);
   let sum = 0;
   for (let p = 0; p < n; p++) sum += out[p] * out[p];
   const sd = Math.sqrt(sum / n) || 1;
