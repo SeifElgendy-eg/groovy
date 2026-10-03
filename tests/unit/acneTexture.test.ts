@@ -184,3 +184,49 @@ describe("scars keep normal skin texture", () => {
     expect(lum(out, pit) - lum(px, pit)).toBeGreaterThan(5);
   });
 });
+
+describe("scars and pores leave highlights and hair alone", () => {
+  const size = 200;
+  /** Flat skin with: a bright shine blob, a thin dark hair strand, and a pit with a raised rim. */
+  function scene() {
+    const px = new Uint8ClampedArray(size * size * 4);
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        let v = 0;
+        const shine = Math.hypot(x - 50, y - 50);
+        if (shine < 6) v += 40 * (1 - shine / 6); // highlight
+        if (Math.abs(x - 0.4 * y - 120) < 1.2) v -= 35; // hair strand (a diagonal line)
+        const pit = Math.hypot(x - 60, y - 150);
+        if (pit < 6) v -= 20 * (1 - pit / 6); // pit
+        else if (pit < 9) v += 5; // its raised rim
+        px.set([190 + v, 150 + v, 130 + v, 255], (y * size + x) * 4);
+      }
+    return px;
+  }
+  const px = scene();
+  const mask = new Uint8ClampedArray(px.length).fill(255);
+  const r = textureCompute({ pixels: px, mask, width: size, height: size, faceWidth: 500 });
+  const at = (x: number, y: number) => (y * size + x) * 4;
+
+  it("scars never darken a highlight", () => {
+    const out = apply(px, r.scars, 1);
+    expect(lum(out, at(50, 50))).toBeGreaterThanOrEqual(lum(px, at(50, 50)) - 0.5);
+  });
+
+  it("scars do not fill a hair strand", () => {
+    const out = apply(px, r.scars, 1);
+    const y = 80, x = Math.round(0.4 * y + 120);
+    expect(lum(out, at(x, y)) - lum(px, at(x, y))).toBeLessThan(2);
+  });
+
+  it("pores do not lift a hair strand", () => {
+    const out = apply(px, r.pores, 1);
+    const y = 80, x = Math.round(0.4 * y + 120);
+    expect(lum(out, at(x, y)) - lum(px, at(x, y))).toBeLessThan(3);
+  });
+
+  it("scars still fill the pit", () => {
+    const out = apply(px, r.scars, 1);
+    expect(lum(out, at(60, 150)) - lum(px, at(60, 150))).toBeGreaterThan(5);
+  });
+});

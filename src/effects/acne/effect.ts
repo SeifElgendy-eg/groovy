@@ -153,13 +153,15 @@ export class AcneEffect {
   private async prepareTexture(input: SkinInput, faded: HTMLCanvasElement, aw: number, ah: number) {
     const { w, h } = input;
     const points = toDisplayPoints(input.landmarks, w, h, input.mirrored);
-    const b = boundsOfPoints(points);
-    const padX = b.width * 0.08,
-      padY = b.height * 0.08;
-    const x = Math.max(0, Math.floor(b.minX - padX)),
-      y = Math.max(0, Math.floor(b.minY - padY));
-    const cw = Math.min(w, Math.ceil(b.maxX + padX)) - x,
-      ch = Math.min(h, Math.ceil(b.maxY + padY)) - y;
+    // The crop covers the landmarks and the whole skin mask (which reaches above the landmarks, up
+    // to the hairline), plus the scar window: a crop edge inside the mask shows as a straight seam.
+    const lm = boundsOfPoints(points);
+    const mb = maskBounds(faded, aw, ah, w / aw, h / ah) ?? lm;
+    const pad = faceWidthOf(points) * 0.05;
+    const x = Math.max(0, Math.floor(Math.min(lm.minX, mb.minX) - pad)),
+      y = Math.max(0, Math.floor(Math.min(lm.minY, mb.minY) - pad));
+    const cw = Math.min(w, Math.ceil(Math.max(lm.maxX, mb.maxX) + pad)) - x,
+      ch = Math.min(h, Math.ceil(Math.max(lm.maxY, mb.maxY) + pad)) - y;
     if (cw < 8 || ch < 8) return null;
     const crop = scratch(true);
     crop.canvas.width = cw;
@@ -238,4 +240,23 @@ export class AcneEffect {
     ctx.globalAlpha = 1;
     return canvas;
   }
+}
+
+/** Bounds (display pixels) of a mask canvas's non-transparent pixels, or null if it is empty. */
+function maskBounds(mask: HTMLCanvasElement, mw: number, mh: number, sx: number, sy: number) {
+  const data = mask.getContext("2d")!.getImageData(0, 0, mw, mh).data;
+  let minX = mw,
+    minY = mh,
+    maxX = -1,
+    maxY = -1;
+  for (let y = 0; y < mh; y++)
+    for (let x = 0; x < mw; x++)
+      if (data[(y * mw + x) * 4 + 3] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+  if (maxX < 0) return null;
+  return { minX: minX * sx, minY: minY * sy, maxX: (maxX + 1) * sx, maxY: (maxY + 1) * sy };
 }

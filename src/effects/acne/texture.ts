@@ -2,10 +2,11 @@
 //
 // The skin's lightness is split by size (frequency separation):
 //   fine  = L - blur(L, pore size)          -> pores and fine grain
-// Pores: the fine band's dark parts are reduced much more than light parts (natural sheen) and
-// some of it is always kept, so skin never turns plastic.
-// Scars: pits are found as dips below the surrounding skin (morphological closing) and filled
-// most of the way, on a pore-smoothed copy so the photo's own pore texture stays on top.
+// Pores: the fine band's dark dots are reduced (light parts, the skin's sheen, barely) and some
+// of it is always kept, so skin never turns plastic. Line-like detail (hair, fine lines) is kept.
+// Scars: pits are found as dips below the surrounding skin (morphology) and filled beyond the
+// face's normal texture depth. Their raised rims are lowered only where there are pits, so
+// highlights elsewhere stay. Lines (hair, creases) and the mask's edge are left alone.
 // Colour is kept: each pixel's RGB is scaled by its change in lightness.
 //
 // The result is returned as two composite layers per treatment, so the caller can apply any
@@ -39,7 +40,7 @@ export interface TextureResult {
 }
 
 /** How strongly each band is reduced at full strength: [dark parts, light parts]. */
-export const PORE_REDUCTION: [number, number] = [0.5, 0.12];
+export const PORE_REDUCTION: [number, number] = [0.5, 0.04];
 
 /** In-place horizontal + vertical box blur of radius r (clamped edges). */
 function boxBlur(src: Float32Array, w: number, h: number, r: number, tmp: Float32Array): void {
@@ -156,8 +157,9 @@ const opening = (v: Float32Array, ok: Uint8Array, w: number, h: number, k: numbe
   morph(morph(v, ok, w, h, k, false), ok, w, h, k, true);
 
 /**
- * Scar relief: how far each spot sits below (dips) or above (raised rims) the skin around it,
- * at full resolution, on the pore-smoothed lightness (so pores are not "scars").
+ * Scar depth: how far each spot sits below the skin around it (acne scars are pits), at full
+ * resolution, on the pore-smoothed lightness (so pores are not "scars"). Bright bumps are lowered
+ * only next to pits (scar rims); elsewhere they are highlights (nose, cheekbones) and are kept.
  * Open-close removes rims and dips narrower than the window; averaging it with close-open cancels
  * the slight darkening/lightening either order alone gives on textured skin. Wider shapes
  * (cheekbone, jaw) are wider than the window and left alone.
@@ -186,15 +188,79 @@ export function scarDepth(b1: Float32Array, mask: Pixels, w: number, h: number, 
   // relief of this face (median |depth| over skin) as normal and remove only what goes beyond it,
   // so a filled scar ends up as textured as the skin around it.
   const floor = medianAbs(depth, valid) * SCAR_TEXTURE_KEPT;
+  const pits = new Float32Array(n);
+  for (let p = 0; p < n; p++) pits[p] = Math.max(0, depth[p] - floor);
+  // Scar rims (the raised, lighter edge of a pit) are lowered too, but only where there are pits
+  // around: elsewhere a bright bump is a highlight (nose, cheekbone, oily shine) and is kept.
+  const scarred = blurLike(pits, w, h, k);
   for (let p = 0; p < n; p++) {
-    const d = depth[p];
-    depth[p] = Math.sign(d) * Math.max(0, Math.abs(d) - floor);
+    const rim = Math.min(0, depth[p] + floor);
+    const near = Math.min(1, scarred[p] / SCAR_RIM_NEIGHBOURHOOD);
+    // A rim stands a few levels proud of the skin; shine stands far higher. Leave the latter.
+    const t = Math.min(1, Math.max(0, (-rim - SCAR_RIM_MAX[0]) / (SCAR_RIM_MAX[1] - SCAR_RIM_MAX[0])));
+    const isRim = 1 - t * t * (3 - 2 * t);
+    depth[p] = pits[p] + rim * near * near * isRim;
   }
   return depth;
 }
 
+/**
+ * 1 where the local structure is blob-like or random (pits, pores, skin grain), falling to 0 where
+ * it is line-like (hair strands, creases, edges): the structure tensor's coherence over ~sigma.
+ */
+export function blobWeight(lum: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  const n = w * h;
+  const xx = new Float32Array(n),
+    xy = new Float32Array(n),
+    yy = new Float32Array(n);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const gx = (lum[y * w + Math.min(w - 1, x + 1)] - lum[y * w + Math.max(0, x - 1)]) / 2;
+      const gy = (lum[Math.min(h - 1, y + 1) * w + x] - lum[Math.max(0, y - 1) * w + x]) / 2;
+      xx[p] = gx * gx;
+      xy[p] = gx * gy;
+      yy[p] = gy * gy;
+    }
+  const a = blurLike(xx, w, h, sigma),
+    b = blurLike(xy, w, h, sigma),
+    c = blurLike(yy, w, h, sigma);
+  const out = new Float32Array(n);
+  for (let p = 0; p < n; p++) {
+    const tr = a[p] + c[p];
+    const diff = Math.sqrt((a[p] - c[p]) ** 2 + 4 * b[p] * b[p]);
+    // Coherence 0 (isotropic) .. 1 (a single direction). +1 keeps flat, noisy areas isotropic.
+    const coh = diff / (tr + 1);
+    const t = Math.min(1, Math.max(0, (coh - LINE_COHERENCE[0]) / (LINE_COHERENCE[1] - LINE_COHERENCE[0])));
+    out[p] = 1 - t * t * (3 - 2 * t);
+  }
+  return out;
+}
+
+/** Coherence range over which a feature goes from "blob" (treated) to "line" (left alone). */
+export const LINE_COHERENCE: [number, number] = [0.35, 0.7];
+
+/** 1 well inside the mask, 0 at and beyond its edge (a blurred, re-thresholded core). */
+function coreWeight(mask: Pixels, w: number, h: number, sigma: number): Float32Array {
+  const n = w * h;
+  const inside = new Float32Array(n);
+  for (let p = 0; p < n; p++) inside[p] = mask[p * 4 + 3] > 200 ? 1 : 0;
+  const v = blurLike(inside, w, h, sigma);
+  for (let p = 0; p < n; p++) {
+    const t = Math.min(1, Math.max(0, (v[p] - 0.6) / 0.35));
+    v[p] = t * t * (3 - 2 * t);
+  }
+  return v;
+}
+
 /** How much of a scar's relief (beyond normal texture) is removed at full strength. */
 export const SCAR_FILL = 1;
+
+/** Average pit depth (levels) around a bright bump above which it counts as a scar rim. */
+export const SCAR_RIM_NEIGHBOURHOOD = 2.5;
+
+/** Height (levels above the skin) over which a bright bump goes from "scar rim" to "shine". */
+export const SCAR_RIM_MAX: [number, number] = [6, 12];
 
 /** Relief up to this multiple of the face's median relief counts as normal texture and is kept. */
 export const SCAR_TEXTURE_KEPT = 1.5;
@@ -220,6 +286,10 @@ function medianAbs(v: Float32Array, valid: Uint8Array): number {
 function scarLayers(pixels: Pixels, lum: Float32Array, b1: Float32Array, mask: Pixels, w: number, h: number, faceWidth: number): Layers {
   const n = w * h;
   const depth = scarDepth(b1, mask, w, h, faceWidth);
+  // Pits are round; hair strands, creases and the face's own outline are lines: leave those.
+  const blob = blobWeight(b1, w, h, Math.max(1.5, faceWidth * 0.012));
+  // Dark hair and shadow just inside the mask's edge look like dips too: fade out near the edge.
+  const core = coreWeight(mask, w, h, Math.max(2, faceWidth * 0.015));
   // The colour of the normal skin around each pixel, as a ratio to lightness (r/L, g/L, b/L).
   // Shine (white) and deep shadow are left out of that average, so the reference is real skin
   // tone: lifted pit shadows do not go orange and lowered shiny rims do not go grey.
@@ -245,7 +315,7 @@ function scarLayers(pixels: Pixels, lum: Float32Array, b1: Float32Array, mask: P
   for (let p = 0; p < n; p++) {
     const i = p * 4;
     add[i + 3] = 255;
-    const fill = depth[p] * SCAR_FILL * (mask[i + 3] / 255);
+    const fill = depth[p] * SCAR_FILL * (mask[i + 3] / 255) * blob[p] * core[p];
     if (Math.abs(fill) < 0.25 || lum[p] < 1) continue;
     // The brightness change is exactly the fill (texture kept). The more a pixel is changed, the
     // more of its colour comes from the surrounding skin tone.
@@ -275,8 +345,12 @@ export function textureCompute(j: TextureJob): TextureResult {
   const b1 = blurLike(lum, w, h, poreSigma);
   const fine = new Float32Array(n);
   for (let p = 0; p < n; p++) fine[p] = lum[p] - b1[p];
+  // Pores are dots; hair strands and fine lines are lines and keep their full detail.
+  const poreBlob = blobWeight(lum, w, h, poreSigma * 2.5);
+  const poreBand = new Float32Array(n);
+  for (let p = 0; p < n; p++) poreBand[p] = fine[p] * poreBlob[p];
   return {
-    pores: toLayers(pixels, lum, reduceBand(fine, PORE_REDUCTION, w, h, poreSigma * 2), j.mask),
+    pores: toLayers(pixels, lum, reduceBand(poreBand, PORE_REDUCTION, w, h, poreSigma * 2), j.mask),
     scars: scarLayers(pixels, lum, b1, j.mask, w, h, j.faceWidth),
     redness: rednessLayers(pixels, j.mask, w, h, j.faceWidth),
   };
