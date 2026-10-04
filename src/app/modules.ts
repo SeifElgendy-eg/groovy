@@ -4,7 +4,7 @@ import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
 import { syncBefore, syncWrinklesPreset } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { updateFaceGuide } from "../ui/faceGuide";
-import { markEffectsDirty } from "./effects";
+import { body, markEffectsDirty } from "./effects";
 import { processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { loadSamplePhoto } from "./source";
@@ -15,6 +15,7 @@ const serviceSections: Record<ServiceId, HTMLElement[]> = {
   wrinkles: [dom.wrinklesSection],
   acne: [dom.acneSection],
   skin: [dom.skinSection],
+  body: [dom.bodySection],
 };
 
 function showEl(el: HTMLElement, show: boolean): void {
@@ -38,6 +39,8 @@ export function setModule(moduleName: ModuleId): void | Promise<void> {
   for (const [id, els] of Object.entries(serviceSections))
     for (const el of els) showEl(el, moduleName === id);
 
+  // Body slimming's model is large: load it when the service is first chosen.
+  if (moduleName === "body") body.warmUp();
   if (moduleName === "wrinkles") {
     dom.wrinklesSlider.value = "100";
     syncWrinklesPreset();

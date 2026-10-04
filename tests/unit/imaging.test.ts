@@ -67,7 +67,7 @@ describe("transformOuterLip", () => {
 
 describe("service registry", () => {
   it("has a record for every service and the home screen", () => {
-    expect(Object.keys(SERVICES).sort()).toEqual(["acne", "lips", "skin", "wrinkles"]);
+    expect(Object.keys(SERVICES).sort()).toEqual(["acne", "body", "lips", "skin", "wrinkles"]);
     expect(metaOf("home").id).toBe("home");
     for (const [id, meta] of Object.entries(SERVICES)) expect(meta.id).toBe(id);
   });

@@ -5,7 +5,7 @@ import { applySourceMode, syncBefore } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { capture, captureBtn, updateFaceGuide } from "../ui/faceGuide";
 import { setStatus } from "../ui/status";
-import { markEffectsDirty } from "./effects";
+import { bodyPerson, markEffectsDirty } from "./effects";
 import { ensureSizes, getSourceDims, setStill } from "./frames";
 import { startCameraLoop } from "./loop";
 import { clearFace, processCurrentSource } from "./pipeline";
@@ -103,6 +103,7 @@ async function photoReady(loadedStatus: string): Promise<void> {
 
 function resetForNewPhoto(kind: typeof state.photoKind): void {
   state.skinMaskReady = false;
+  bodyPerson.mask = null;
   state.photoKind = kind;
   clearFace();
   markEffectsDirty();

@@ -24,7 +24,7 @@ function Send-Response($stream, [int]$status, [string]$type, [byte[]]$body, [boo
     if (-not $headOnly) { $stream.Write($body,0,$body.Length) }
 }
 try {
-    foreach ($required in @('index.html','vendor/mediapipe/wasm/vision_wasm_internal.wasm','vendor/mediapipe/wasm/vision_wasm_internal.js','models/face_landmarker.task','models/selfie_multiclass_256x256.tflite')) {
+    foreach ($required in @('index.html','vendor/mediapipe/wasm/vision_wasm_internal.wasm','vendor/mediapipe/wasm/vision_wasm_internal.js','models/face_landmarker.task','models/selfie_multiclass_256x256.tflite','models/bodypix-mobilenet-v1-100-s8.onnx')) {
         if (-not (Test-Path -LiteralPath (Join-Path $web $required))) { throw "Missing $required. Extract and keep the complete project folder together." }
     }
     $listener = $null
@@ -43,7 +43,7 @@ try {
     }
     if ($null -eq $listener) { throw 'No available local port. Close earlier copies and try again.' }
     Open-App "$url/?v=$ver"
-    $mime = @{'.html'='text/html; charset=utf-8';'.js'='text/javascript';'.mjs'='text/javascript';'.css'='text/css';'.wasm'='application/wasm';'.json'='application/json';'.png'='image/png';'.jpg'='image/jpeg';'.jpeg'='image/jpeg';'.svg'='image/svg+xml';'.ico'='image/x-icon';'.task'='application/octet-stream';'.tflite'='application/octet-stream'}
+    $mime = @{'.html'='text/html; charset=utf-8';'.js'='text/javascript';'.mjs'='text/javascript';'.css'='text/css';'.wasm'='application/wasm';'.json'='application/json';'.png'='image/png';'.jpg'='image/jpeg';'.jpeg'='image/jpeg';'.svg'='image/svg+xml';'.ico'='image/x-icon';'.task'='application/octet-stream';'.tflite'='application/octet-stream';'.onnx'='application/octet-stream'}
     while ($true) {
         $client = $listener.AcceptTcpClient()
         try {

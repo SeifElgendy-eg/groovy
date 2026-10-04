@@ -94,10 +94,10 @@
                   ><strong>Acne Treatment</strong
                   ><small>Your skin journey</small>
                 </button>
-                <button class="service-card" disabled>
+                <button id="chooseBodyBtn" class="service-card">
                   <span class="service-symbol" aria-hidden="true">♧</span
                   ><strong>Weight loss<br />(Body shaping)</strong
-                  ><small class="coming-soon">Coming soon</small>
+                  ><small>See your new shape</small>
                 </button>
               </div>
               <button id="chooseSkinBtn" hidden>Skin Brightness</button>
@@ -234,6 +234,43 @@
               <div class="small-note">
                 Illustrative simulation only. Treatment durations do not predict
                 clinical results.
+              </div>
+            </section>
+
+            <section
+              id="bodySection"
+              class="section module-section hidden-section"
+            >
+              <div class="eyebrow">BODY</div>
+              <h3>Weight loss (body shaping)</h3>
+              <div class="control">
+                <div class="row">
+                  <strong>Weight loss</strong
+                  ><span id="bodyValue" class="value">0%</span>
+                </div>
+                <input id="bodySlider" aria-label="Weight loss" type="range" min="0" max="100" step="5" value="0" />
+              </div>
+              <div class="eyebrow">AREAS</div>
+              <div class="control">
+                <div class="row">
+                  <strong>Arms</strong><span id="bodyArmsValue" class="value">100%</span>
+                </div>
+                <input id="bodyArmsSlider" aria-label="Arms" type="range" min="0" max="100" step="5" value="100" />
+              </div>
+              <div class="control">
+                <div class="row">
+                  <strong>Waist &amp; hips</strong><span id="bodyWaistValue" class="value">100%</span>
+                </div>
+                <input id="bodyWaistSlider" aria-label="Waist and hips" type="range" min="0" max="100" step="5" value="100" />
+              </div>
+              <div class="control">
+                <div class="row">
+                  <strong>Legs</strong><span id="bodyLegsValue" class="value">100%</span>
+                </div>
+                <input id="bodyLegsSlider" aria-label="Legs" type="range" min="0" max="100" step="5" value="100" />
+              </div>
+              <div id="bodyStatus" class="small-note">
+                Stand facing the camera with your whole body in view, then Take photo.
               </div>
             </section>
 

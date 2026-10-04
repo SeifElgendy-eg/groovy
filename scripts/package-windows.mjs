@@ -29,6 +29,7 @@ const REQUIRED = [
   "index.html",
   "models/face_landmarker.task",
   "models/selfie_multiclass_256x256.tflite",
+  "models/bodypix-mobilenet-v1-100-s8.onnx",
   "vendor/mediapipe/wasm/vision_wasm_internal.js",
   "vendor/mediapipe/wasm/vision_wasm_internal.wasm",
   "vendor/mediapipe/wasm/vision_wasm_nosimd_internal.wasm",
@@ -39,6 +40,9 @@ for (const f of REQUIRED) {
   const p = path.join(dist, f);
   if (!fs.existsSync(p) || fs.statSync(p).size === 0) fail(`missing or empty in build: ${f}`);
 }
+// onnxruntime's WebAssembly (body slimming) is bundled by the build under a hashed name.
+if (!fs.readdirSync(path.join(dist, "assets")).some((f) => /^ort-wasm-simd-threaded.*\.wasm$/.test(f)))
+  fail("missing in build: assets/ort-wasm-simd-threaded*.wasm");
 const html = fs.readFileSync(path.join(dist, "index.html"), "utf8");
 if (/(?:src|href)=["']\/(?!\/)/.test(html)) fail("index.html has root-absolute URLs; the app is served from a sub-folder");
 if (/https?:\/\//.test(html.replace(/<meta[^>]*Content-Security-Policy[^>]*>/s, "")))

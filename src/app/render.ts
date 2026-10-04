@@ -3,9 +3,9 @@
 import { needsWarp } from "../effects/lips/renderer";
 import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
 import type { SkinInput } from "../effects/skin/input";
-import { readBotoxDoses, readLipParams } from "../ui/controls";
+import { readBodySettings, readBotoxDoses, readLipParams } from "../ui/controls";
 import { dom } from "../ui/dom";
-import { acne, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
+import { acne, body, bodyPerson, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
 import { noteWork, tracked } from "./activity";
@@ -65,8 +65,10 @@ interface AsyncEffect {
  * `body[data-effects-busy]` is set meanwhile, so tests can wait for the final picture.
  */
 // Layers for a newly chosen set of botox areas arrive asynchronously: redraw then.
+const anyBusy = () => acne.busy || wrinkles.busy || wrinkles.layersPending || body.busy;
+
 wrinkles.onChange = () => {
-  if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
+  if (!anyBusy()) delete document.body.dataset.effectsBusy;
   renderAll();
 };
 
@@ -81,7 +83,7 @@ function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
       .prepare(skinInput(w, h))
       .catch((err) => console.error("effect preparation failed", err))
       .finally(() => {
-        if (!acne.busy && !wrinkles.busy && !wrinkles.layersPending) delete document.body.dataset.effectsBusy;
+        if (!anyBusy()) delete document.body.dataset.effectsBusy;
         renderAll();
       });
   }
@@ -134,7 +136,50 @@ function renderAcne(w: number, h: number): void {
   if (ready) acne.draw(ctx, w, h, amount, scars, pores, redness);
 }
 
+function renderBody(w: number, h: number): void {
+  const status = dom.bodyStatus;
+  if (state.sourceMode !== "photo") {
+    status.textContent = "Stand facing the camera with your whole body in view, then Take photo.";
+    return;
+  }
+  const person = bodyPerson.mask;
+  if (!person) {
+    status.textContent = state.modelReady ? "Analysing the photo…" : "Loading models…";
+    return;
+  }
+  const settings = readBodySettings();
+  if (settings.overall <= 0) {
+    status.textContent = "Move the Weight loss slider to preview the result.";
+    return;
+  }
+  // A new photo while the last one is still being analysed: stop that analysis.
+  if (body.dirty && body.busy) body.cancel();
+  if (body.dirty && !body.busy) {
+    document.body.dataset.effectsBusy = "1";
+    status.textContent = "Analysing the body…";
+    const start = performance.now();
+    void body
+      .prepare(sourceCanvas, person)
+      .then((ok) => {
+        if (ok) noteWork("body analysis", performance.now() - start);
+      })
+      .finally(() => {
+        if (!anyBusy()) delete document.body.dataset.effectsBusy;
+        renderAll();
+      });
+    return;
+  }
+  if (body.busy) return;
+  if (body.failed) {
+    status.textContent = "No full body found. Use a photo of the whole body, facing the camera.";
+    return;
+  }
+  status.textContent = "Compare Before and After to preview the weight loss.";
+  body.draw(ctx, w, h, settings);
+}
+
 const effectRender: Partial<Record<ModuleId, Draw>> = {
+  body: renderBody,
   skin: renderSkin,
   lips: renderLips,
   acne: renderAcne,
@@ -142,6 +187,7 @@ const effectRender: Partial<Record<ModuleId, Draw>> = {
 };
 
 const effectActive: Record<ServiceId, () => boolean> = {
+  body: () => Number(dom.bodySlider.value) > 0,
   wrinkles: () => Object.values(readBotoxDoses()).some((d) => d > 0),
   acne: () =>
     Number(dom.acneSlider.value) > 0 ||

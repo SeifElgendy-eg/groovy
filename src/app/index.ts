@@ -76,6 +76,12 @@ function resetAll(): void {
   syncAcnePreset();
   dom.brightnessSlider.value = "0";
   dom.brightnessValue.textContent = "0%";
+  dom.bodySlider.value = "0";
+  dom.bodyValue.textContent = "0%";
+  for (const [s, v] of [[dom.bodyArmsSlider, dom.bodyArmsValue], [dom.bodyWaistSlider, dom.bodyWaistValue], [dom.bodyLegsSlider, dom.bodyLegsValue]] as const) {
+    s.value = "100";
+    v.textContent = "100%";
+  }
   dom.lipSlider.value = "0";
   dom.verticalSlider.value = "60";
   dom.blendSlider.value = "55";
@@ -101,6 +107,7 @@ function bindControls(): void {
   dom.chooseWrinklesBtn.addEventListener("click", () => setModule("wrinkles"));
   dom.chooseAcneBtn.addEventListener("click", () => setModule("acne"));
   dom.chooseSkinBtn.addEventListener("click", () => setModule("skin"));
+  dom.chooseBodyBtn.addEventListener("click", () => setModule("body"));
   dom.backHomeBtn.addEventListener("click", () => setModule("home"));
   dom.cameraBtn.addEventListener("click", () => useCameraAgain());
   dom.startBtn.addEventListener("click", startCamera);
@@ -162,6 +169,12 @@ function bindControls(): void {
 
   // Skin brightness
   bindSlider(dom.brightnessSlider, dom.brightnessValue);
+
+  // Body slimming
+  bindSlider(dom.bodySlider, dom.bodyValue);
+  bindSlider(dom.bodyArmsSlider, dom.bodyArmsValue);
+  bindSlider(dom.bodyWaistSlider, dom.bodyWaistValue);
+  bindSlider(dom.bodyLegsSlider, dom.bodyLegsValue);
 
   // Lips
   for (const btn of dom.lipPresetButtons)
