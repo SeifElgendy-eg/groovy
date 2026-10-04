@@ -1,0 +1,6 @@
+# Botox coverage: guards carved after the hairline snap (eye shadows no longer peeled), valley
+# depth caps (shadow edges are not lines), freckle protection only for small isolated patches,
+# nose guard up the bridge
+wrinkles-20u
+wrinkles-40u
+wrinkles-forehead-40u

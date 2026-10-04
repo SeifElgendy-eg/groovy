@@ -42,14 +42,22 @@ export function faceOval(points: Point[], faceWidth: number): Point[] {
       side = (dx * sx + dy * sy) / (wid / 2); // -1 .. +1 across the face
     let x = p.x,
       y = p.y;
-    // Forehead: the landmark oval often stops below the real hairline.
+    // Forehead: the landmark oval often stops below the real hairline (a bald or receding head
+    // has forehead lines well above it), and its upper corners cut the temples off. The skin mask
+    // decides where the hair starts; the oval only has to reach past it.
     if (up > 0.35) {
-      const k = smooth(clamp((up - 0.35) / 0.65)) * faceWidth * 0.16;
+      const k = smooth(clamp((up - 0.35) / 0.65)) * faceWidth * 0.24;
       x += ux * k;
       y += uy * k;
     }
-    // Cheek edge / temple: pull in slightly so the ear root is never inside.
-    if (Math.abs(side) > 0.8) {
+    if (up > 0.3 && Math.abs(side) > 0.4) {
+      const k = smooth(clamp((up - 0.3) / 0.35)) * smooth(clamp((Math.abs(side) - 0.4) / 0.4)) * faceWidth * 0.06,
+        s = Math.sign(side);
+      x += sx * s * k;
+      y += sy * s * k;
+    }
+    // Cheek edge (below the temples): pull in slightly so the ear root is never inside.
+    if (Math.abs(side) > 0.8 && up <= 0.3) {
       const k = smooth(clamp((Math.abs(side) - 0.8) / 0.2)) * faceWidth * 0.02,
         s = Math.sign(side);
       x -= sx * s * k;

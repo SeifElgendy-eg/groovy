@@ -4,6 +4,8 @@ import { expose, transfer } from "comlink";
 import { acneCompute, wrinklesCompute, type AcneJob, type WrinklesJob } from "./compute";
 import { textureCompute, type TextureJob } from "../acne/texture";
 import { linesCompute, linesLayers, type AreaId, type LinesJob } from "../wrinkles/lines";
+import { linesComputeParallel } from "../wrinkles/parallel";
+import { helperCount, runStage } from "./pool";
 
 const api = {
   acne(job: AcneJob) {
@@ -18,8 +20,17 @@ const api = {
     const r = wrinklesCompute(job);
     return transfer(r, [r.faded.buffer]);
   },
-  lines(job: LinesJob) {
-    const r = linesCompute(job);
+  async lines(job: LinesJob) {
+    // On several cores when the page allows shared memory (same result as on one).
+    let r;
+    if (helperCount() > 0) {
+      try {
+        r = await linesComputeParallel(job, runStage);
+      } catch (err) {
+        console.warn("botox on several cores failed; using one", err);
+        r = linesCompute(job);
+      }
+    } else r = linesCompute(job);
     return transfer(r, Object.values(r).flatMap((l) => [l.mul.buffer, l.add.buffer]));
   },
   linesLayers(enabled: AreaId[]) {

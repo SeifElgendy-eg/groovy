@@ -11,6 +11,10 @@ import type { Zone } from "./lines";
 const UNDER_LID_RIGHT = [7, 163, 144, 145, 153, 154, 155] as const;
 const UNDER_LID_LEFT = [249, 390, 373, 374, 380, 381, 382] as const;
 
+/** The brows' upper edge, outer tail to inner end, per brow. */
+const BROW_UPPER_RIGHT = [70, 63, 105, 66] as const;
+const BROW_UPPER_LEFT = [300, 293, 334, 296] as const;
+
 export function botoxZones(points: Point[], faceWidth: number): Zone[] {
   const P = points,
     fw = faceWidth;
@@ -27,11 +31,23 @@ export function botoxZones(points: Point[], faceWidth: number): Zone[] {
       // Up to the hairline (the face mesh stops below it; the skin mask keeps the hair out).
       cx: (P[10].x + brow.x) / 2 - vx * fw * 0.08,
       cy: (P[10].y + brow.y) / 2 - vy * fw * 0.08,
-      rx: fw * 0.46,
+      rx: fw * 0.62,
       ry: Math.max(4, foreheadHeight * 0.75 + fw * 0.12),
       angle,
       lineAngle: angle,
     },
+    // Along the brows (above them, out to their tails): the forehead's lower edge, where a raised
+    // brow folds the skin into a bulge and a crease; the forehead ellipse curves away there.
+    ...[...BROW_UPPER_RIGHT, ...BROW_UPPER_LEFT].map((k): Zone => ({
+      id: "forehead",
+      cx: P[k].x - vx * fw * 0.07,
+      cy: P[k].y - vy * fw * 0.07,
+      rx: fw * 0.09,
+      ry: fw * 0.08,
+      angle,
+      lineAngle: angle,
+      tolerance: [35, 65],
+    })),
     {
       id: "frown",
       // Between the brows, from a little above them down to the top of the nose.
