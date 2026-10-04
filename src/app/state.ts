@@ -26,6 +26,8 @@ export const state = {
   alignment: { ...INITIAL_ALIGNMENT } as AlignmentState,
   /** The current photo came from the camera's "Take photo" button. */
   capturedPhoto: false,
+  /** Whole seconds left of a running capture countdown (see core/countdown.ts), or null. */
+  countdown: null as number | null,
   selectedShade: "off",
   selectedShadeHex: "",
   lipFinish: "natural" as "natural" | "matte" | "gloss",
