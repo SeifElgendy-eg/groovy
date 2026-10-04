@@ -920,7 +920,7 @@ function toLayers(
     // Creases are redder than the skin around them: even small lifts take most of its colour.
     // (A deep fold lifted far takes the skin's colour fully: its own, scaled up, turns orange.)
     // (Lowered far, a bright ridge takes the skin's colour too: its own, darkened, turns grey.)
-    let a = f > 0 ? Math.min(f / 8, 0.55 + 0.4 * smoothstep(20, 60, f)) : Math.min(0.5, -f / 30) + 0.4 * smoothstep(10, 30, -f);
+    let a = f > 0 ? Math.min(f / 8, 0.55 + 0.4 * smoothstep(20, 60, f)) : Math.min(0.5, -f / 30) + 0.2 * smoothstep(10, 30, -f);
     // Main areas: the colour is the plain skin's too, so a removed fold leaves no tinted trace.
     a = Math.max(a, recolour[q] * 0.85);
     for (let c = 0; c < 3; c++) {
