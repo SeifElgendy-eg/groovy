@@ -1240,10 +1240,12 @@ export function strayHairs(
 ): Float32Array {
   const n = w * h;
   const out = new Float32Array(n);
-  // (The main forehead zone: the smaller ones along the brows have no hairline.)
+  // The main forehead zone reaches the hairline; the smaller ones along the brows reach the brows,
+  // whose stray hairs (sticking out past the brow's outline from the landmarks) are hair too.
   const fz = zones.filter((z) => z.id === "forehead" && !z.strict);
   const widest = Math.max(0, ...fz.map((z) => z.rx));
-  const forehead = fz.filter((z) => z.rx === widest);
+  const forehead = fz.filter((z) => z.rx === widest),
+    browZones = fz.filter((z) => z.rx !== widest);
   if (!forehead.length) return out;
   // Any skin, the mask's faded edge included: strands cross that fade on their way from the hair.
   const inside = (p: number) => mask[p * 4 + 3] > 8;
@@ -1289,18 +1291,26 @@ export function strayHairs(
     }
     return v - 1;
   };
-  // Seeds: strong pixels within 3 px of the outside (hair), in the forehead's upper half.
+  // Seeds: strong pixels within 3 px of the outside (hair or brow), in the forehead's upper half or
+  // along the brows.
   const seen = new Uint8Array(n);
   const queue = new Int32Array(n);
+  // Strands grown from a brow: their seed (index into seedX/seedY), -1 for the hairline's.
+  const comp = new Int32Array(n).fill(-1);
+  const seedX: number[] = [],
+    seedY: number[] = [];
   let qh = 0,
     qt = 0;
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = y * w + x;
       if (!inside(p) || strong(p) !== 2) continue;
-      let upper = false;
+      // Seeds: by the hairline (the forehead's upper half) or by a brow.
+      let upper = false,
+        brow = false;
       for (const z of forehead) if (ellipseWeight(z, x, y) > 0 && y < z.cy) upper = true;
-      if (!upper) continue;
+      if (!upper) for (const z of browZones) if (ellipseWeight(z, x, y) > 0) brow = true;
+      if (!upper && !brow) continue;
       let edge = false;
       for (let dy = -3; dy <= 3 && !edge; dy++)
         for (let dx = -3; dx <= 3; dx++) {
@@ -1317,8 +1327,23 @@ export function strayHairs(
       if (edge && lv(p) === 2) {
         seen[p] = 1;
         queue[qt++] = p;
+        if (brow) {
+          comp[p] = seedX.length;
+          seedX.push(x);
+          seedY.push(y);
+        }
       }
     }
+  // A brow's stray hair is short and ends on the skin; a line running on from the brow (a crease
+  // or crevice) is long: strands grown from a brow that would reach further than a brow hair are
+  // dropped whole (they are lines to treat).
+  const browHairMax = Math.max(4, fw * 0.07);
+  const parent = Int32Array.from(seedX, (_, i) => i),
+    blocked = new Uint8Array(seedX.length);
+  const root = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
   // Follow the strand: to candidates within a short gap (a strand fades where it catches light)
   // whose direction agrees with this pixel's, stepping along the line rather than across it.
   // Grain has no steady direction, so growth cannot spread through it.
@@ -1337,14 +1362,35 @@ export function strayHairs(
           yy = y + dy;
         if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
         const q = yy * w + xx;
-        if (seen[q] || !lv(q)) continue;
+        if (!lv(q)) continue;
+        if (seen[q]) {
+          // Two brow strands meeting are one.
+          if (comp[p] >= 0 && comp[q] >= 0) {
+            const a = root(comp[p]),
+              b = root(comp[q]);
+            if (a !== b) {
+              parent[a] = b;
+              blocked[b] |= blocked[a];
+            }
+          }
+          continue;
+        }
         if (Math.abs(Math.cos(lineDir[q] - lineDir[p])) < turn) continue;
         const len = Math.hypot(dx, dy);
         if (len > 1.5 && Math.abs(dx * dx0 + dy * dy0) / len < 0.7) continue;
+        if (comp[p] >= 0) {
+          const c = comp[p];
+          if (Math.hypot(xx - seedX[c], yy - seedY[c]) > browHairMax) {
+            blocked[root(c)] = 1;
+            continue;
+          }
+          comp[q] = c;
+        }
         seen[q] = 1;
         queue[qt++] = q;
       }
   }
+  for (let p = 0; p < n; p++) if (comp[p] >= 0 && blocked[root(comp[p])]) seen[p] = 0;
   // The strand itself, plus a softer pixel around it.
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
