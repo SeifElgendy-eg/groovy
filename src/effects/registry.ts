@@ -20,6 +20,11 @@ export interface ModuleMeta {
   paintsBaseFrame: boolean;
   /** "Reset All" leaves the view on the Before image. */
   resetShowsBefore: boolean;
+  /**
+   * Seconds between pressing "Take photo" and the photo being taken (0: immediately). Services
+   * shot from a distance (the whole body) need time to step back into position.
+   */
+  captureDelaySeconds: number;
 }
 
 export const HOME_META: ModuleMeta = {
@@ -31,6 +36,7 @@ export const HOME_META: ModuleMeta = {
   usesSkinMask: false,
   paintsBaseFrame: false,
   resetShowsBefore: false,
+  captureDelaySeconds: 0,
 };
 
 export const SERVICES: Record<ServiceId, ModuleMeta> = {
@@ -43,6 +49,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     usesSkinMask: false,
     paintsBaseFrame: true,
     resetShowsBefore: false,
+  captureDelaySeconds: 0,
   },
   wrinkles: {
     id: "wrinkles",
@@ -53,6 +60,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     usesSkinMask: true,
     paintsBaseFrame: false,
     resetShowsBefore: true,
+  captureDelaySeconds: 0,
   },
   acne: {
     id: "acne",
@@ -63,6 +71,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     usesSkinMask: true,
     paintsBaseFrame: false,
     resetShowsBefore: false,
+  captureDelaySeconds: 0,
   },
   body: {
     id: "body",
@@ -74,6 +83,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     usesSkinMask: false,
     paintsBaseFrame: false,
     resetShowsBefore: false,
+  captureDelaySeconds: 5,
   },
   skin: {
     id: "skin",
@@ -84,6 +94,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     usesSkinMask: true,
     paintsBaseFrame: false,
     resetShowsBefore: false,
+  captureDelaySeconds: 0,
   },
 };
 

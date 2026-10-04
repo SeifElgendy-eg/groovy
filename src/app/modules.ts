@@ -7,7 +7,7 @@ import { updateFaceGuide } from "../ui/faceGuide";
 import { body, markEffectsDirty } from "./effects";
 import { processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
-import { loadSamplePhoto } from "./source";
+import { cancelCountdown, loadSamplePhoto } from "./source";
 import { resetAlignment, state } from "./state";
 
 const serviceSections: Record<ServiceId, HTMLElement[]> = {
@@ -23,6 +23,7 @@ function showEl(el: HTMLElement, show: boolean): void {
 }
 
 export function setModule(moduleName: ModuleId): void | Promise<void> {
+  cancelCountdown();
   state.module = moduleName;
   resetAlignment();
   updateFaceGuide(null);

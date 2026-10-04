@@ -672,7 +672,8 @@ button:focus-visible {
   border-style: solid;
   border-color: #84e4bc;
 }
-.face-guide-label {
+.face-guide-label,
+.body-guide-hint {
   position: absolute;
   z-index: 7;
   bottom: 18px;
@@ -693,6 +694,120 @@ button:focus-visible {
   display: none;
 }
 
+/* Body shaping capture guide (ui/bodyGuide.ts): a standing outline to fit the whole body into,
+   a ring for the feet, and a short "how to stand" card. Never changes the camera crop or zoom. */
+.body-guide {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+}
+.body-guide svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.body-guide-figure {
+  fill: rgba(255, 255, 255, 0.16);
+  stroke: rgba(255, 235, 245, 0.9);
+  stroke-width: 2px;
+  stroke-dasharray: 7 6;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.body-guide-ring {
+  fill: none;
+  stroke: url(#bodyGuideRing);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.body-guide-pad {
+  fill: url(#bodyGuideRing);
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .body-guide-ring {
+    animation: body-guide-pulse 2.4s ease-in-out infinite;
+  }
+}
+@keyframes body-guide-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.body-guide-tips {
+  position: absolute;
+  z-index: 7;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: #24152fe8;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.body-guide-tips strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 14px;
+}
+.body-guide-tips ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: stand;
+}
+.body-guide-tips li {
+  position: relative;
+  padding-left: 30px;
+  counter-increment: stand;
+}
+.body-guide-tips li::before {
+  content: counter(stand);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #24152f;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.body-guide-tips li b,
+.body-guide-tips li span {
+  display: block;
+}
+.body-guide-tips li span {
+  color: var(--muted);
+}
+.body-guide-tips p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.body-guide[hidden],
+.body-guide-tips[hidden],
+.body-guide-hint[hidden] {
+  display: none;
+}
+/* The outline's feet are at the bottom centre: with room at the sides, "Take photo" moves aside. */
+.stage-wrap.body-guide-roomy .capture-photo {
+  left: auto;
+  right: 24px;
+  bottom: 24px;
+  transform: none;
+}
+
 .capture-photo {
   position: absolute;
   z-index: 8;
@@ -704,6 +819,53 @@ button:focus-visible {
   box-shadow: 0 4px 20px #0006;
 }
 .capture-photo[hidden] {
+  display: none;
+}
+/* While a countdown runs the same button cancels it: quieter than the main action. */
+.capture-photo.counting {
+  background: #24152fe8;
+  color: #fff;
+  border: 1px solid var(--accent);
+}
+
+/* Capture countdown (ui/countdown.ts): a big number readable from a couple of metres. */
+.capture-countdown {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  pointer-events: none;
+}
+.capture-countdown-number {
+  font-size: min(30vh, 200px);
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 2px 24px #000a,
+    0 0 4px #000a;
+}
+.capture-countdown-caption {
+  border-radius: 20px;
+  padding: 6px 16px;
+  background: #24152fe8;
+  color: #fff;
+  font-size: 15px;
+}
+.capture-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: #fff;
+  pointer-events: none;
+}
+.capture-countdown[hidden],
+.capture-flash[hidden] {
   display: none;
 }
 

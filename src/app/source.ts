@@ -1,7 +1,9 @@
 // Where pictures come from: the live camera, an uploaded/captured photo, or a bundled test photo.
+import { startCountdown, type Countdown } from "../core/countdown";
 import { metaOf } from "../effects/registry";
 import { describeCameraError, openUserCamera, stopStream } from "../io/camera";
 import { applySourceMode, syncBefore } from "../ui/controls";
+import { flashCapture, showCountdown } from "../ui/countdown";
 import { dom } from "../ui/dom";
 import { capture, captureBtn, updateFaceGuide } from "../ui/faceGuide";
 import { setStatus } from "../ui/status";
@@ -17,8 +19,11 @@ import { drawLifted } from "../io/softwareLift";
 
 let stream: MediaStream | null = null;
 let cameraStarting = false;
+/** The running capture countdown (see core/countdown.ts), if any. */
+let countdown: Countdown | null = null;
 
 export function setSourceMode(mode: "camera" | "photo"): void {
+  if (mode !== "camera") cancelCountdown();
   state.sourceMode = mode;
   applySourceMode();
 }
@@ -73,6 +78,7 @@ export function useCameraAgain(): void {
 }
 
 export function stopCamera(): void {
+  cancelCountdown();
   stopStream(stream);
 }
 
@@ -102,6 +108,7 @@ async function photoReady(loadedStatus: string): Promise<void> {
 }
 
 function resetForNewPhoto(kind: typeof state.photoKind): void {
+  cancelCountdown();
   state.skinMaskReady = false;
   bodyPerson.mask = null;
   state.photoKind = kind;
@@ -146,38 +153,77 @@ export async function loadSamplePhoto(): Promise<void> {
   dom.photo.src = sampleUrl.href;
 }
 
-/** "Take photo": freeze the current camera frame (mirrored, as the user saw it) and use it. */
+/** Stop a running capture countdown (the service, source or camera changed, or the person cancelled). */
+export function cancelCountdown(): void {
+  countdown?.cancel();
+}
+
+function endCountdown(): void {
+  countdown = null;
+  state.countdown = null;
+  showCountdown(null);
+  updateFaceGuide(state.facePoints); // the button goes back to its start label
+}
+
+/** Count down `seconds` on the stage, then take the photo. */
+function beginCountdown(seconds: number): void {
+  countdown = startCountdown(seconds, {
+    onTick: (remaining) => {
+      state.countdown = remaining;
+      showCountdown(remaining);
+      updateFaceGuide(state.facePoints);
+    },
+    onDone: () => {
+      endCountdown();
+      void takePhoto();
+      flashCapture();
+    },
+    onCancel: endCountdown,
+  });
+}
+
+/** Freeze the current camera frame (mirrored, as the user saw it) and use it as the photo. */
+async function takePhoto(): Promise<void> {
+  const { video } = dom;
+  if (capture.busy || state.sourceMode !== "camera" || video.readyState < 2) return;
+  capture.busy = true;
+  captureBtn.disabled = true;
+  try {
+    const still = tracked.sync("taking the photo", () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const c = canvas.getContext("2d")!;
+      c.translate(canvas.width, 0);
+      c.scale(-1, 1);
+      // Software lift for a face the camera could not make bright enough (1 = untouched).
+      drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
+      return canvas;
+    });
+    state.showBefore = false;
+    syncBefore();
+    state.capturedPhoto = true;
+    // Use the captured canvas directly as the photo: no PNG encode/decode round trip.
+    resetForNewPhoto("upload");
+    setStill(still);
+    await onPhotoReady("Photo taken");
+  } catch (error) {
+    setStatus((error as Error).message, "error");
+  } finally {
+    capture.busy = false;
+    captureBtn.disabled = false;
+  }
+}
+
+/**
+ * "Take photo". A service with a capture delay (registry: the whole body, shot from a distance)
+ * starts a countdown instead, and the same button cancels it.
+ */
 export function mountCaptureButton(): void {
-  captureBtn.addEventListener("click", async () => {
-    const { video } = dom;
-    if (capture.busy || state.sourceMode !== "camera" || video.readyState < 2)
-      return;
-    capture.busy = true;
-    captureBtn.disabled = true;
-    try {
-      const still = tracked.sync("taking the photo", () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const c = canvas.getContext("2d")!;
-        c.translate(canvas.width, 0);
-        c.scale(-1, 1);
-        // Software lift for a face the camera could not make bright enough (1 = untouched).
-        drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
-        return canvas;
-      });
-      state.showBefore = false;
-      syncBefore();
-      state.capturedPhoto = true;
-      // Use the captured canvas directly as the photo: no PNG encode/decode round trip.
-      resetForNewPhoto("upload");
-      setStill(still);
-      await onPhotoReady("Photo taken");
-    } catch (error) {
-      setStatus((error as Error).message, "error");
-    } finally {
-      capture.busy = false;
-      captureBtn.disabled = false;
-    }
+  captureBtn.addEventListener("click", () => {
+    if (countdown) return cancelCountdown();
+    const delay = metaOf(state.module).captureDelaySeconds;
+    if (delay >= 1 && state.sourceMode === "camera" && !capture.busy) beginCountdown(delay);
+    else void takePhoto();
   });
 }
