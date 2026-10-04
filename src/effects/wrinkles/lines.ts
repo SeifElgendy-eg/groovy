@@ -216,39 +216,89 @@ function zoneWeight(g: ZoneGeom, x: number, y: number, feather = 0.35): number {
 }
 
 export function linesCompute(j: LinesJob): LinesResult {
+  // The stages below run one after another here; linesComputeParallel (parallel.ts) runs the
+  // independent ones at the same time on helper workers. Same functions, same inputs: the same
+  // result to the last bit.
+  const b = linesBase(j);
+  const L = stageLines(b);
+  const B = stageBands(b);
+  const S = stageSkin(b);
+  const P = stageSpots({ ...b, spots: L.spots, strength: L.strength, fineRef: L.fineRef });
+  const H = stageHair({ ...b, widthOf: L.widthOf, strength: L.strength });
+  const V = stageValley({ ...b, smooth0: L.smooth0, level: L.level, widthOf: L.widthOf });
+  const E = stageHeal({ ...b, strength: L.strength, lineShaped: B.lineShaped, spotNear: P.spotNear, spotRef: P.spotRef, strayNear: H.strayNear, fineBand: B.fineBand, lowBand: B.lowBand });
+  const all: AreaArgs = { ...b, ...L, ...V, ...B, ...P, ...H, ...E, areaWeight: S.areaWeight, id: "forehead" };
+  return linesFinish(b, S, AREAS.map((id) => stageArea({ ...all, id })));
+}
+
+/** What every stage reads: the job and its lightness. */
+export interface LinesBase {
+  pixels: Pixels;
+  mask: Pixels;
+  w: number;
+  h: number;
+  fw: number;
+  zones: Zone[];
+  lum: Float32Array;
+}
+
+export function linesBase(j: LinesJob): LinesBase {
   const { pixels, mask, width: w, height: h, faceWidth: fw } = j;
   const n = w * h;
-  const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
-    tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
-  const geoms = j.zones.map((z) => zoneGeom(z, tolLo, tolHi));
   const lum = new Float32Array(n);
   for (let p = 0; p < n; p++) lum[p] = 0.2126 * pixels[p * 4] + 0.7152 * pixels[p * 4 + 1] + 0.0722 * pixels[p * 4 + 2];
+  return { pixels, mask, w, h, fw, zones: j.zones, lum };
+}
 
-  // Blurred copies of the lightness, by blur radius: different sizes often round to the same
-  // radius, and then the same copy serves them all (read-only).
-  const lumBlurs = new Map<number, Float32Array>();
-  const lumBlur = (sigma: number) => {
+const geomsOf = (zones: Zone[]) => {
+  const tolLo = Math.cos((DIRECTION_LIMIT * Math.PI) / 180),
+    tolHi = Math.cos((DIRECTION_TOLERANCE * Math.PI) / 180);
+  return zones.map((z) => zoneGeom(z, tolLo, tolHi));
+};
+
+/**
+ * Blurred copies of the lightness, by blur radius: different sizes often round to the same
+ * radius, and then the same copy serves them all (read-only).
+ */
+function lumBlurs(lum: Float32Array, w: number, h: number) {
+  const byRadius = new Map<number, Float32Array>();
+  return (sigma: number) => {
     const r = boxRadius(sigma);
-    let b = lumBlurs.get(r);
-    if (!b) lumBlurs.set(r, (b = blurLike(lum, w, h, sigma)));
+    let b = byRadius.get(r);
+    if (!b) byRadius.set(r, (b = blurLike(lum, w, h, sigma)));
     return b;
   };
-  // Each stage is its own function, so its working arrays are freed when it returns (a 4K
-  // photo's face crop needs a lot of them).
-  const { strength, dir, fineDir, fineStrength, level, spots, edge, edgeDir, widthOf, smooth0, smooth2, fineRef } = lineMeasures(lum, lumBlur, mask, geoms, w, h, fw);
+}
+
+/** The lines: their strength, direction and width per pixel. */
+export function stageLines(b: LinesBase) {
+  const { mask, w, h, fw, lum } = b;
+  return lineMeasures(lum, lumBlurs(lum, w, h), mask, geomsOf(b.zones), w, h, fw);
+}
+
+/** Valley depths, and how lined the face is. */
+export function stageValley(a: LinesBase & { smooth0: Float32Array; level: Float32Array; widthOf: Uint8Array }) {
+  const { mask, w, h, fw, lum } = a;
+  const geoms = geomsOf(a.zones);
   // How deep each pixel sits in a valley: lighter skin on both sides of it, within the width of
   // the line found there (a morphological closing fills such a valley; it leaves a step alone).
   // A shadow's edge (under the brows, the eye sockets in top light) is dark on one side only: it is
   // no line, and lifting it left a bright, orange band along the shadow.
-  const { valley, broad } = valleyDepth(smooth0, level, widthOf, w, h, fw);
+  const { valley, broad } = valleyDepth(a.smooth0, a.level, a.widthOf, w, h, fw);
   // How deeply lined this face is (0 typical .. 1 very): on such skin the texture between the
   // lines is crepe too, so less of it is kept and more is renewed.
   const severity = smoothstep(SEVERE_VALLEY[0], SEVERE_VALLEY[1], meanValley(mask, geoms, w, h, valley, lum));
-  const { roundNear, spotNear, spotRef, spotSurround } = spotProtection(spots, strength, lum, lumBlur, mask, geoms, w, h, fw);
+  return { valley, broad, severity };
+}
+
+/** Frequency bands of the lightness, line-shaped detail, and fresh grain for the treated skin. */
+export function stageBands(b: LinesBase) {
+  const { mask, w, h, fw, lum } = b;
+  const n = w * h;
+  const lumBlur = lumBlurs(lum, w, h);
   // How far below its surroundings each pixel is (the depth a line would be filled by).
   // (The pixel's own lightness: even the smallest blur would make the line look shallower.)
   const around = lumBlur(Math.max(3, fw * 0.02));
-  const skin = plainSkinColour(pixels, lum, around, w, h, fw);
   // Frequency separation: the mid band (lines and crepey texture) is what botox softens; the fine
   // band (pores, grain) and the low band (the face's shading) are kept.
   const fineTop = lumBlur(Math.max(0.8, fw * 0.0022));
@@ -259,32 +309,26 @@ export function linesCompute(j: LinesJob): LinesResult {
   const lineShaped = blobWeight(lum, w, h, Math.max(1, fw * 0.003));
   for (let p = 0; p < n; p++) lineShaped[p] = 1 - lineShaped[p];
   const lowBand = lumBlur(Math.max(3, fw * 0.012));
-  lumBlurs.clear(); // (the copies still in use stay; the rest can be freed)
   const fineBand = new Float32Array(n);
   for (let p = 0; p < n; p++) fineBand[p] = lum[p] - fineTop[p];
   // Fresh grain for the treated skin: the face's own fine texture grew along its creases and
   // keeps tracing them, so it is replaced by new, directionless grain of the same scale and
   // strength as this face's least-lined skin.
   const donorGrain = synthGrain(fineBand, lineShaped, mask, w, h, fw, lowBand);
-  const spotFree = new Float32Array(n);
-  // A spot must also be a real one: strong against this face's typical spot response. (On plain
-  // skin the line strength is ~0, so the ratio alone called every speck of grain a freckle, and
-  // the treatment kept every slightly dark pixel, crease remnants included, as dark dashes.)
-  for (let p = 0; p < n; p++)
-    spotFree[p] =
-      1 -
-      smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * fineRef + spotNear[p])) *
-        smoothstep(0.3, 0.6, spotNear[p] / Math.max(1e-6, spotRef));
+  return { around, fineTop, finestTop, lineShaped, lowBand, fineBand, donorGrain };
+}
 
-  // Stray hairs lying on the skin (wisps, a curl hanging over the forehead): left whole.
-  const strayNear = strayHairs(lum, around, mask, j.zones, w, h, fw, (p) => widthOf[p] > 0 && strength[p] > 0.45);
-  // Real skin for the lines (healing-brush style): the fine texture of clean skin elsewhere on
-  // this face, copied over the lines in place of generated grain.
-  const healed = healLines(strength, mask, lineShaped, spotNear, spotRef, strayNear, fineBand, lowBand, w, h, fw);
+/** The plain skin's colour around each pixel, and each area's weight over the crop. */
+export function stageSkin(b: LinesBase) {
+  const { pixels, w, h, fw, lum } = b;
+  const n = w * h;
+  const around = blurLike(lum, w, h, Math.max(3, fw * 0.02));
+  const skin = plainSkinColour(pixels, lum, around, w, h, fw);
   // Areas overlap (forehead and frown lines between the brows; crow's feet and under-eyes). Each
   // area's correction is computed from the original photo and the layers are drawn on top of each
   // other, so an overlap would be treated twice (pale streaks). Each area's weight over the crop is
   // kept, and linesLayers shares each pixel out among the areas that are switched on.
+  const geoms = geomsOf(b.zones);
   const areaWeight = {} as Record<AreaId, Float32Array>;
   for (const id of AREAS) {
     const e = new Float32Array(n);
@@ -299,8 +343,89 @@ export function linesCompute(j: LinesJob): LinesResult {
     for (let p = 0; p < n; p++) e[p] = e[p] * e[p];
     areaWeight[id] = e;
   }
+  return { skin, areaWeight };
+}
+
+/** Freckles and moles: where they are, and how free of them each pixel is. */
+export function stageSpots(a: LinesBase & { spots: Float32Array; strength: Float32Array; fineRef: number }) {
+  const { mask, w, h, fw, lum, spots, strength, fineRef } = a;
+  const n = w * h;
+  const geoms = geomsOf(a.zones);
+  const P = spotProtection(spots, strength, lum, lumBlurs(lum, w, h), mask, geoms, w, h, fw);
+  const { spotNear, spotRef } = P;
+  const spotFree = new Float32Array(n);
+  // A spot must also be a real one: strong against this face's typical spot response. (On plain
+  // skin the line strength is ~0, so the ratio alone called every speck of grain a freckle, and
+  // the treatment kept every slightly dark pixel, crease remnants included, as dark dashes.)
+  for (let p = 0; p < n; p++)
+    spotFree[p] =
+      1 -
+      smoothstep(0.35, 0.7, spotNear[p] / Math.max(1e-6, strength[p] * fineRef + spotNear[p])) *
+        smoothstep(0.3, 0.6, spotNear[p] / Math.max(1e-6, spotRef));
+  return { ...P, spotFree };
+}
+
+/** Stray hairs lying on the skin (wisps, a curl hanging over the forehead): left whole. */
+export function stageHair(a: LinesBase & { widthOf: Uint8Array; strength: Float32Array }) {
+  const { mask, w, h, fw, lum, widthOf, strength } = a;
+  const around = blurLike(lum, w, h, Math.max(3, fw * 0.02));
+  return { strayNear: strayHairs(lum, around, mask, a.zones, w, h, fw, (p) => widthOf[p] > 0 && strength[p] > 0.45) };
+}
+
+/**
+ * Real skin for the lines (healing-brush style): the fine texture of clean skin elsewhere on this
+ * face, copied over the lines in place of generated grain.
+ */
+export function stageHeal(
+  a: LinesBase & {
+    strength: Float32Array;
+    lineShaped: Float32Array;
+    spotNear: Float32Array;
+    spotRef: number;
+    strayNear: Float32Array;
+    fineBand: Float32Array;
+    lowBand: Float32Array;
+  },
+) {
+  const { mask, w, h, fw } = a;
+  return { healed: healLines(a.strength, mask, a.lineShaped, a.spotNear, a.spotRef, a.strayNear, a.fineBand, a.lowBand, w, h, fw) };
+}
+
+/** Everything an area's pass reads. */
+export type AreaArgs = LinesBase &
+  ReturnType<typeof stageLines> &
+  ReturnType<typeof stageValley> &
+  ReturnType<typeof stageBands> &
+  ReturnType<typeof stageSpots> &
+  ReturnType<typeof stageHair> &
+  ReturnType<typeof stageHeal> & { areaWeight: Record<AreaId, Float32Array>; id: AreaId };
+
+/** One area's corrections (lift, recolour), over its window of the crop. */
+export interface AreaOut {
+  window: Window;
+  fill: Float32Array;
+  recolour: Float32Array;
+}
+
+/** Keep the areas' corrections for linesLayers and make the layers for all areas. */
+export function linesFinish(b: LinesBase, S: ReturnType<typeof stageSkin>, areas: AreaOut[]): LinesResult {
   const rawFill = {} as Record<AreaId, Float32Array>,
-    rawRecolour = {} as Record<AreaId, Float32Array>;
+    rawRecolour = {} as Record<AreaId, Float32Array>,
+    windows = {} as Record<AreaId, Window>;
+  AREAS.forEach((id, i) => {
+    rawFill[id] = areas[i].fill;
+    rawRecolour[id] = areas[i].recolour;
+    windows[id] = areas[i].window;
+  });
+  cached = { pixels: b.pixels, lum: b.lum, skin: S.skin, areaWeight: S.areaWeight, rawFill, rawRecolour, windows, width: b.w };
+  return linesLayers(AREAS) as LinesResult;
+}
+
+/** One area's pass (see linesCompute). */
+export function stageArea(a: AreaArgs): AreaOut {
+  const { id, mask, w, h, fw, lum, strength, dir, fineDir, fineStrength, roundNear, edge, edgeDir, around, valley, broad, smooth0, smooth2, level } = a;
+  const { fineTop, finestTop, lowBand, lineShaped, spotFree, donorGrain, fineBand, healed, strayNear, areaWeight, severity, spotSurround } = a;
+  const geoms = geomsOf(a.zones);
   // Sizes of the per-area steps (the line cover, ridge and edge reach, and the blurs).
   const r = Math.max(1, Math.round(fw * 0.0025)),
     rf = Math.max(2, Math.round(fw * 0.02)),
@@ -314,251 +439,243 @@ export function linesCompute(j: LinesJob): LinesResult {
   // around those. Nothing outside can change, so the result is the same as over the whole crop.
   const reach = Math.max(r, rf + 3 * boxRadius(sNear), r1) + 2;
   const margin = reach + 3 * Math.max(boxRadius(sb), boxRadius(sig), boxRadius(sSoft)) + 2;
-  const windows = {} as Record<AreaId, Window>;
-  for (const id of AREAS) {
-    const zones = j.zones.filter((z) => z.id === id);
-    const zg = geoms.filter((g) => g.z.id === id);
-    windows[id] = { x: 0, y: 0, w: 0, h: 0 };
-    rawFill[id] = rawRecolour[id] = new Float32Array(0);
-    if (!zg.length) continue;
-    // Pixels outside every zone's box get no weight.
-    const bx0 = Math.max(0, Math.min(...zg.map((g) => g.x0))),
-      bx1 = Math.min(w - 1, Math.max(...zg.map((g) => g.x1))),
-      by0 = Math.max(0, Math.min(...zg.map((g) => g.y0))),
-      by1 = Math.min(h - 1, Math.max(...zg.map((g) => g.y1)));
-    if (bx0 > bx1 || by0 > by1) continue;
-    // The area's window (ox, oy, sw x sh); q indexes it, p the crop.
-    const ox = Math.max(0, bx0 - margin),
-      oy = Math.max(0, by0 - margin),
-      sw = Math.min(w, bx1 + margin + 1) - ox,
-      sh = Math.min(h, by1 + margin + 1) - oy,
-      sn = sw * sh;
-    // The area's corrections, over its window only (nothing changes outside it).
-    const fill = new Float32Array(sn),
-      recolour = new Float32Array(sn);
-    windows[id] = { x: ox, y: oy, w: sw, h: sh };
-    rawFill[id] = fill;
-    rawRecolour[id] = recolour;
-    const weight = new Float32Array(sn),
-      edgeWeight = new Float32Array(sn);
-    const ref = 1; // strengths are already relative to their width's typical value
-    for (let y = by0; y <= by1; y++)
-      for (let x = bx0; x <= bx1; x++) {
-        const p = y * w + x;
-        const m = mask[p * 4 + 3] / 255;
-        if (m <= 0 || strength[p] <= 0) continue;
-        let zw = 0,
-          dw = 0;
-        for (const g of zg) {
-          const e = zoneWeight(g, x, y);
-          if (e <= 0) continue;
-          const z = g.z,
+  const zones = a.zones.filter((z) => z.id === id);
+  const zg = geoms.filter((g) => g.z.id === id);
+  const none = { window: { x: 0, y: 0, w: 0, h: 0 }, fill: new Float32Array(0), recolour: new Float32Array(0) };
+  if (!zg.length) return none;
+  // Pixels outside every zone's box get no weight.
+  const bx0 = Math.max(0, Math.min(...zg.map((g) => g.x0))),
+    bx1 = Math.min(w - 1, Math.max(...zg.map((g) => g.x1))),
+    by0 = Math.max(0, Math.min(...zg.map((g) => g.y0))),
+    by1 = Math.min(h - 1, Math.max(...zg.map((g) => g.y1)));
+  if (bx0 > bx1 || by0 > by1) return none;
+  // The area's window (ox, oy, sw x sh); q indexes it, p the crop.
+  const ox = Math.max(0, bx0 - margin),
+    oy = Math.max(0, by0 - margin),
+    sw = Math.min(w, bx1 + margin + 1) - ox,
+    sh = Math.min(h, by1 + margin + 1) - oy,
+    sn = sw * sh;
+  // The area's corrections, over its window only (nothing changes outside it).
+  const fill = new Float32Array(sn),
+    recolour = new Float32Array(sn);
+  const weight = new Float32Array(sn),
+    edgeWeight = new Float32Array(sn);
+  const ref = 1; // strengths are already relative to their width's typical value
+  for (let y = by0; y <= by1; y++)
+    for (let x = bx0; x <= bx1; x++) {
+      const p = y * w + x;
+      const m = mask[p * 4 + 3] / 255;
+      if (m <= 0 || strength[p] <= 0) continue;
+      let zw = 0,
+        dw = 0;
+      for (const g of zg) {
+        const e = zoneWeight(g, x, y);
+        if (e <= 0) continue;
+        const z = g.z,
+          lo = g.lo,
+          hi = g.hi;
+        const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
+        let d = z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
+        // By the lid, the finest width must agree too: a row of lashes reads as one dark band
+        // along the lid at the broad widths, but at the finest width each lash crosses it.
+        if (z.strict) d *= smoothstep(lo, hi, Math.abs(Math.cos(fineDir[p] - expected))) * (fineStrength[p] > 0 ? 1 : 0);
+        if (e * d > zw * dw) {
+          zw = e;
+          dw = d;
+        }
+      }
+      if (zw <= 0 || dw <= 0) continue;
+      // Not a line where anything round is (deliberately broader than spotFree, which decides
+      // what keeps its own pixels): lash tips crossing the lid line and similar dots must never
+      // count as line, or the lid's lashes get painted over (unit test).
+      const notSpot = 1 - smoothstep(0.35, 0.7, roundNear[p] / Math.max(1e-6, strength[p] + roundNear[p]));
+      const isLine = smoothstep(0.12, 0.45, strength[p] / Math.max(1e-6, ref)) * notSpot;
+      weight[(y - oy) * sw + x - ox] = isLine * dw * zw * m;
+    }
+  // Thin bright crease edges running the area's way (relative threshold as for lines).
+  const edgeRef = percentile(edge, mask, zg, w, h, 0.9);
+  for (let y = by0; y <= by1; y++)
+    for (let x = bx0; x <= bx1; x++) {
+      const p = y * w + x;
+      const m = mask[p * 4 + 3] / 255;
+      if (m <= 0 || edge[p] <= 0) continue;
+      let best = 0;
+      for (const g of zg) {
+        const e = zoneWeight(g, x, y);
+        if (e <= 0) continue;
+        const z = g.z,
+          lo = g.lo,
+          hi = g.hi;
+        const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
+        best = Math.max(best, e * (z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(edgeDir[p] - expected)))));
+      }
+      edgeWeight[(y - oy) * sw + x - ox] = best * smoothstep(0.35, 0.8, edge[p] / Math.max(1e-6, edgeRef)) * m;
+    }
+  // The line mask, widened to cover the whole line (its centre is where the measure peaks).
+  const cover = slide(slide(weight, sw, sh, r, true, false), sw, sh, r, true, true);
+  // Main areas: the plain skin level, with lines (and bright ridges, clipped) left out of the
+  // average. Each pixel there goes to this level plus fresh grain: one target, so nothing stacks.
+  // The skin level around each line, leaving the lines (and the shine) out of the average
+  // (normalised convolution): the depth is then right at the line's centre and zero beside it,
+  // so the fill never leaves a light halo next to a line. (Same weights as the base, wider.)
+  // Bright ridges and shine are clipped too, so the skin level is the plain skin's (else a
+  // ridge measures less raised than it is).
+  const keep = new Float32Array(sn),
+    keepLum = new Float32Array(sn),
+    baseW = new Float32Array(sn),
+    baseL = new Float32Array(sn);
+  for (let y = 0; y < sh; y++)
+    for (let x = 0; x < sw; x++) {
+      const q = y * sw + x,
+        p = (y + oy) * w + x + ox;
+      keep[q] = 1 - Math.min(1, cover[q]);
+      keepLum[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * keep[q];
+      // The plain skin level leaves out anything clearly darker than the skin around it too
+      // (stray hair at the hairline, crease remnants), so it never pulls the skin down.
+      // (Narrow dark only, in a valley: a broad shadow is the skin's own shading and stays in.)
+      const plainHere = lum[p] >= around[p] - MIN_DEPTH[1] || valley[p] < MIN_DEPTH[1] ? keep[q] : 0;
+      baseW[q] = plainHere;
+      baseL[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * plainHere;
+    }
+  const baseNum = blurLike(baseL, sw, sh, sb),
+    baseDen = blurLike(baseW, sw, sh, sb);
+  const num = blurLike(keepLum, sw, sh, sig),
+    den = blurLike(keep, sw, sh, sig);
+  // Next to lines (within a fold's width), the raised ridges between them: lowering those is
+  // the other half of flattening a fold. Elsewhere bright bumps are highlights and stay.
+  const ridgeLevel = smooth2;
+  const onEdge = slide(slide(edgeWeight, sw, sh, r1, true, false), sw, sh, r1, true, true);
+  // The lines themselves (their full width, softened by a pixel or two).
+  const onLineSoft = blurLike(cover, sw, sh, sSoft);
+  const nearLine = blurLike(slide(slide(weight, sw, sh, rf, true, false), sw, sh, rf, true, true), sw, sh, sNear);
+  for (let ly = 0; ly < sh; ly++)
+    for (let lx = 0; lx < sw; lx++) {
+      const q = ly * sw + lx,
+        x = lx + ox,
+        y = ly + oy,
+        p = y * w + x;
+      // Outside the area's zones, with no line, ridge or edge reaching here: nothing changes.
+      if ((x < bx0 || x > bx1 || y < by0 || y > by1) && !(cover[q] > 0) && !(nearLine[q] > 0) && !(onEdge[q] > 0)) continue;
+      const skinLevel = den[q] > 1e-3 ? num[q] / den[q] : around[p];
+      // The softened mid band everywhere in the area: dark detail fully on lines, partly elsewhere
+      // (crepey texture); bright detail only near lines (ridges), never shine beyond RIDGE_CAP.
+      let zone = 0,
+        fineZone = 0,
+        loose = 0,
+        looseSoft = 0,
+        strictOk = 0;
+      for (const g of zg) {
+        const e = zoneWeight(g, x, y);
+        if (e <= 0) continue;
+        const z = g.z;
+        if (z.strict) {
+          const expected = z.lineAngle ?? 0,
             lo = g.lo,
             hi = g.hi;
-          const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
-          let d = z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(dir[p] - expected)));
-          // By the lid, the finest width must agree too: a row of lashes reads as one dark band
-          // along the lid at the broad widths, but at the finest width each lash crosses it.
-          if (z.strict) d *= smoothstep(lo, hi, Math.abs(Math.cos(fineDir[p] - expected))) * (fineStrength[p] > 0 ? 1 : 0);
-          if (e * d > zw * dw) {
-            zw = e;
-            dw = d;
-          }
+          strictOk = Math.max(strictOk, e * smoothstep(lo, hi, Math.abs(Math.cos(fineDir[p] - expected))) * (fineStrength[p] > 0 ? 1 : 0));
+        } else {
+          loose = Math.max(loose, e);
+          looseSoft = Math.max(looseSoft, zoneWeight(g, x, y, 0.7));
         }
-        if (zw <= 0 || dw <= 0) continue;
-        // Not a line where anything round is (deliberately broader than spotFree, which decides
-        // what keeps its own pixels): lash tips crossing the lid line and similar dots must never
-        // count as line, or the lid's lashes get painted over (unit test).
-        const notSpot = 1 - smoothstep(0.35, 0.7, roundNear[p] / Math.max(1e-6, strength[p] + roundNear[p]));
-        const isLine = smoothstep(0.12, 0.45, strength[p] / Math.max(1e-6, ref)) * notSpot;
-        weight[(y - oy) * sw + x - ox] = isLine * dw * zw * m;
+        zone = Math.max(zone, e);
+        if (z.fine) fineZone = Math.max(fineZone, e);
       }
-    // Thin bright crease edges running the area's way (relative threshold as for lines).
-    const edgeRef = percentile(edge, mask, zg, w, h, 0.9);
-    for (let y = by0; y <= by1; y++)
-      for (let x = bx0; x <= bx1; x++) {
-        const p = y * w + x;
-        const m = mask[p * 4 + 3] / 255;
-        if (m <= 0 || edge[p] <= 0) continue;
-        let best = 0;
-        for (const g of zg) {
-          const e = zoneWeight(g, x, y);
-          if (e <= 0) continue;
-          const z = g.z,
-            lo = g.lo,
-            hi = g.hi;
-          const expected = z.from ? Math.atan2(y - z.from.y, x - z.from.x) : (z.lineAngle ?? 0);
-          best = Math.max(best, e * (z.anyDirection ? 1 : smoothstep(lo, hi, Math.abs(Math.cos(edgeDir[p] - expected)))));
-        }
-        edgeWeight[(y - oy) * sw + x - ox] = best * smoothstep(0.35, 0.8, edge[p] / Math.max(1e-6, edgeRef)) * m;
+      const m = mask[p * 4 + 3] / 255;
+      let band = 0;
+      if (zone > 0 && m > 0) {
+        const top = fineTop[p] + (finestTop[p] - fineTop[p]) * fineZone;
+        const mid = top - lowBand[p];
+        const onLine = Math.min(1, cover[q]);
+        // Texture is softened in loose zones only; strict zones (by the lid) soften only lines.
+        band =
+          mid < 0
+            ? -mid * MAX_SOFTEN * Math.max(TEXTURE_SOFTEN * loose, onLine * zone) * spotFree[p]
+            : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * loose + RIDGE_FLATTEN * Math.min(1, nearLine[q]) * zone);
+        // The faint leftover lines in the finest grain (both dark and light ones).
+        const finest = lum[p] - finestTop[p];
+        band -= finest * FINEST_LINES * lineShaped[p] * strictOk * spotFree[p];
+        // Main areas: swap the fine detail (with the lines' last traces) for fresh grain.
+        // Freckles and moles keep their own detail.
+        band += (donorGrain[p] - fineBand[p]) * GRAIN_REPLACE * loose * spotFree[p];
+        band *= m;
       }
-    // The line mask, widened to cover the whole line (its centre is where the measure peaks).
-    const cover = slide(slide(weight, sw, sh, r, true, false), sw, sh, r, true, true);
-    // Main areas: the plain skin level, with lines (and bright ridges, clipped) left out of the
-    // average. Each pixel there goes to this level plus fresh grain: one target, so nothing stacks.
-    // The skin level around each line, leaving the lines (and the shine) out of the average
-    // (normalised convolution): the depth is then right at the line's centre and zero beside it,
-    // so the fill never leaves a light halo next to a line. (Same weights as the base, wider.)
-    // Bright ridges and shine are clipped too, so the skin level is the plain skin's (else a
-    // ridge measures less raised than it is).
-    const keep = new Float32Array(sn),
-      keepLum = new Float32Array(sn),
-      baseW = new Float32Array(sn),
-      baseL = new Float32Array(sn);
-    for (let y = 0; y < sh; y++)
-      for (let x = 0; x < sw; x++) {
-        const q = y * sw + x,
-          p = (y + oy) * w + x + ox;
-        keep[q] = 1 - Math.min(1, cover[q]);
-        keepLum[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * keep[q];
-        // The plain skin level leaves out anything clearly darker than the skin around it too
-        // (stray hair at the hairline, crease remnants), so it never pulls the skin down.
-        // (Narrow dark only, in a valley: a broad shadow is the skin's own shading and stays in.)
-        const plainHere = lum[p] >= around[p] - MIN_DEPTH[1] || valley[p] < MIN_DEPTH[1] ? keep[q] : 0;
-        baseW[q] = plainHere;
-        baseL[q] = Math.min(lum[p], around[p] + MIN_DEPTH[1]) * plainHere;
+      let f = 0,
+        rc = 0;
+      if (cover[q] > 0) {
+        const depth = Math.max(0, Math.min(skinLevel - level[p], valley[p] + MIN_DEPTH[0]));
+        // Skin grain dips a few levels; a line is deeper than that.
+        // Capped: a fold deeper than this is mostly shadow from an expression (raised brows);
+        // lifting it fully turns the skin flat and orange.
+        f = Math.fround(Math.min(MAX_LIFT, depth * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], depth) * Math.min(1, cover[q]) * MAX_SOFTEN));
       }
-    const baseNum = blurLike(baseL, sw, sh, sb),
-      baseDen = blurLike(baseW, sw, sh, sb);
-    const num = blurLike(keepLum, sw, sh, sig),
-      den = blurLike(keep, sw, sh, sig);
-    // Next to lines (within a fold's width), the raised ridges between them: lowering those is
-    // the other half of flattening a fold. Elsewhere bright bumps are highlights and stay.
-    const ridgeLevel = smooth2;
-    const onEdge = slide(slide(edgeWeight, sw, sh, r1, true, false), sw, sh, r1, true, true);
-    // The lines themselves (their full width, softened by a pixel or two).
-    const onLineSoft = blurLike(cover, sw, sh, sSoft);
-    const nearLine = blurLike(slide(slide(weight, sw, sh, rf, true, false), sw, sh, rf, true, true), sw, sh, sNear);
-    for (let ly = 0; ly < sh; ly++)
-      for (let lx = 0; lx < sw; lx++) {
-        const q = ly * sw + lx,
-          x = lx + ox,
-          y = ly + oy,
-          p = y * w + x;
-        // Outside the area's zones, with no line, ridge or edge reaching here: nothing changes.
-        if ((x < bx0 || x > bx1 || y < by0 || y > by1) && !(cover[q] > 0) && !(nearLine[q] > 0) && !(onEdge[q] > 0)) continue;
-        const skinLevel = den[q] > 1e-3 ? num[q] / den[q] : around[p];
-        // The softened mid band everywhere in the area: dark detail fully on lines, partly elsewhere
-        // (crepey texture); bright detail only near lines (ridges), never shine beyond RIDGE_CAP.
-        let zone = 0,
-          fineZone = 0,
-          loose = 0,
-          looseSoft = 0,
-          strictOk = 0;
-        for (const g of zg) {
-          const e = zoneWeight(g, x, y);
-          if (e <= 0) continue;
-          const z = g.z;
-          if (z.strict) {
-            const expected = z.lineAngle ?? 0,
-              lo = g.lo,
-              hi = g.hi;
-            strictOk = Math.max(strictOk, e * smoothstep(lo, hi, Math.abs(Math.cos(fineDir[p] - expected))) * (fineStrength[p] > 0 ? 1 : 0));
-          } else {
-            loose = Math.max(loose, e);
-            looseSoft = Math.max(looseSoft, zoneWeight(g, x, y, 0.7));
-          }
-          zone = Math.max(zone, e);
-          if (z.fine) fineZone = Math.max(fineZone, e);
-        }
-        const m = mask[p * 4 + 3] / 255;
-        let band = 0;
-        if (zone > 0 && m > 0) {
-          const top = fineTop[p] + (finestTop[p] - fineTop[p]) * fineZone;
-          const mid = top - lowBand[p];
-          const onLine = Math.min(1, cover[q]);
-          // Texture is softened in loose zones only; strict zones (by the lid) soften only lines.
-          band =
-            mid < 0
-              ? -mid * MAX_SOFTEN * Math.max(TEXTURE_SOFTEN * loose, onLine * zone) * spotFree[p]
-              : -Math.min(RIDGE_CAP, mid) * MAX_SOFTEN * (TEXTURE_SOFTEN * loose + RIDGE_FLATTEN * Math.min(1, nearLine[q]) * zone);
-          // The faint leftover lines in the finest grain (both dark and light ones).
-          const finest = lum[p] - finestTop[p];
-          band -= finest * FINEST_LINES * lineShaped[p] * strictOk * spotFree[p];
-          // Main areas: swap the fine detail (with the lines' last traces) for fresh grain.
-          // Freckles and moles keep their own detail.
-          band += (donorGrain[p] - fineBand[p]) * GRAIN_REPLACE * loose * spotFree[p];
-          band *= m;
-        }
-        let f = 0,
-          rc = 0;
-        if (cover[q] > 0) {
-          const depth = Math.max(0, Math.min(skinLevel - level[p], valley[p] + MIN_DEPTH[0]));
-          // Skin grain dips a few levels; a line is deeper than that.
-          // Capped: a fold deeper than this is mostly shadow from an expression (raised brows);
-          // lifting it fully turns the skin flat and orange.
-          f = Math.fround(Math.min(MAX_LIFT, depth * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], depth) * Math.min(1, cover[q]) * MAX_SOFTEN));
-        }
-        const notLine = 1 - Math.min(1, cover[q]);
-        let lower = 0;
-        if (nearLine[q] > 0 && ridgeLevel[p] > skinLevel) {
-          const ridge = Math.min(RIDGE_CAP, ridgeLevel[p] - skinLevel);
-          lower = ridge * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], ridge) * Math.min(1, nearLine[q]);
-        }
-        const edgeHere = Math.min(1, onEdge[q]);
-        if (edgeHere > 0 && smooth0[p] > skinLevel) {
-          const rise = Math.min(RIDGE_CAP, smooth0[p] - skinLevel);
-          lower = Math.max(lower, rise * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], rise) * edgeHere);
-        }
-        f = Math.fround(f - lower * notLine * RIDGE_FLATTEN);
-        // Whichever change is larger (in its own direction) wins: line fill, ridge lowering, band.
-        f = Math.fround(band > 0 ? Math.max(f, band) : Math.min(f, band));
-        if (looseSoft > 0 && m > 0) {
-          // Never below the area's own average: botox never darkens skin (dark circles stay as
-          // they are rather than turning darker or blotchy).
-          const avg = baseDen[q] > 0.05 ? baseNum[q] / baseDen[q] : lowBand[p];
-          const base = id === "undereye" ? Math.max(lowBand[p], avg) : avg;
-          // The skin's own pores and grain stay wherever they do not trace a line: off the lines
-          // themselves, and where the fine detail is round or random rather than long. Only on the
-          // lines is the detail replaced (it traces the creases there).
-          const keepTex = (1 - Math.min(1, onLineSoft[q])) * (1 - PORE_LINE_DROP * lineShaped[p]) * (1 - 0.75 * severity);
-          // (Deeply lined skin: the "clean" skin the healing copies from is crepey too.)
-          const grain = donorGrain[p] * GRAIN_REPLACE;
-          const fresh = Number.isNaN(healed[p]) ? grain : healed[p] + (grain - healed[p]) * 0.6 * severity;
-          const texture = keepTex * fineBand[p] + (1 - keepTex) * fresh;
-          // The skin's gentle relief between pore and line size, kept where no line is near (the
-          // plain base alone reads as flat, airbrushed skin).
-          const relief = (fineTop[p] - base) * MID_KEEP * (1 - 0.8 * severity) * (1 - Math.min(1, nearLine[q]));
-          // Lifted no further than a valley's sides (or the local shading) allow: a fold's trough
-          // comes up to the skin either side of it, a shadow cast by the brows or the eye sockets
-          // keeps its depth (lifting it to the area's average left a pale, orange band).
-          const ceiling = Math.max(broad[p], lowBand[p] - lum[p], 0) + MIN_DEPTH[1];
-          const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, ceiling, base + relief + texture - lum[p]));
-          // Wide, gentle hand-over at the area's edge.
-          const edgeK = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
-          // Freckles and moles keep their own look, but only their dark core: the skin around them
-          // goes to the target like everywhere else (no pale halo).
-          // (The spot itself: darker than the skin right around it. Darker than the base alone is
-          // not enough: under the eyes the whole dark circle is, and keeping it showed as squares.)
-          const core = smoothstep(3, 8, Math.min(base, spotSurround[p]) - lum[p]);
-          const k = edgeK * (1 - (1 - spotFree[p]) * core);
-          f = Math.fround(f * (1 - edgeK) + toTarget * k);
-          rc = Math.fround(k);
-        }
-        // Stray hairs keep their own pixels (only their dark strand, not the skin beside it).
-        const hair = strayNear[p];
-        if (hair > 0) {
-          f = Math.fround(f * (1 - hair));
-          rc = Math.fround(rc * (1 - hair));
-        }
-        f = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, f));
-        // Under the eyes mostly lift: the lower lid's lighter skin and the cheek's highlights are
-        // not ridges to flatten (lowering them reads as a darker eye bag). Only the crepe's fine
-        // bright ridges come down, to the skin's local level and by a few levels at most, so
-        // nothing gets darker than the skin around it. That holds for any area reaching there
-        // (the crow's feet's lower zone covers the same band).
-        const lowest = -Math.min(UNDEREYE_LOWER * (1 + 3 * severity), Math.max(1, lum[p] - lowBand[p]));
-        if (id === "undereye") f = Math.max(lowest, f);
-        else if (f < lowest) {
-          const u = smoothstep(0, 0.3, areaWeight.undereye[p]);
-          if (u > 0) f = f * (1 - u) + lowest * u;
-        }
-        fill[q] = f;
-        recolour[q] = rc;
+      const notLine = 1 - Math.min(1, cover[q]);
+      let lower = 0;
+      if (nearLine[q] > 0 && ridgeLevel[p] > skinLevel) {
+        const ridge = Math.min(RIDGE_CAP, ridgeLevel[p] - skinLevel);
+        lower = ridge * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], ridge) * Math.min(1, nearLine[q]);
       }
-  }
-  cached = { pixels, lum, skin, areaWeight, rawFill, rawRecolour, windows, width: w };
-  return linesLayers(AREAS) as LinesResult;
+      const edgeHere = Math.min(1, onEdge[q]);
+      if (edgeHere > 0 && smooth0[p] > skinLevel) {
+        const rise = Math.min(RIDGE_CAP, smooth0[p] - skinLevel);
+        lower = Math.max(lower, rise * smoothstep(MIN_DEPTH[0], MIN_DEPTH[1], rise) * edgeHere);
+      }
+      f = Math.fround(f - lower * notLine * RIDGE_FLATTEN);
+      // Whichever change is larger (in its own direction) wins: line fill, ridge lowering, band.
+      f = Math.fround(band > 0 ? Math.max(f, band) : Math.min(f, band));
+      if (looseSoft > 0 && m > 0) {
+        // Never below the area's own average: botox never darkens skin (dark circles stay as
+        // they are rather than turning darker or blotchy).
+        const avg = baseDen[q] > 0.05 ? baseNum[q] / baseDen[q] : lowBand[p];
+        const base = id === "undereye" ? Math.max(lowBand[p], avg) : avg;
+        // The skin's own pores and grain stay wherever they do not trace a line: off the lines
+        // themselves, and where the fine detail is round or random rather than long. Only on the
+        // lines is the detail replaced (it traces the creases there).
+        const keepTex = (1 - Math.min(1, onLineSoft[q])) * (1 - PORE_LINE_DROP * lineShaped[p]) * (1 - 0.75 * severity);
+        // (Deeply lined skin: the "clean" skin the healing copies from is crepey too.)
+        const grain = donorGrain[p] * GRAIN_REPLACE;
+        const fresh = Number.isNaN(healed[p]) ? grain : healed[p] + (grain - healed[p]) * 0.6 * severity;
+        const texture = keepTex * fineBand[p] + (1 - keepTex) * fresh;
+        // The skin's gentle relief between pore and line size, kept where no line is near (the
+        // plain base alone reads as flat, airbrushed skin).
+        const relief = (fineTop[p] - base) * MID_KEEP * (1 - 0.8 * severity) * (1 - Math.min(1, nearLine[q]));
+        // Lifted no further than a valley's sides (or the local shading) allow: a fold's trough
+        // comes up to the skin either side of it, a shadow cast by the brows or the eye sockets
+        // keeps its depth (lifting it to the area's average left a pale, orange band).
+        const ceiling = Math.max(broad[p], lowBand[p] - lum[p], 0) + MIN_DEPTH[1];
+        const toTarget = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, ceiling, base + relief + texture - lum[p]));
+        // Wide, gentle hand-over at the area's edge.
+        const edgeK = looseSoft * looseSoft * (3 - 2 * looseSoft) * m;
+        // Freckles and moles keep their own look, but only their dark core: the skin around them
+        // goes to the target like everywhere else (no pale halo).
+        // (The spot itself: darker than the skin right around it. Darker than the base alone is
+        // not enough: under the eyes the whole dark circle is, and keeping it showed as squares.)
+        const core = smoothstep(3, 8, Math.min(base, spotSurround[p]) - lum[p]);
+        const k = edgeK * (1 - (1 - spotFree[p]) * core);
+        f = Math.fround(f * (1 - edgeK) + toTarget * k);
+        rc = Math.fround(k);
+      }
+      // Stray hairs keep their own pixels (only their dark strand, not the skin beside it).
+      const hair = strayNear[p];
+      if (hair > 0) {
+        f = Math.fround(f * (1 - hair));
+        rc = Math.fround(rc * (1 - hair));
+      }
+      f = Math.max(-RIDGE_CAP, Math.min(MAX_LIFT, f));
+      // Under the eyes mostly lift: the lower lid's lighter skin and the cheek's highlights are
+      // not ridges to flatten (lowering them reads as a darker eye bag). Only the crepe's fine
+      // bright ridges come down, to the skin's local level and by a few levels at most, so
+      // nothing gets darker than the skin around it. That holds for any area reaching there
+      // (the crow's feet's lower zone covers the same band).
+      const lowest = -Math.min(UNDEREYE_LOWER * (1 + 3 * severity), Math.max(1, lum[p] - lowBand[p]));
+      if (id === "undereye") f = Math.max(lowest, f);
+      else if (f < lowest) {
+        const u = smoothstep(0, 0.3, areaWeight.undereye[p]);
+        if (u > 0) f = f * (1 - u) + lowest * u;
+      }
+      fill[q] = f;
+      recolour[q] = rc;
+    }
+  return { window: { x: ox, y: oy, w: sw, h: sh }, fill, recolour };
 }
 
 /** The line measures at three widths, combined: per pixel the width that dominates, its strength (relative to this face's typical one), direction and depth level; plus the round-spot and bright-edge measures. */

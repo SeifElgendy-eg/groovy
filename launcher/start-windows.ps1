@@ -18,7 +18,7 @@ function Open-App([string]$url) {
 }
 function Send-Response($stream, [int]$status, [string]$type, [byte[]]$body, [bool]$headOnly = $false) {
     $reason = switch ($status) { 200 {'OK'} 404 {'Not Found'} 405 {'Method Not Allowed'} default {'Bad Request'} }
-    $header = "HTTP/1.1 $status $reason`r`nContent-Type: $type`r`nContent-Length: $($body.Length)`r`nCache-Control: no-store`r`nX-Content-Type-Options: nosniff`r`nConnection: close`r`n`r`n"
+    $header = "HTTP/1.1 $status $reason`r`nContent-Type: $type`r`nContent-Length: $($body.Length)`r`nCache-Control: no-store`r`nX-Content-Type-Options: nosniff`r`nCross-Origin-Opener-Policy: same-origin`r`nCross-Origin-Embedder-Policy: require-corp`r`nConnection: close`r`n`r`n"
     $bytes = [Text.Encoding]::ASCII.GetBytes($header)
     $stream.Write($bytes,0,$bytes.Length)
     if (-not $headOnly) { $stream.Write($body,0,$body.Length) }

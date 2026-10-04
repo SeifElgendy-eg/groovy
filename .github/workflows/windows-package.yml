@@ -52,6 +52,8 @@ jobs:
           function Get-Bytes($path) { (Invoke-WebRequest "$base/$path" -UseBasicParsing -TimeoutSec 60) }
           $index = Get-Bytes ''
           if ($index.Content -notmatch 'Beauty Simulator') { throw 'index.html not served' }
+          # Cross-origin isolation: botox shares memory between its workers (several cores).
+          if ($index.Headers['Cross-Origin-Opener-Policy'] -ne 'same-origin' -or $index.Headers['Cross-Origin-Embedder-Policy'] -ne 'require-corp') { throw 'isolation headers missing' }
           $wasm = Get-Bytes 'vendor/mediapipe/wasm/vision_wasm_internal.wasm'
           if ($wasm.Headers['Content-Type'] -notlike 'application/wasm*') { throw "wasm served as $($wasm.Headers['Content-Type'])" }
           $expectedWasm = (Get-Item (Join-Path $pkg 'app/vendor/mediapipe/wasm/vision_wasm_internal.wasm')).Length
