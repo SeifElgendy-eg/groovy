@@ -919,7 +919,8 @@ function toLayers(
     // Lifted creases take the skin's colour; lowered ridges (often shine) mostly keep their own.
     // Creases are redder than the skin around them: even small lifts take most of its colour.
     // (A deep fold lifted far takes the skin's colour fully: its own, scaled up, turns orange.)
-    let a = f > 0 ? Math.min(f / 8, 0.55 + 0.4 * smoothstep(20, 60, f)) : Math.min(0.5, -f / 30);
+    // (Lowered far, a bright ridge takes the skin's colour too: its own, darkened, turns grey.)
+    let a = f > 0 ? Math.min(f / 8, 0.55 + 0.4 * smoothstep(20, 60, f)) : Math.min(0.5, -f / 30) + 0.4 * smoothstep(10, 30, -f);
     // Main areas: the colour is the plain skin's too, so a removed fold leaves no tinted trace.
     a = Math.max(a, recolour[q] * 0.85);
     for (let c = 0; c < 3; c++) {
@@ -1239,7 +1240,10 @@ export function strayHairs(
 ): Float32Array {
   const n = w * h;
   const out = new Float32Array(n);
-  const forehead = zones.filter((z) => z.id === "forehead" && !z.strict);
+  // (The main forehead zone: the smaller ones along the brows have no hairline.)
+  const fz = zones.filter((z) => z.id === "forehead" && !z.strict);
+  const widest = Math.max(0, ...fz.map((z) => z.rx));
+  const forehead = fz.filter((z) => z.rx === widest);
   if (!forehead.length) return out;
   // Any skin, the mask's faded edge included: strands cross that fade on their way from the hair.
   const inside = (p: number) => mask[p * 4 + 3] > 8;
