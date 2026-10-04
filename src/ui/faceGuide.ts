@@ -1,8 +1,13 @@
-// The oval capture guide and the "Take photo" button shown over the live camera.
+// The oval capture guide and the "Take photo" button shown over the live camera (body shaping
+// swaps the oval for its own standing outline, see bodyGuide.ts).
+import { captureLabel } from "../core/countdown";
+import { metaOf } from "../effects/registry";
 import { evaluateAlignment, type HeadPose } from "../face/alignment";
 import { getSourceDims } from "../app/frames";
 import { state } from "../app/state";
 import type { NormalizedLandmark } from "../effects/skin/input";
+import { mountBodyGuide, updateBodyGuide } from "./bodyGuide";
+import { mountCountdown } from "./countdown";
 import { dom } from "./dom";
 
 export const captureBtn = document.createElement("button");
@@ -22,6 +27,8 @@ export const capture = { busy: false };
 export function mountFaceGuide(): void {
   dom.stageWrap.append(captureBtn);
   dom.stageWrap.append(faceGuide, faceGuideLabel);
+  mountBodyGuide();
+  mountCountdown();
   window.addEventListener("resize", () => updateFaceGuide(state.facePoints));
 }
 
@@ -33,10 +40,17 @@ export function updateFaceGuide(points: NormalizedLandmark[] | null, pose?: Head
   if (!points) lastPose = null;
   const { stageWrap, video } = dom;
   const camera = state.sourceMode === "camera" && state.module !== "home";
-  faceGuide.hidden = faceGuideLabel.hidden = !camera;
+  // Body shaping needs the whole body in view, not a face: it has its own guide (bodyGuide.ts).
+  const bodyGuide = camera && state.module === "body";
+  faceGuide.hidden = faceGuideLabel.hidden = !camera || bodyGuide;
+  updateBodyGuide(bodyGuide);
   captureBtn.hidden = !camera || !state.running;
   captureBtn.disabled = capture.busy || video.readyState < 2;
-  if (!camera) return;
+  // A service shot from a distance has a timer (registry): the button starts it, then cancels it.
+  const label = captureLabel(camera ? metaOf(state.module).captureDelaySeconds : 0, state.countdown);
+  if (captureBtn.textContent !== label) captureBtn.textContent = label;
+  captureBtn.classList.toggle("counting", state.countdown !== null);
+  if (!camera || bodyGuide) return;
   const { w, h } = getSourceDims();
   const scale = Math.min(stageWrap.clientWidth / w, stageWrap.clientHeight / h);
   const dw = w * scale,
