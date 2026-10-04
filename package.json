@@ -16,6 +16,7 @@
   "devDependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
     "fflate": "^0.8.3",
+    "onnxruntime-web": "^1.30.0",
     "playwright": "^1.63.0",
     "sharp": "^0.35.5",
     "typescript": "7.0.2",

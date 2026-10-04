@@ -2,7 +2,7 @@
 // loop read these records instead of branching on module names, so adding a service means adding
 // one entry here (plus its implementation) rather than editing every if/else chain.
 
-export type ServiceId = "lips" | "wrinkles" | "acne" | "skin";
+export type ServiceId = "lips" | "wrinkles" | "acne" | "skin" | "body";
 export type ModuleId = "home" | ServiceId;
 export type SampleKind = "sample" | "sample-acne" | "sample-wrinkles";
 
@@ -61,6 +61,17 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample-acne",
     sampleButtonLabel: "Test Photo · Acne",
     usesSkinMask: true,
+    paintsBaseFrame: false,
+    resetShowsBefore: false,
+  },
+  body: {
+    id: "body",
+    eyebrow: "BODY",
+    title: "Weight loss (body shaping)",
+    // No full-body test photo is bundled yet: the button loads the face test photo.
+    sampleKind: "sample",
+    sampleButtonLabel: "Test Photo",
+    usesSkinMask: false,
     paintsBaseFrame: false,
     resetShowsBefore: false,
   },

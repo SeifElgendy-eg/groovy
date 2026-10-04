@@ -81,6 +81,16 @@ export function readBotoxDoses(): Record<"forehead" | "frown" | "crows" | "under
   };
 }
 
+/** Body slimming sliders, 0..1. */
+export function readBodySettings(): { overall: number; arms: number; waist: number; legs: number } {
+  return {
+    overall: Number(dom.bodySlider.value) / 100,
+    arms: Number(dom.bodyArmsSlider.value) / 100,
+    waist: Number(dom.bodyWaistSlider.value) / 100,
+    legs: Number(dom.bodyLegsSlider.value) / 100,
+  };
+}
+
 /** The acne sliders' current values. */
 export function readAcnePlan(): AcnePlan {
   return {

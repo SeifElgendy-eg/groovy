@@ -1,5 +1,6 @@
 // The effect instances and the canvases they share with the pipeline.
 import { AcneEffect } from "../effects/acne/effect";
+import { BodyEffect, type PersonMask } from "../effects/body/effect";
 import { LipRenderer } from "../effects/lips/renderer";
 import { SkinBrightness } from "../effects/skin/brightness";
 import { WrinklesEffect } from "../effects/wrinkles/effect";
@@ -13,6 +14,10 @@ export const acne = new AcneEffect();
 export const wrinkles = new WrinklesEffect();
 export const lipRenderer = new LipRenderer();
 export const skinBrightness = new SkinBrightness();
+export const body = new BodyEffect();
+
+/** Person mask of the current photo for body slimming (from the multiclass segmenter), or null. */
+export const bodyPerson: { mask: PersonMask | null } = { mask: null };
 
 /** Raw skin segmentation (alpha = skin), in the model's orientation. */
 export const segMask = scratch();
@@ -23,4 +28,5 @@ export const skinEffectMask = scratch();
 export function markEffectsDirty(): void {
   acne.dirty = true;
   wrinkles.dirty = true;
+  body.dirty = true;
 }

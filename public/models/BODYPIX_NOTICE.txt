@@ -1,0 +1,10 @@
+bodypix-mobilenet-v1-100-s8.onnx
+
+BodyPix 2.0 (MobileNetV1, multiplier 1.00, output stride 8) by Google, from TensorFlow.js
+(https://github.com/tensorflow/tfjs-models/tree/master/body-pix), Apache License 2.0.
+ONNX conversion by Keijiro Takahashi (npm package jp.keijiro.bodypix 4.0.0,
+https://github.com/keijiro/BodyPixSentis), Apache License 2.0.
+
+Modified for onnxruntime: the seven dilated convolutions' "SAME" automatic padding was replaced
+by the equivalent explicit padding (onnxruntime does not support automatic padding together with
+dilation). Constants were also removed from the graph inputs (they are initializers). Weights are unchanged.

@@ -12,7 +12,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 await page.goto(server.resolvedUrls.local[0]);
 await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
-const expected = { "#chooseLipsBtn": ["LIPS", "Filler (lips)", "Test Photo"], "#chooseWrinklesBtn": ["WRINKLES", "Botox (wrinkles)", "Test Photo · Wrinkles"], "#chooseAcneBtn": ["ACNE", "Acne Treatment", "Test Photo · Acne"] };
+const expected = { "#chooseLipsBtn": ["LIPS", "Filler (lips)", "Test Photo"], "#chooseWrinklesBtn": ["WRINKLES", "Botox (wrinkles)", "Test Photo · Wrinkles"], "#chooseAcneBtn": ["ACNE", "Acne Treatment", "Test Photo · Acne"], "#chooseBodyBtn": ["BODY", "Weight loss (body shaping)", "Test Photo"] };
 let bad = 0;
 for (const [sel, [eyebrow, title, label]] of Object.entries(expected)) {
   await page.click(sel);

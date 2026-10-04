@@ -12,7 +12,7 @@ import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
-import { lipRenderer, markEffectsDirty, segMask, skinEffectMask } from "./effects";
+import { body, bodyPerson, lipRenderer, markEffectsDirty, segMask, skinEffectMask } from "./effects";
 import {
   analysisSource,
   getSourceDims,
@@ -108,6 +108,31 @@ function marginOf(segmenter: ImageSegmenter, canvas: HTMLCanvasElement): MarginM
   }
 }
 
+/** Longest side the person mask is segmented at (body slimming). */
+const PERSON_MAX = 512;
+const personCanvas = document.createElement("canvas");
+const personCtx = personCanvas.getContext("2d")!;
+
+/** Person mask (1 - background score of the multiclass model) for body slimming. */
+function segmentPerson(segmenter: ImageSegmenter, source: HTMLCanvasElement): void {
+  const scale = Math.min(1, PERSON_MAX / Math.max(source.width, source.height));
+  personCanvas.width = Math.max(1, Math.round(source.width * scale));
+  personCanvas.height = Math.max(1, Math.round(source.height * scale));
+  personCtx.drawImage(source, 0, 0, personCanvas.width, personCanvas.height);
+  const r = segmenter.segment(personCanvas);
+  try {
+    const bg = r.confidenceMasks?.[0];
+    if (!bg) return;
+    const data = bg.getAsFloat32Array();
+    const person = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i++) person[i] = 1 - data[i];
+    bodyPerson.mask = { data: person, w: bg.width, h: bg.height };
+    body.dirty = true;
+  } finally {
+    closeSegmentation(r);
+  }
+}
+
 const frameCanvas = document.createElement("canvas");
 const frameCtx = frameCanvas.getContext("2d")!;
 const cropCanvas = document.createElement("canvas");
@@ -188,6 +213,9 @@ export async function processCurrentSource(): Promise<void> {
       : tracked.sync("photo face detection", () => faceLandmarker.detect(sourceCanvas));
     if (wantsMask)
       tracked.sync("skin segmentation", () => segmentSkin(segmenter, sourceCanvas, faceRes.faceLandmarks?.[0] ?? null));
+    // Body slimming works on photos (taken, uploaded or test): the person's outline.
+    if (state.module === "body" && !camera)
+      tracked.sync("person segmentation", () => segmentPerson(segmenter, sourceCanvas));
     if (faceRes.faceLandmarks?.length) {
       const landmarks = faceRes.faceLandmarks[0];
       state.facePoints = landmarks;
