@@ -115,6 +115,52 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   if (!panelOk) bad++;
   await cam.close();
 }
+// Body shaping is shot from a distance: its capture button runs a countdown (cancellable), then
+// takes the photo. It has its own standing guide, not the face oval.
+{
+  const body = await browser.newPage();
+  body.on("pageerror", (e) => errors.push(e.message));
+  await body.goto(server.resolvedUrls.local[0]);
+  await body.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await body.click("#chooseBodyBtn");
+  await body.click("#startBtn");
+  await body.waitForFunction(() => document.getElementById("overlay").classList.contains("hidden"), null, { timeout: 30000 });
+  await body.waitForTimeout(800);
+  const ui = () =>
+    body.evaluate(() => ({
+      bodyGuide: !document.querySelector(".body-guide").hidden,
+      faceGuide: !document.querySelector(".face-guide").hidden,
+      button: document.querySelector(".capture-photo").textContent,
+      counting: !document.querySelector(".capture-countdown").hidden,
+      number: document.querySelector(".capture-countdown-number").textContent,
+      still: !!document.querySelector(".captured-still"),
+    }));
+  const idle = await ui();
+  const idleOk = idle.bodyGuide && !idle.faceGuide && idle.button === "Start 5-second timer" && !idle.counting;
+  console.log(idleOk ? "ok  " : "FAIL", "body camera shows the standing guide and a timer button", JSON.stringify(idle));
+  if (!idleOk) bad++;
+
+  await body.click(".capture-photo");
+  const running = await ui();
+  const runningOk = running.counting && running.number === "5" && running.button === "Cancel" && !running.still;
+  console.log(runningOk ? "ok  " : "FAIL", "pressing the button starts the countdown", JSON.stringify(running));
+  if (!runningOk) bad++;
+
+  await body.click(".capture-photo"); // Cancel
+  await body.waitForTimeout(1500); // no photo may follow a cancelled countdown
+  const cancelled = await ui();
+  const cancelledOk = !cancelled.counting && cancelled.button === "Start 5-second timer" && !cancelled.still;
+  console.log(cancelledOk ? "ok  " : "FAIL", "cancel stops the countdown without taking a photo", JSON.stringify(cancelled));
+  if (!cancelledOk) bad++;
+
+  await body.click(".capture-photo");
+  await body.waitForFunction(() => document.getElementById("perfBadge").textContent === "PHOTO READY", null, { timeout: 120000 });
+  const taken = await ui();
+  const takenOk = taken.still && !taken.counting;
+  console.log(takenOk ? "ok  " : "FAIL", "the countdown ends by taking the photo", JSON.stringify(taken));
+  if (!takenOk) bad++;
+  await body.close();
+}
 // Camera failures must be visible to the user (they used to be swallowed silently).
 for (const [errName, expectedText] of [
   ["NotAllowedError", "Allow camera access in your browser settings."],
