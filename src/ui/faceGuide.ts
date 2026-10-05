@@ -15,6 +15,20 @@ captureBtn.className = "primary capture-photo";
 captureBtn.textContent = "Take photo";
 captureBtn.hidden = true;
 
+const photoProcessingCue = document.createElement("div");
+photoProcessingCue.className = "photo-processing-cue";
+photoProcessingCue.hidden = true;
+photoProcessingCue.setAttribute("role", "status");
+photoProcessingCue.setAttribute("aria-live", "polite");
+photoProcessingCue.setAttribute("aria-atomic", "true");
+const photoProcessingSpinner = document.createElement("span");
+photoProcessingSpinner.className = "photo-processing-spinner";
+const photoProcessingCopy = document.createElement("div");
+const photoProcessingTitle = document.createElement("strong");
+const photoProcessingDetail = document.createElement("span");
+photoProcessingCopy.append(photoProcessingTitle, photoProcessingDetail);
+photoProcessingCue.append(photoProcessingSpinner, photoProcessingCopy);
+
 const faceGuide = document.createElement("div");
 faceGuide.className = "face-guide";
 const faceGuideLabel = document.createElement("div");
@@ -29,6 +43,7 @@ export function mountFaceGuide(): void {
   dom.stageWrap.append(faceGuide, faceGuideLabel);
   mountBodyGuide();
   mountCountdown();
+  dom.stageWrap.append(photoProcessingCue);
   window.addEventListener("resize", () => updateFaceGuide(state.facePoints));
 }
 
@@ -64,4 +79,15 @@ export function updateFaceGuide(points: NormalizedLandmark[] | null, pose?: Head
   state.faceAligned = result.aligned;
   faceGuide.classList.toggle("aligned", state.faceAligned);
   faceGuideLabel.textContent = result.label;
+}
+
+
+export function showPhotoProcessingCue(detail: string): void {
+  photoProcessingTitle.textContent = "Photo taken";
+  photoProcessingDetail.textContent = detail;
+  photoProcessingCue.hidden = false;
+}
+
+export function hidePhotoProcessingCue(): void {
+  photoProcessingCue.hidden = true;
 }

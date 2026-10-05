@@ -8,13 +8,13 @@ import { FEET_RING, GUIDE_VIEWBOX, silhouettePath } from "./bodySilhouette";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Free space needed on each side of the outline for the steps card; narrower stages get a one-line hint. */
-const CARD_MIN_SIDE = 210;
+const CARD_MIN_SIDE = 190;
 
 const STEPS: [title: string, detail: string][] = [
   ["Face the camera", "Stand straight and look ahead."],
   ["Arms slightly away", "Leave a small gap between your arms and your body."],
   ["Feet a little apart", "Weight even, as in the outline."],
-  ["Whole body in the outline", "Step back until your head and feet both fit."],
+  ["Whole body in the guide", "Keep your whole body roughly inside; a little extra space is okay."],
 ];
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -101,17 +101,23 @@ export function updateBodyGuide(active: boolean): void {
   lastKey = key;
   // The outline is sized from the picture the camera shows (letterboxed in the stage), centred.
   const scale = Math.min(W / w, H / h);
+  const dw = w * scale;
   const dh = h * scale;
-  const gh = dh * 0.94;
+  const imageLeft = (W - dw) / 2;
+  const imageTop = (H - dh) / 2;
+
+  // Make the actual silhouette generous enough that people can fit inside it comfortably.
+  const gh = dh * 0.97;
   const gw = (gh * GUIDE_VIEWBOX.w) / GUIDE_VIEWBOX.h;
   figure.style.width = `${gw}px`;
   figure.style.height = `${gh}px`;
-  figure.style.left = `${(W - gw) / 2}px`;
-  figure.style.top = `${(H - dh) / 2 + dh * 0.03}px`;
-  const side = (W - gw) / 2;
+  figure.style.left = `${imageLeft + (dw - gw) / 2}px`;
+  figure.style.top = `${imageTop + dh * 0.015}px`;
+
+  const side = Math.max(0, (dw - gw) / 2);
   const roomy = side >= CARD_MIN_SIDE;
   stageWrap.classList.toggle("body-guide-roomy", roomy);
   tips.hidden = !roomy;
   hint.hidden = roomy;
-  if (roomy) tips.style.width = `${Math.min(260, side - 32)}px`;
+  if (roomy) tips.style.width = `${Math.min(220, Math.max(176, side - 20))}px`;
 }

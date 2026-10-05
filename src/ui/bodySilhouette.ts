@@ -5,9 +5,26 @@
 // camera with the arms slightly away from the body and the feet slightly apart. Only the right
 // half is written out; the left is its mirror image, so the figure is exactly symmetric.
 
-/** SVG viewBox of the guide: the figure fills 6..194 wide and 5..513 tall; feet rings sit below. */
-export const GUIDE_VIEWBOX = { w: 200, h: 530 } as const;
+/** SVG viewBox of the guide; the standing silhouette is intentionally broad so a person can fit inside comfortably. */
+export const GUIDE_VIEWBOX = { w: 240, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
+
+const ORIGINAL_CENTRE_X = 100;
+const SILHOUETTE_X_SCALE = 1.22;
+/** Extra outward movement of each leg, increasing from the knee toward the feet. */
+const LEG_SPREAD = 24;
+const LEG_SPREAD_START_Y = 292;
+const LEG_SPREAD_END_Y = 513;
+
+const expandX = ([x, y]: Pt): Pt => [
+  GUIDE_CENTRE_X + (x - ORIGINAL_CENTRE_X) * SILHOUETTE_X_SCALE,
+  y,
+];
+
+const spreadLeg = ([x, y]: Pt): Pt => {
+  const t = Math.max(0, Math.min(1, (y - LEG_SPREAD_START_Y) / (LEG_SPREAD_END_Y - LEG_SPREAD_START_Y)));
+  return [x + LEG_SPREAD * t, y];
+};
 
 type Pt = readonly [number, number];
 
@@ -54,12 +71,14 @@ function spline(pts: readonly Pt[]): string {
  * crotch) where the outline is allowed to turn sharply.
  */
 export function silhouettePath(): string {
-  const leftUpper = [...UPPER].reverse().map(mirror); // left armpit -> top of head (mirror)
-  const over = [...leftUpper, ...UPPER.slice(1)]; // left armpit -> over the head -> right armpit
-  const leftLower = [...LOWER].reverse().map(mirror); // crotch -> left armpit
+  const expandedUpper = UPPER.map(expandX);
+  const expandedLower = LOWER.map(expandX).map(spreadLeg);
+  const leftUpper = [...expandedUpper].reverse().map(mirror); // left armpit -> top of head (mirror)
+  const over = [...leftUpper, ...expandedUpper.slice(1)]; // left armpit -> over the head -> right armpit
+  const leftLower = [...expandedLower].reverse().map(mirror); // crotch -> left armpit
   const start = over[0];
-  return `M${round(start[0])} ${round(start[1])}${spline(over)}${spline(LOWER)}${spline(leftLower)}Z`;
+  return `M${round(start[0])} ${round(start[1])}${spline(over)}${spline(expandedLower)}${spline(leftLower)}Z`;
 }
 
-/** Where the feet stand: a ring to step into, centred between the feet (the soles are at y = 513). */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 86, ry: 13 } as const;
+/** Where the feet stand: a wider stance marker centred between the two feet. */
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 114, ry: 14 } as const;
