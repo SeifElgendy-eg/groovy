@@ -701,31 +701,6 @@ button:focus-visible {
   z-index: 6;
   pointer-events: none;
 }
-.body-guide-zone {
-  box-sizing: border-box;
-  position: absolute;
-  z-index: 5;
-  pointer-events: none;
-  border: 1px solid rgba(255, 235, 245, 0.22);
-  border-radius: 30px;
-  background: rgba(255, 255, 255, 0.045);
-  box-shadow: inset 0 0 0 1px rgba(36, 21, 47, 0.28);
-}
-.body-guide-zone::before {
-  content: "STAND ANYWHERE INSIDE";
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(36, 21, 47, 0.82);
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-}
 .body-guide svg {
   display: block;
   width: 100%;
@@ -1203,7 +1178,6 @@ body:not(.home-screen) .stage-wrap {
 @keyframes photo-processing-spin {
   to { transform: rotate(360deg); }
 }
-.photo-processing-cue[hidden],
-.body-guide-zone[hidden] {
+.photo-processing-cue[hidden] {
   display: none !important;
 }
