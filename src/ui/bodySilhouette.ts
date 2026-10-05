@@ -10,9 +10,9 @@ export const GUIDE_VIEWBOX = { w: 220, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
 
 const ORIGINAL_CENTRE_X = 100;
-const SILHOUETTE_X_SCALE = 1.12;
+const SILHOUETTE_X_SCALE = 1.22;
 /** Extra outward movement of each leg, increasing from the knee toward the feet. */
-const LEG_SPREAD = 16;
+const LEG_SPREAD = 24;
 const LEG_SPREAD_START_Y = 292;
 const LEG_SPREAD_END_Y = 513;
 
@@ -81,4 +81,4 @@ export function silhouettePath(): string {
 }
 
 /** Where the feet stand: a wider stance marker centred between the two feet. */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 108, ry: 14 } as const;
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 116, ry: 14 } as const;
