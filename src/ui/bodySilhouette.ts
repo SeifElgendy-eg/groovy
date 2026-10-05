@@ -11,11 +11,20 @@ export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
 
 const ORIGINAL_CENTRE_X = 100;
 const SILHOUETTE_X_SCALE = 1.12;
+/** Extra outward movement of each leg, increasing from the knee toward the feet. */
+const LEG_SPREAD = 16;
+const LEG_SPREAD_START_Y = 292;
+const LEG_SPREAD_END_Y = 513;
 
 const expandX = ([x, y]: Pt): Pt => [
   GUIDE_CENTRE_X + (x - ORIGINAL_CENTRE_X) * SILHOUETTE_X_SCALE,
   y,
 ];
+
+const spreadLeg = ([x, y]: Pt): Pt => {
+  const t = Math.max(0, Math.min(1, (y - LEG_SPREAD_START_Y) / (LEG_SPREAD_END_Y - LEG_SPREAD_START_Y)));
+  return [x + LEG_SPREAD * t, y];
+};
 
 type Pt = readonly [number, number];
 
@@ -63,7 +72,7 @@ function spline(pts: readonly Pt[]): string {
  */
 export function silhouettePath(): string {
   const expandedUpper = UPPER.map(expandX);
-  const expandedLower = LOWER.map(expandX);
+  const expandedLower = LOWER.map(expandX).map(spreadLeg);
   const leftUpper = [...expandedUpper].reverse().map(mirror); // left armpit -> top of head (mirror)
   const over = [...leftUpper, ...expandedUpper.slice(1)]; // left armpit -> over the head -> right armpit
   const leftLower = [...expandedLower].reverse().map(mirror); // crotch -> left armpit
@@ -71,5 +80,5 @@ export function silhouettePath(): string {
   return `M${round(start[0])} ${round(start[1])}${spline(over)}${spline(expandedLower)}${spline(leftLower)}Z`;
 }
 
-/** Where the feet stand: a ring to step into, centred between the feet (the soles are at y = 513). */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 100, ry: 14 } as const;
+/** Where the feet stand: a wider stance marker centred between the two feet. */
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 108, ry: 14 } as const;
