@@ -62,4 +62,4 @@ export function silhouettePath(): string {
 }
 
 /** Where the feet stand: a ring to step into, centred between the feet (the soles are at y = 513). */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 86, ry: 13 } as const;
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 94, ry: 14 } as const;
