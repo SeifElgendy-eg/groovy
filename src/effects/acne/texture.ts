@@ -40,7 +40,7 @@ export interface TextureResult {
 }
 
 /** How strongly each band is reduced at full strength: [dark parts, light parts]. */
-export const PORE_REDUCTION: [number, number] = [0.5, 0.04];
+export const PORE_REDUCTION: [number, number] = [0.51, 0.0408];
 
 /** In-place horizontal + vertical box blur of radius r (clamped edges). */
 function boxBlur(src: Float32Array, w: number, h: number, r: number, tmp: Float32Array, acc: Float64Array): void {
@@ -407,7 +407,7 @@ function coreWeight(mask: Pixels, w: number, h: number, sigma: number): Float32A
 }
 
 /** How much of a scar's relief (beyond normal texture) is removed at full strength. */
-export const SCAR_FILL = 1;
+export const SCAR_FILL = 1.02;
 
 /** Average pit depth (levels) around a bright bump above which it counts as a scar rim. */
 export const SCAR_RIM_NEIGHBOURHOOD = 2.5;
