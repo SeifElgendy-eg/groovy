@@ -6,7 +6,7 @@
 // half is written out; the left is its mirror image, so the figure is exactly symmetric.
 
 /** SVG viewBox of the guide; the standing silhouette is intentionally broad so a person can fit inside comfortably. */
-export const GUIDE_VIEWBOX = { w: 220, h: 530 } as const;
+export const GUIDE_VIEWBOX = { w: 240, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
 
 const ORIGINAL_CENTRE_X = 100;
@@ -81,4 +81,4 @@ export function silhouettePath(): string {
 }
 
 /** Where the feet stand: a wider stance marker centred between the two feet. */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 116, ry: 14 } as const;
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 114, ry: 14 } as const;
