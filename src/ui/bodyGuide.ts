@@ -8,13 +8,13 @@ import { FEET_RING, GUIDE_VIEWBOX, silhouettePath } from "./bodySilhouette";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Free space needed on each side of the outline for the steps card; narrower stages get a one-line hint. */
-const CARD_MIN_SIDE = 210;
+const CARD_MIN_SIDE = 216;
 
 const STEPS: [title: string, detail: string][] = [
   ["Face the camera", "Stand straight and look ahead."],
   ["Arms slightly away", "Leave a small gap between your arms and your body."],
   ["Feet a little apart", "Weight even, as in the outline."],
-  ["Whole body in the outline", "Step back until your head and feet both fit."],
+  ["Whole body in the guide", "Keep your whole body roughly inside; a little extra space is okay."],
 ];
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -76,8 +76,12 @@ hint.className = "face-guide-label body-guide-hint";
 hint.textContent = "Face the camera · arms slightly away · feet a little apart · whole body inside the outline";
 hint.hidden = true;
 
+const zone = document.createElement("div");
+zone.className = "body-guide-zone";
+zone.hidden = true;
+
 export function mountBodyGuide(): void {
-  dom.stageWrap.append(figure, tips, hint);
+  dom.stageWrap.append(zone, figure, tips, hint);
 }
 
 /** Size/position key of the last layout, so the per-frame calls do not touch the DOM needlessly. */
@@ -89,7 +93,7 @@ export function updateBodyGuide(active: boolean): void {
   stageWrap.classList.toggle("body-guide-on", active);
   if (!active) {
     stageWrap.classList.remove("body-guide-roomy");
-    figure.hidden = tips.hidden = hint.hidden = true;
+    zone.hidden = figure.hidden = tips.hidden = hint.hidden = true;
     lastKey = "";
     return;
   }
@@ -101,17 +105,37 @@ export function updateBodyGuide(active: boolean): void {
   lastKey = key;
   // The outline is sized from the picture the camera shows (letterboxed in the stage), centred.
   const scale = Math.min(W / w, H / h);
+  const dw = w * scale;
   const dh = h * scale;
-  const gh = dh * 0.94;
+  const imageLeft = (W - dw) / 2;
+  const imageTop = (H - dh) / 2;
+  const gh = dh * 0.88;
   const gw = (gh * GUIDE_VIEWBOX.w) / GUIDE_VIEWBOX.h;
   figure.style.width = `${gw}px`;
   figure.style.height = `${gh}px`;
-  figure.style.left = `${(W - gw) / 2}px`;
-  figure.style.top = `${(H - dh) / 2 + dh * 0.03}px`;
-  const side = (W - gw) / 2;
+  figure.style.left = `${imageLeft + (dw - gw) / 2}px`;
+  figure.style.top = `${imageTop + dh * 0.06}px`;
+
+  // The safe zone is an intentionally generous target area, but it must stay inside the actual
+  // displayed image so it never suggests standing in a letterbox bar.
+  const maxZoneW = Math.max(0, dw - 24);
+  const maxZoneH = Math.max(0, dh - 24);
+  if (maxZoneW <= 0 || maxZoneH <= 0) {
+    zone.hidden = true;
+  } else {
+    const zoneW = Math.min(maxZoneW, Math.max(gw + 120, dw * 0.72));
+    const zoneH = Math.min(maxZoneH, dh * 0.92);
+    zone.style.width = `${zoneW}px`;
+    zone.style.height = `${zoneH}px`;
+    zone.style.left = `${imageLeft + (dw - zoneW) / 2}px`;
+    zone.style.top = `${imageTop + (dh - zoneH) / 2}px`;
+    zone.hidden = false;
+  }
+
+  const side = Math.max(0, (dw - gw) / 2);
   const roomy = side >= CARD_MIN_SIDE;
   stageWrap.classList.toggle("body-guide-roomy", roomy);
   tips.hidden = !roomy;
   hint.hidden = roomy;
-  if (roomy) tips.style.width = `${Math.min(260, side - 32)}px`;
+  if (roomy) tips.style.width = `${Math.min(320, side - 24)}px`;
 }
