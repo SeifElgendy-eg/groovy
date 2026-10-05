@@ -76,12 +76,8 @@ hint.className = "face-guide-label body-guide-hint";
 hint.textContent = "Face the camera · arms slightly away · feet a little apart · whole body inside the outline";
 hint.hidden = true;
 
-const zone = document.createElement("div");
-zone.className = "body-guide-zone";
-zone.hidden = true;
-
 export function mountBodyGuide(): void {
-  dom.stageWrap.append(zone, figure, tips, hint);
+  dom.stageWrap.append(figure, tips, hint);
 }
 
 /** Size/position key of the last layout, so the per-frame calls do not touch the DOM needlessly. */
@@ -93,7 +89,7 @@ export function updateBodyGuide(active: boolean): void {
   stageWrap.classList.toggle("body-guide-on", active);
   if (!active) {
     stageWrap.classList.remove("body-guide-roomy");
-    zone.hidden = figure.hidden = tips.hidden = hint.hidden = true;
+    figure.hidden = tips.hidden = hint.hidden = true;
     lastKey = "";
     return;
   }
@@ -109,28 +105,14 @@ export function updateBodyGuide(active: boolean): void {
   const dh = h * scale;
   const imageLeft = (W - dw) / 2;
   const imageTop = (H - dh) / 2;
-  const gh = dh * 0.88;
+
+  // Make the actual silhouette generous enough that people can fit inside it comfortably.
+  const gh = dh * 0.94;
   const gw = (gh * GUIDE_VIEWBOX.w) / GUIDE_VIEWBOX.h;
   figure.style.width = `${gw}px`;
   figure.style.height = `${gh}px`;
   figure.style.left = `${imageLeft + (dw - gw) / 2}px`;
-  figure.style.top = `${imageTop + dh * 0.06}px`;
-
-  // The safe zone is an intentionally generous target area, but it must stay inside the actual
-  // displayed image so it never suggests standing in a letterbox bar.
-  const maxZoneW = Math.max(0, dw - 24);
-  const maxZoneH = Math.max(0, dh - 24);
-  if (maxZoneW <= 0 || maxZoneH <= 0) {
-    zone.hidden = true;
-  } else {
-    const zoneW = Math.min(maxZoneW, Math.max(gw + 120, dw * 0.72));
-    const zoneH = Math.min(maxZoneH, dh * 0.92);
-    zone.style.width = `${zoneW}px`;
-    zone.style.height = `${zoneH}px`;
-    zone.style.left = `${imageLeft + (dw - zoneW) / 2}px`;
-    zone.style.top = `${imageTop + (dh - zoneH) / 2}px`;
-    zone.hidden = false;
-  }
+  figure.style.top = `${imageTop + dh * 0.03}px`;
 
   const side = Math.max(0, (dw - gw) / 2);
   const roomy = side >= CARD_MIN_SIDE;
