@@ -8,7 +8,7 @@ import { FEET_RING, GUIDE_VIEWBOX, silhouettePath } from "./bodySilhouette";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Free space needed on each side of the outline for the steps card; narrower stages get a one-line hint. */
-const CARD_MIN_SIDE = 216;
+const CARD_MIN_SIDE = 190;
 
 const STEPS: [title: string, detail: string][] = [
   ["Face the camera", "Stand straight and look ahead."],
@@ -119,5 +119,5 @@ export function updateBodyGuide(active: boolean): void {
   stageWrap.classList.toggle("body-guide-roomy", roomy);
   tips.hidden = !roomy;
   hint.hidden = roomy;
-  if (roomy) tips.style.width = `${Math.min(320, side - 24)}px`;
+  if (roomy) tips.style.width = `${Math.min(220, Math.max(176, side - 20))}px`;
 }
