@@ -5,6 +5,7 @@ import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
 import type { SkinInput } from "../effects/skin/input";
 import { readBodySettings, readBotoxDoses, readLipParams } from "../ui/controls";
 import { dom } from "../ui/dom";
+import { hidePhotoProcessingCue, showPhotoProcessingCue } from "../ui/faceGuide";
 import { acne, body, bodyPerson, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
@@ -66,9 +67,18 @@ interface AsyncEffect {
  */
 // Layers for a newly chosen set of botox areas arrive asynchronously: redraw then.
 const anyBusy = () => acne.busy || wrinkles.busy || wrinkles.layersPending || body.busy;
+function currentPhotoProcessingLabel(): string | null {
+  if (state.sourceMode !== "photo") return null;
+  if (state.module === "wrinkles") return "Processing Botox effect…";
+  if (state.module === "acne") return "Processing acne treatment…";
+  return null;
+}
 
 wrinkles.onChange = () => {
-  if (!anyBusy()) delete document.body.dataset.effectsBusy;
+  if (!anyBusy()) {
+    delete document.body.dataset.effectsBusy;
+    hidePhotoProcessingCue();
+  }
   renderAll();
 };
 
@@ -78,12 +88,17 @@ function ensurePrepared(effect: AsyncEffect, w: number, h: number): boolean {
   // the time: there the running work is left to finish.)
   if (effect.dirty && effect.busy && state.sourceMode === "photo") effect.cancel();
   if (effect.dirty && !effect.busy) {
+    const processingLabel = currentPhotoProcessingLabel();
+    if (processingLabel) showPhotoProcessingCue(processingLabel);
     document.body.dataset.effectsBusy = "1";
     void effect
       .prepare(skinInput(w, h))
       .catch((err) => console.error("effect preparation failed", err))
       .finally(() => {
-        if (!anyBusy()) delete document.body.dataset.effectsBusy;
+        if (!anyBusy()) {
+          delete document.body.dataset.effectsBusy;
+          hidePhotoProcessingCue();
+        }
         renderAll();
       });
   }
