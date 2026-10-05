@@ -107,12 +107,12 @@ export function updateBodyGuide(active: boolean): void {
   const imageTop = (H - dh) / 2;
 
   // Make the actual silhouette generous enough that people can fit inside it comfortably.
-  const gh = dh * 0.94;
+  const gh = dh * 0.97;
   const gw = (gh * GUIDE_VIEWBOX.w) / GUIDE_VIEWBOX.h;
   figure.style.width = `${gw}px`;
   figure.style.height = `${gh}px`;
   figure.style.left = `${imageLeft + (dw - gw) / 2}px`;
-  figure.style.top = `${imageTop + dh * 0.03}px`;
+  figure.style.top = `${imageTop + dh * 0.015}px`;
 
   const side = Math.max(0, (dw - gw) / 2);
   const roomy = side >= CARD_MIN_SIDE;
