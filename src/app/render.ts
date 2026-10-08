@@ -193,6 +193,8 @@ function renderBody(w: number, h: number): void {
   }
   const notes = ["Compare Before and After to preview the weight loss."];
   if (!body.legs) notes.push("The legs are not fully in the photo, so they are left as they are.");
+  if (body.backdropState === "mismatch" && state.capturedPhoto)
+    notes.push("The empty backdrop no longer matches the camera view: capture it again for the cleanest background.");
   if (body.posture && !body.posture.ok) notes.push(`For a better result next time: ${body.posture.message}`);
   status.textContent = notes.join(" ");
   body.draw(ctx, w, h, settings);

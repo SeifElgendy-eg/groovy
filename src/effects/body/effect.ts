@@ -4,6 +4,7 @@ import { wrap, type Remote } from "comlink";
 import { BODYPIX_LONG_SIDE, inputSide } from "./bodypix";
 import { FULL } from "./field";
 import { checkPosture, legsVisible, type PostureResult } from "./posture";
+import { backdropGain, MAX_MISMATCH, personCover } from "./backdrop";
 import { BodyWarp, type Strengths } from "./warp";
 import type { BodyResult, BodyWorkerApi } from "./worker";
 
@@ -40,6 +41,10 @@ export class BodyEffect {
   legs = true;
   /** How the person stands in the analysed photo (advice only: the slimming runs anyway). */
   posture: PostureResult | null = null;
+  /** The empty backdrop of the booth (camera frame size), set by the app; null: none captured. */
+  plate: HTMLCanvasElement | null = null;
+  /** The backdrop for the last photo: used, not matching the photo, or not available. */
+  backdropState: "used" | "mismatch" | "none" = "none";
   private posing = false;
   private poseCanvas: HTMLCanvasElement | null = null;
   private result: BodyResult | null = null;
@@ -110,6 +115,7 @@ export class BodyEffect {
     this.result = null;
     this.posture = null;
     this.legs = true;
+    this.backdropState = "none";
     this.warp.clear();
     try {
       const { width: w, height: h } = frame;
@@ -141,6 +147,7 @@ export class BodyEffect {
       this.legs = legsVisible(r.joints, ww, wh);
       this.posture = checkPosture(r.joints, ww, wh, false);
       this.warp.set(frame, r);
+      this.backdropState = this.useBackdrop(frame, person);
       this.ready = true;
       return true;
     } catch (err) {
@@ -153,6 +160,42 @@ export class BodyEffect {
       this.busy = false;
       this.stop = null;
     }
+  }
+
+  /**
+   * Use the empty backdrop for this photo if it is the same scene: same size, and the background
+   * around the person matches it once its colours are corrected.
+   */
+  private useBackdrop(frame: HTMLCanvasElement, person: PersonMask): "used" | "mismatch" | "none" {
+    const plate = this.plate;
+    if (!plate || plate.width !== frame.width || plate.height !== frame.height) return "none";
+    const long = Math.max(person.w, person.h);
+    const mask = { data: person.data, w: person.w, h: person.h };
+    const cover = personCover(mask, 0.003 * long, 0.002 * long);
+    const keep = personCover(mask, 0.012 * long, 0.004 * long);
+    // colour gain and the match, on small copies, away from the person (and its shadow)
+    const k = Math.min(1, 192 / Math.max(frame.width, frame.height));
+    const w = Math.max(8, Math.round(frame.width * k)), h = Math.max(8, Math.round(frame.height * k));
+    const small = (src: HTMLCanvasElement) => {
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext("2d", { willReadFrequently: true })!;
+      cx.drawImage(src, 0, 0, w, h);
+      return cx.getImageData(0, 0, w, h).data;
+    };
+    const far = personCover(mask, 0.04 * long, 0);
+    const away = new Float32Array(w * h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        away[y * w + x] = far.data[Math.min(far.h - 1, Math.floor(((y + 0.5) * far.h) / h)) * far.w + Math.min(far.w - 1, Math.floor(((x + 0.5) * far.w) / w))];
+    const gain = backdropGain(small(frame), small(plate), w, h, away);
+    if (gain.mismatch > MAX_MISMATCH) {
+      this.warp.setBackdrop(null);
+      return "mismatch";
+    }
+    this.warp.setBackdrop({ plate, cover, keep, gain });
+    return "used";
   }
 
   /** Strengths for the warp from the sliders (and the person's build). */

@@ -195,6 +195,20 @@ function beginCountdown(seconds: number, auto = false): void {
   });
 }
 
+/** The current camera frame as a canvas, mirrored (as the user saw it), at the camera's resolution. */
+export function grabFrame(): HTMLCanvasElement {
+  const { video } = dom;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const c = canvas.getContext("2d")!;
+  c.translate(canvas.width, 0);
+  c.scale(-1, 1);
+  // Software lift for a face the camera could not make bright enough (1 = untouched).
+  drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
+  return canvas;
+}
+
 /** Freeze the current camera frame (mirrored, as the user saw it) and use it as the photo. */
 async function takePhoto(): Promise<void> {
   const { video } = dom;
@@ -202,17 +216,7 @@ async function takePhoto(): Promise<void> {
   capture.busy = true;
   captureBtn.disabled = true;
   try {
-    const still = tracked.sync("taking the photo", () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const c = canvas.getContext("2d")!;
-      c.translate(canvas.width, 0);
-      c.scale(-1, 1);
-      // Software lift for a face the camera could not make bright enough (1 = untouched).
-      drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
-      return canvas;
-    });
+    const still = tracked.sync("taking the photo", grabFrame);
     state.showBefore = false;
     syncBefore();
     state.capturedPhoto = true;

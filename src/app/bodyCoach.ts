@@ -4,6 +4,7 @@
 import { checkPosture, Stillness } from "../effects/body/posture";
 import { setBodyCoach } from "../ui/bodyGuide";
 import { dom } from "../ui/dom";
+import { backdropCapturing } from "./backdrop";
 import { body } from "./effects";
 import { autoCaptureRunning, beginAutoCapture, cancelCountdown } from "./source";
 import { state } from "./state";
@@ -32,7 +33,7 @@ export function resetBodyCoach(): void {
 /** Called from the camera loop on every frame. */
 export function bodyCoachTick(now: number): void {
   const live = state.module === "body" && state.sourceMode === "camera" && state.running;
-  if (!live) return;
+  if (!live || backdropCapturing()) return;
   if (running || now - lastCheck < CHECK_MS) return;
   const { video } = dom;
   if (video.readyState < 2 || !video.videoWidth) return;

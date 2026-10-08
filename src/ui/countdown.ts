@@ -27,13 +27,14 @@ const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)"
 
 /**
  * Show `remaining` (whole seconds left), or hide the countdown with null. `holding`: the person is
- * already in place (hands-free capture), so the caption only asks them to hold still.
+ * already in place (hands-free capture), so the caption only asks them to hold still. `caption`:
+ * a caption of its own (the empty-backdrop capture).
  */
-export function showCountdown(remaining: number | null, holding = false): void {
+export function showCountdown(remaining: number | null, holding = false, caption?: string): void {
   overlay.hidden = remaining === null;
   if (remaining === null) return;
   numberEl.textContent = String(remaining);
-  captionEl.textContent = holding ? "Hold still" : countdownCaption(remaining);
+  captionEl.textContent = caption ?? (holding ? "Hold still" : countdownCaption(remaining));
   if (!reducedMotion())
     numberEl.animate(
       [

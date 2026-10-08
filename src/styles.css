@@ -806,6 +806,25 @@ button:focus-visible {
 .body-guide-hint[hidden] {
   display: none;
 }
+/* Staff setting: the booth's empty backdrop (app/backdrop.ts). */
+.backdrop-setup {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 6px;
+}
+.backdrop-setup strong {
+  display: block;
+  font-size: 14px;
+}
+.backdrop-setup .small-note {
+  display: block;
+  margin-top: 2px;
+}
+.backdrop-setup button {
+  flex: none;
+}
 /* Live posture advice (app/bodyCoach.ts): top centre, green for a good pose. */
 .body-coach {
   position: absolute;
