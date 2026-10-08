@@ -805,34 +805,6 @@ button:focus-visible {
 .body-guide-hint[hidden] {
   display: none;
 }
-/* The example pose: in the "How to stand" card and in the body panel. */
-.body-guide-example {
-  display: block;
-  height: 130px;
-  margin: 0 auto 8px;
-  border-radius: 10px;
-}
-.body-pose-example {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin: 14px 0 6px;
-}
-.body-pose-example img {
-  flex: none;
-  height: 132px;
-  border-radius: 10px;
-}
-.body-pose-example figcaption {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.35;
-}
-.body-pose-example strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--text);
-}
 /* Live posture advice (app/bodyCoach.ts): top centre, green for a good pose. */
 .body-coach {
   position: absolute;
