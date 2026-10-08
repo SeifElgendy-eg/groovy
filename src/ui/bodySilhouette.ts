@@ -2,7 +2,7 @@
 // Pure geometry (no DOM) so it can be unit-tested and rendered anywhere.
 //
 // The reference pose (the example images) on a neutral, average adult build, so it reads as a pose
-// cue and not a body type: facing the camera, arms hanging about 13 degrees out with a clear gap at
+// cue and not a body type: facing the camera, arms hanging about 15 degrees out with a clear gap at
 // the hips, feet about hip-width apart. It matches the pose the posture check coaches toward
 // (effects/body/posture.ts).
 //
@@ -22,7 +22,7 @@
 export const GUIDE_ROOM = 1.15;
 
 /** SVG viewBox of the guide (wide enough for the widened figure). */
-export const GUIDE_VIEWBOX = { w: 272, h: 530 } as const;
+export const GUIDE_VIEWBOX = { w: 284, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
 
 type Pt = readonly [number, number];
@@ -32,19 +32,29 @@ const DESIGN_CENTRE_X = 120;
 /** Widen a body point about the guide's centre. */
 const widen = ([x, y]: Pt): Pt => [GUIDE_CENTRE_X + (x - DESIGN_CENTRE_X) * GUIDE_ROOM, y];
 
-/** The arm's centre line, shoulder joint to fingertips (~13 degrees out from vertical). */
+/** The arm's centre line as drawn below, shoulder joint to fingertips (~13 degrees out). */
 const ARM_FROM: Pt = [178, 100], ARM_TO: Pt = [229, 318];
 /**
- * Widen an arm point: the arm moves out with the shoulder and gets GUIDE_ROOM thicker across, but
- * keeps its angle (stretching it sideways like the body would splay it further out).
+ * Angle of the arm's centre line from vertical in the guide, degrees. The best slimming results came
+ * from arms at 17-20 degrees measured shoulder point to wrist point (as the posture check measures
+ * it); for the reference man that is a 15 degree centre line through the arm itself, so a person
+ * filling this outline measures ~17-18 degrees.
+ */
+export const GUIDE_ARM_DEG = 15;
+
+/**
+ * Place an arm point: the arm hangs from the (widened) shoulder at GUIDE_ARM_DEG and is GUIDE_ROOM
+ * thicker across, keeping its length (stretching it sideways would splay it out unevenly).
  */
 function widenArm([x, y]: Pt): Pt {
   const len = Math.hypot(ARM_TO[0] - ARM_FROM[0], ARM_TO[1] - ARM_FROM[1]);
   const ux = (ARM_TO[0] - ARM_FROM[0]) / len, uy = (ARM_TO[1] - ARM_FROM[1]) / len;
   const along = (x - ARM_FROM[0]) * ux + (y - ARM_FROM[1]) * uy;
   const across = (x - ARM_FROM[0]) * -uy + (y - ARM_FROM[1]) * ux;
+  const a = (GUIDE_ARM_DEG * Math.PI) / 180;
+  const vx = Math.sin(a), vy = Math.cos(a); // the arm's new direction
   const [sx, sy] = widen(ARM_FROM);
-  return [sx + along * ux - across * GUIDE_ROOM * uy, sy + along * uy + across * GUIDE_ROOM * ux];
+  return [sx + along * vx - across * GUIDE_ROOM * vy, sy + along * vy + across * GUIDE_ROOM * vx];
 }
 
 /** Right half, top of the head to the shoulder: head (~0.13 of the height), neck, shoulder line. */
