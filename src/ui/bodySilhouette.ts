@@ -1,9 +1,9 @@
 // The standing figure drawn over the live camera for body shaping: where to stand and how.
 // Pure geometry (no DOM) so it can be unit-tested and rendered anywhere.
 //
-// Traced from the reference pose (the example images): facing the camera, arms hanging about
-// 15-20 degrees out with a clear gap at the hips, feet about hip-width apart, a fuller build so
-// most people fit inside comfortably. It matches the pose the posture check coaches toward
+// The reference pose (the example images) on a neutral, average build, so it reads as a pose cue
+// and not a body type: facing the camera, arms hanging about 15 degrees out with a clear gap at the
+// hips, feet about hip-width apart. It matches the pose the posture check coaches toward
 // (effects/body/posture.ts). Only the right half is written out (top of the head down to the
 // crotch); the left is its mirror image, so the figure is exactly symmetric.
 
@@ -19,15 +19,19 @@ type Pt = readonly [number, number];
  * up to the crotch on the centre line.
  */
 const RIGHT: Pt[] = [
-  [120.0, 5.0], [134.9, 9.7], [144.2, 22.1], [146.9, 37.5], [147.5, 52.5], [139.9, 66.3], [142.2, 80.6], [156.3, 87.8],
-  [171.1, 93.4], [186.0, 98.5], [196.4, 110.1], [200.4, 125.4], [201.3, 141.2], [204.1, 156.8], [206.8, 172.4], [211.7, 187.4],
-  [217.5, 202.1], [220.5, 217.6], [222.7, 233.3], [226.0, 248.8], [230.3, 264.0], [236.3, 278.6], [237.6, 294.4], [231.1, 305.8],
-  [217.8, 301.2], [216.5, 285.8], [210.8, 271.2], [209.7, 255.5], [202.3, 241.6], [194.3, 227.9], [187.6, 213.5], [184.0, 198.1],
-  [180.7, 182.7], [172.7, 178.2], [174.0, 193.5], [179.5, 208.4], [182.6, 223.8], [180.5, 239.4], [183.2, 254.8], [186.1, 270.3],
-  [186.3, 286.1], [184.3, 301.8], [180.6, 317.2], [176.3, 332.5], [171.5, 347.5], [167.5, 362.8], [167.7, 378.5], [169.1, 394.3],
-  [167.7, 410.0], [164.1, 425.4], [159.4, 440.5], [154.5, 455.6], [151.3, 471.0], [153.5, 486.6], [161.8, 499.9], [161.1, 511.5],
-  [145.4, 513.0], [132.6, 506.9], [128.7, 491.7], [127.4, 476.0], [130.4, 460.5], [129.8, 444.7], [126.8, 429.2], [123.6, 413.7],
-  [123.3, 397.9], [126.3, 382.4], [125.5, 366.8], [123.5, 351.2], [123.1, 335.4], [120.0, 320.7],
+  // head and neck
+  [120, 5], [133, 8], [142, 18], [146, 33], [145, 48], [141, 60], [135, 70], [134, 80],
+  // shoulder, outside of the arm, hand
+  [143, 88], [162, 95], [182, 101], [195, 110], [201, 126], [205, 150], [210, 178], [215, 205],
+  [221, 232], [227, 258], [232, 280], [236, 297], [237, 312], [233, 325], [225, 330], [217, 324],
+  // inside of the arm up to the armpit
+  [213, 309], [208, 292], [201, 268], [194, 243], [188, 218], [182, 194], [176, 176], [171, 168],
+  // side of the body, outside of the leg, foot
+  [167, 182], [165, 204], [162, 226], [161, 248], [165, 270], [171, 292], [175, 314], [175, 340],
+  [171, 372], [166, 403], [166, 430], [162, 458], [153, 484], [149, 496], [154, 505], [152, 513],
+  // inside of the leg up to the crotch
+  [131, 513], [126, 505], [127, 492], [126, 468], [125, 444], [127, 417], [127, 400], [125, 375],
+  [123, 352], [120, 334],
 ];
 
 const mirror = ([x, y]: Pt): Pt => [GUIDE_VIEWBOX.w - x, y];
