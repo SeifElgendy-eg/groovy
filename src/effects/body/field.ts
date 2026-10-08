@@ -47,7 +47,7 @@ const LEFT_ARM = [2, 3, 6, 7, 10];
 const RIGHT_ARM = [4, 5, 8, 9, 11];
 
 /** Strength at 100% of the overall slider, per area (fraction of the local half-width). */
-export const FULL = { arms: 0.6, torso: 0.3, legs: 0.32 } as const;
+export const FULL = { arms: 0.6, torso: 0.3, legs: 0.3 } as const;
 
 export interface BodyInput {
   w: number;
@@ -283,6 +283,38 @@ export function waistRatio(m: Uint8Array, F: Frame): number {
 // ---------------------------------------------------------------- torso and legs
 
 /**
+ * The natural waist: the narrowest row of the body (without the arms) between the bust and the hips
+ * (0.3 to 0.75 of shoulders to hip joints; BodyPix's hip points sit low, so the waist is usually near
+ * 0.45), widths smoothed over a few rows.
+ */
+export function waistY(m: Uint8Array, F: Frame): number {
+  const tl = F.hip[1] - F.neck[1];
+  const y0 = Math.max(0, Math.round(F.neck[1] + 0.3 * tl)), y1 = Math.min(F.h - 1, Math.round(F.neck[1] + 0.75 * tl));
+  const ws: number[] = [];
+  for (let y = y0; y <= y1; y++) {
+    const rs = runsOf(m, F.w, y, 0.01 * F.w);
+    if (!rs.length) {
+      ws.push(Infinity);
+      continue;
+    }
+    const r = mainRun(rs, centreX(F, y));
+    ws.push(r[1] - r[0]);
+  }
+  const k = Math.max(1, Math.round(0.03 * tl));
+  let best = F.neck[1] + 0.45 * tl, bw = Infinity;
+  for (let i = 0; i < ws.length; i++) {
+    let sum = 0, c = 0;
+    for (let j = Math.max(0, i - k); j <= Math.min(ws.length - 1, i + k); j++) if (isFinite(ws[j])) (sum += ws[j]), c++;
+    // ties go to the lower row (a straight torso: the waist is lower, not under the bust)
+    if (c && sum / c <= bw) {
+      bw = sum / c;
+      best = y0 + i;
+    }
+  }
+  return best;
+}
+
+/**
  * Horizontal movement of the body without the arms, at strength 1 of the torso (`legs` false) or
  * of the legs (`legs` true). Background fall-off widths are those of 100% (fixed, so the field is
  * linear in the strength).
@@ -295,10 +327,12 @@ export function waistRatio(m: Uint8Array, F: Frame): number {
 interface ArmRest {
   v: Float32Array;
   c: Float32Array;
+  /** How the arm on that side moves at each row (its turn; 0 where it does not turn). */
+  arm: Float32Array;
 }
 
-function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?: ArmRest): Float32Array {
-  const { w, h, sw, jx, jy } = F;
+function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?: ArmRest, hands?: Uint8Array): Float32Array {
+  const { w, h, sw, jy } = F;
   const dx = new Float32Array(w * h);
   const tl = F.hip[1] - F.neck[1];
   const kneeY = (jy(9) + jy(12)) / 2;
@@ -308,37 +342,61 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
   const crotch = F.hip[1] + 0.15 * thigh;
   // Strength down the torso: a little over the chest, the same over the whole bust (a strength
   // that grows down across the bust pulls its lower curve in more than its upper one and makes it
-  // pointed), then growing below the bust to full at the waist.
-  // The hips (where the slimming shows most) a little more than the waist.
+  // pointed), then growing below the bust to full at the waist. From the waist down it is full and
+  // even: the waist, hips and thighs slim by the same fraction, so the waist-to-hip ratio stays (a
+  // waist slimmed less than the hips below it turns an hourglass into a box).
+  const waist = waistY(m, F);
   const gt = (y: number) =>
     y >= F.neck[1] + 0.12 * tl
-      ? 0.3 + 0.7 * sstep(F.neck[1] + 0.5 * tl, F.neck[1] + 0.8 * tl, y) + 0.15 * sstep(F.neck[1] + 0.85 * tl, F.hip[1], y)
+      ? 0.3 + 0.7 * sstep(Math.max(waist - 0.2 * tl, F.neck[1] + 0.28 * tl), Math.max(waist - 0.05 * tl, F.neck[1] + 0.4 * tl), y)
       : 0.3 * sstep(F.neck[1], F.neck[1] + 0.12 * tl, y);
   // Strength down the legs: full on the upper thighs, easing to 0.55 at the knee (the thigh tapers
   // into the knee as it does on a slimmer leg, and the knee keeps its shape: slimming the thigh
   // fully down to the knee would leave a wide, knobbly knee), 0.55 on the calves, none at the
   // ankles. Without the ankles in the picture, only the thighs and knees.
+  // The rows are narrowed across, which suits legs that stand roughly upright: a thigh or shin
+  // tilted far from vertical (crouching, a knee raised, a long stride) is slimmed less, and not at
+  // all past 45 degrees (narrowing it across would smear it).
+  const tilt = (a: number, b: number) =>
+    (Math.atan2(Math.abs(F.jx(b) - F.jx(a)), Math.max(1e-3, F.jy(b) - F.jy(a))) * 180) / Math.PI;
+  const legTilt = Math.max(tilt(8, 9), tilt(11, 12), calves ? Math.max(tilt(9, 10), tilt(12, 13)) : 0);
+  const upright = 1 - sstep(25, 45, legTilt);
   const gl = (y: number) =>
+    upright *
     (1 - 0.45 * sstep(crotch + 0.35 * thigh, kneeY, y)) *
     (calves ? 1 - sstep(ankY - 0.35 * thigh, ankY, y) : 1 - sstep(kneeY, kneeY + 0.35 * thigh, y));
   const nomT = FULL.torso * buildK, nomL = FULL.legs * buildK; // 100% strengths, for the fall-off widths
-  const row = new Float32Array(w);
-  const falloff = (edge: number, outward: 1 | -1, amt: number, B: number) => {
-    for (let x = 0; x < w; x++) {
-      const dist = (x - edge) * outward;
-      if (dist > 0 && dist < B) row[x] += amt * (1 - dist / B);
-    }
+
+  // Pass 1, per row: the runs this field narrows, each with its centre and strength, and the movement
+  // of the body's two outer edges.
+  interface Run {
+    a: number;
+    b: number;
+    c: number;
+    g: number;
+  }
+  const rowsOf: (Run[] | null)[] = new Array(h).fill(null);
+  const eL = new Float32Array(h), eR = new Float32Array(h), has = new Uint8Array(h);
+  // Where an arm's contact with the side ends (a forearm against the waist, at a shirt's hem), the
+  // body's edge comes in no further than the arm does: a straight arm cannot follow the waist's
+  // curve, and the gap that would open between them there has nothing behind it to show (it would
+  // be filled with stretched skin ending in a notch). The arm hides that bit of the waist anyway.
+  const keep = (e: number, k: number) => {
+    const c = rest ? rest.c[k] : 0;
+    if (!c || !e) return e;
+    const v = rest!.v[k];
+    const target = Math.sign(v) === Math.sign(e) && Math.abs(e) > Math.abs(v) ? v : e;
+    return e + c * (target - e);
   };
   for (let y = Math.max(0, Math.floor(F.neck[1])); y < h; y++) {
     const rs = runsOf(m, w, y, 0.01 * w);
     if (!rs.length) continue;
     const xc = centreX(F, y);
-    const main = mainRun(rs, xc);
-    row.fill(0);
     const beta = sstep(crotch, crotch + 0.5 * thigh, y);
+    const runs: Run[] = [];
     if (!legs && y < crotch + 0.5 * thigh) {
-      const g = gt(y);
       let a: number, b: number;
+      const main = mainRun(rs, xc);
       if (y < crotch) [a, b] = main;
       else {
         a = Infinity;
@@ -349,54 +407,103 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
         }
         if (!isFinite(a) || !isFinite(b)) [a, b] = main;
       }
-      // Where an arm rests on the side, the body's edge there comes in no further than the arm
-      // does: a straight arm cannot follow the waist's curve, and the gap that would open between
-      // them has nothing behind it to show (it would be filled with stretched skin). The arm hides
-      // that part of the waist anyway.
-      const keep = (e: number, k: number) => {
-        const c = rest ? rest.c[k] : 0;
-        if (!c) return 1;
-        const v = rest!.v[k];
-        const target = Math.sign(v) === Math.sign(e) && Math.abs(e) > Math.abs(v) ? v : e;
-        return e ? (e + c * (target - e)) / e : 1;
-      };
-      const kL = keep(g * (a - xc), y), kR = keep(g * (b - xc), h + y);
-      for (let x = Math.max(0, Math.ceil(a)); x <= Math.min(w - 1, b); x++) row[x] = g * (x - xc) * (x < xc ? kL : kR);
-      const eL = g * (a - xc) * kL, eR = g * (b - xc) * kR;
-      // the background beside the body stretches into the gap, stopping short of an arm or hand there
-      let gapL = 1e9, gapR = 1e9;
-      for (const r of rs) {
-        if (r[1] <= a) gapL = Math.min(gapL, a - r[1]);
-        if (r[0] >= b) gapR = Math.min(gapR, r[0] - b);
-      }
-      const BL = Math.max(1, Math.min(2.5 * Math.abs(nomT * eL) + 0.08 * sw, 0.8 * gapL));
-      const BR = Math.max(1, Math.min(2.5 * Math.abs(nomT * eR) + 0.08 * sw, 0.8 * gapR));
-      falloff(a, -1, eL, BL);
-      falloff(b, 1, eR, BR);
-      // arms and hands beside the body hang from the shoulders: they stay where they are
-      for (const r of rs) if (r[1] <= a || r[0] >= b) row.fill(0, r[0], r[1]);
-      for (let x = 0; x < w; x++) row[x] *= 1 - beta;
+      runs.push({ a, b, c: xc, g: gt(y) * (1 - beta) });
     }
     if (legs && y >= crotch) {
       const g = beta * gl(y);
       // At the top of the thighs the legs narrow toward the body's centre line, as the hips above
-      // do (so the outer hips and thighs come in as much as the waist; narrowing each thigh toward
-      // its own middle there would leave the hips wide); lower down each leg narrows toward its own
-      // middle.
+      // do (so the outer hips come in as much as the waist; narrowing each thigh toward its own
+      // middle there would leave the hips wide); lower down each leg narrows toward its own middle.
+      // (A hand next to the thigh is not in this mask: hands are arm parts.)
       const own = sstep(crotch + 0.1 * thigh, crotch + 0.8 * thigh, y);
       for (const r of rs) {
-        const a = r[0], b = r[1], c = (a + b) / 2, hw = (b - a) / 2;
-        if (hw < 0.04 * sw) continue;
-        // a hand next to the thigh is not a leg
-        const nearHand = [4, 7].some((k) => Math.abs(c - jx(k)) < 0.4 * sw && y < jy(k) + 0.45 * sw);
-        if (nearHand && hw < 0.3 * sw) continue;
-        const ct = c + 0.7 * (1 - own) * (F.hip[0] - c);
-        for (let x = a; x < b; x++) row[x] += g * (x - ct);
-        const eL = g * (a - ct), eR = g * (b - ct);
-        falloff(a, -1, eL, 2.5 * nomL * Math.abs(eL) + 0.06 * sw);
-        falloff(b, 1, eR, 2.5 * nomL * Math.abs(eR) + 0.06 * sw);
+        const c = (r[0] + r[1]) / 2;
+        if (r[1] - r[0] < 0.08 * sw) continue;
+        runs.push({ a: r[0], b: r[1], c: c + 0.7 * (1 - own) * (F.hip[0] - c), g });
       }
     }
+    if (!runs.length) continue;
+    rowsOf[y] = runs;
+    const first = runs[0], last = runs[runs.length - 1];
+    eL[y] = keep(first.g * (first.a - first.c), y);
+    eR[y] = keep(last.g * (last.b - last.c), h + y);
+    // A hand against the body's side hides its edge there: the outline seen is the hand, which
+    // moves as the arm does. The edge below (or above) the hand follows on smoothly from the hand,
+    // instead of stepping in under it (a notch in a coat or shorts right below the hand).
+    if (rest && hands) {
+      const reach = Math.max(2, Math.round(0.04 * sw)), o = y * w;
+      for (let x = Math.max(0, Math.floor(first.a) - reach); x < first.a; x++) if (hands[o + x]) {
+        eL[y] = rest.arm[y];
+        break;
+      }
+      for (let x = Math.ceil(last.b); x < Math.min(w, last.b + reach); x++) if (hands[o + x]) {
+        eR[y] = rest.arm[h + y];
+        break;
+      }
+    }
+    has[y] = 1;
+  }
+  // The outer edges' movement, smoothed down the body: where the edge seen in the photo jumps (a
+  // hand or forearm hides part of a coat, a hip or a waist), the movement would jump with it and
+  // leave a step or a notch in the outline below the hand.
+  const smoothEdge = (e: Float32Array) => {
+    const out = Float32Array.from(e);
+    const s = Math.max(1, 0.08 * sw), r = Math.ceil(2.5 * s);
+    for (let y = 0; y < h; y++) {
+      if (!has[y]) continue;
+      let num = 0, den = 0;
+      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) {
+        if (!has[k]) continue;
+        const wt = Math.exp(-0.5 * ((k - y) / s) ** 2);
+        num += wt * e[k];
+        den += wt;
+      }
+      out[y] = num / den;
+    }
+    return out;
+  };
+  const sL = smoothEdge(eL), sR = smoothEdge(eR);
+
+  // Pass 2: each run narrows toward its centre; the outer halves of the outermost runs are scaled
+  // to give the smoothed edge movement.
+  const row = new Float32Array(w);
+  const falloff = (edge: number, outward: 1 | -1, amt: number, B: number) => {
+    for (let x = 0; x < w; x++) {
+      const dist = (x - edge) * outward;
+      if (dist > 0 && dist < B) row[x] += amt * (1 - dist / B);
+    }
+  };
+  for (let y = 0; y < h; y++) {
+    const runs = rowsOf[y];
+    if (!runs) continue;
+    row.fill(0);
+    const rs = runsOf(m, w, y, 0.01 * w);
+    const nom = legs ? nomL : nomT;
+    runs.forEach((r, i) => {
+      const e0L = r.g * (r.a - r.c), e0R = r.g * (r.b - r.c);
+      const kL = i === 0 && e0L ? sL[y] / e0L : 1, kR = i === runs.length - 1 && e0R ? sR[y] / e0R : 1;
+      for (let x = Math.max(0, Math.ceil(r.a)); x < Math.min(w, r.b + (legs ? 0 : 1)); x++) {
+        const left = x < r.c, k = left ? kL : kR;
+        const t = clamp(((x - r.c) / ((left ? r.a : r.b) - r.c || 1) - 0.5) / 0.5, 0, 1);
+        row[x] += r.g * (x - r.c) * (1 + (k - 1) * t);
+      }
+      const EL = e0L * kL, ER = e0R * kR;
+      if (legs) {
+        falloff(r.a, -1, EL, 2.5 * nom * Math.abs(EL) + 0.06 * sw);
+        falloff(r.b, 1, ER, 2.5 * nom * Math.abs(ER) + 0.06 * sw);
+      } else {
+        // the background beside the body stretches into the gap, stopping short of an arm or hand there
+        let gapL = 1e9, gapR = 1e9;
+        for (const q of rs) {
+          if (q[1] <= r.a) gapL = Math.min(gapL, r.a - q[1]);
+          if (q[0] >= r.b) gapR = Math.min(gapR, q[0] - r.b);
+        }
+        falloff(r.a, -1, EL, Math.max(1, Math.min(2.5 * Math.abs(nom * EL) + 0.08 * sw, 0.8 * gapL)));
+        falloff(r.b, 1, ER, Math.max(1, Math.min(2.5 * Math.abs(nom * ER) + 0.08 * sw, 0.8 * gapR)));
+        // arms and hands beside the body hang from the shoulders: they stay where they are
+        for (const q of rs) if (q[1] <= r.a || q[0] >= r.b) row.fill(0, q[0], q[1]);
+      }
+    });
     dx.set(row, y * w);
   }
   return blur(dx, w, h, 0.015 * sw + 1, 0.06 * sw);
@@ -539,7 +646,7 @@ function armSwing(
   const [yLo, yHi] = legs ? [crotch, h] : [F.neck[1] + 0.3 * tl, crotch + 0.5 * thigh];
   const n = w * h;
   const P = input.person;
-  const out = { dx: new Float32Array(n), dy: new Float32Array(n), rest: { v: new Float32Array(2 * h), c: new Float32Array(2 * h) } as ArmRest };
+  const out = { dx: new Float32Array(n), dy: new Float32Array(n), rest: { v: new Float32Array(2 * h), c: new Float32Array(2 * h), arm: new Float32Array(2 * h) } as ArmRest };
   for (const [side, ids] of [["L", LEFT_ARM], ["R", RIGHT_ARM]] as const) {
     const am = new Float32Array(n);
     let cnt = 0, sx = 0, sy = 0, ymin = h, ymax = -1;
@@ -617,7 +724,9 @@ function armSwing(
     const yLow = rows.reduce((m, r) => Math.max(m, r.y), sy0);
     for (const r of rows) {
       const k = (left ? 0 : h) + r.y;
-      out.rest.c[k] = r.c;
+      // only near the end of the contact (the waist above it keeps slimming fully: holding the
+      // waist back wherever an arm touches it made the waist slim less than the hips)
+      out.rest.c[k] = r.c * sstep(yLow - 0.25 * sw, yLow - 0.05 * sw, r.y);
       out.rest.v[k] = theta * Math.max(0, r.y - sy0) + theta2 * Math.max(0, r.y - ey0);
     }
     // and a little below the lowest contact, fading: the body's movement is smoothed down the body,
@@ -627,6 +736,10 @@ function armSwing(
       const k = (left ? 0 : h) + y;
       out.rest.c[k] = Math.max(out.rest.c[k], last.c * (1 - sstep(0, 0.12 * sw, y - yLow)));
       out.rest.v[k] = out.rest.v[(left ? 0 : h) + yLow];
+    }
+    for (let y = 0; y < h; y++) {
+      const yy = Math.min(y, yLow);
+      out.rest.arm[(left ? 0 : h) + y] = theta * Math.max(0, yy - sy0) + theta2 * Math.max(0, yy - ey0);
     }
     const wgt = blur(am, w, h, 0.05 * sw + 1);
     const at = (x: number, y: number) => Math.min(1, sample(wgt, w, h, x, y) * 3);
@@ -890,12 +1003,15 @@ export function bodyFields(input: BodyInput): BodyFields {
     body[i] = 1;
     armHard[i] = 0;
   }
+  const handMask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) handMask[i] = m[i] && (labels[i] === 10 || labels[i] === 11) && !body[i] ? 1 : 0;
   const torso0 = bodyField(body, F, false, buildK);
-  const legs = bodyField(body, F, true, buildK);
+  const legs0 = bodyField(body, F, true, buildK);
   const arm = armField(input, labels, F, body);
   const swingT = armSwing(input, labels, body, F, torso0, false, FULL.torso * buildK);
-  const torso = bodyField(body, F, false, buildK, swingT.rest);
-  const swingL = armSwing(input, labels, body, F, legs, true, FULL.legs * buildK);
+  const torso = bodyField(body, F, false, buildK, swingT.rest, handMask);
+  const swingL = armSwing(input, labels, body, F, legs0, true, FULL.legs * buildK);
+  const legs = bodyField(body, F, true, buildK, swingL.rest, handMask);
   // each pixel follows the arm's motion or the body's, softly blended at the arm's edge
   const wa = blur(armHard, w, h, 0.03 * sw + 1);
   for (let i = 0; i < n; i++) wa[i] = Math.min(1, wa[i] * 1.6);
@@ -998,9 +1114,13 @@ export function bodyFields(input: BodyInput): BodyFields {
     }
     const bx = blur(dx, w, h, finalBlur), by = blur(dy, w, h, finalBlur);
     const out = new Float32Array(2 * n);
+    // none at the photo's edges: a movement there would read from outside the photo (streaks)
+    const edge = Math.max(2, 0.02 * Math.max(w, h));
     for (let i = 0; i < n; i++) {
-      out[2 * i] = bx[i];
-      out[2 * i + 1] = by[i];
+      const x = i % w, y = (i / w) | 0;
+      const e = sstep(0, edge, Math.min(x, w - 1 - x, y, h - 1 - y));
+      out[2 * i] = bx[i] * e;
+      out[2 * i + 1] = by[i] * e;
     }
     return out;
   };

@@ -141,6 +141,39 @@ describe("movement fields on a drawn figure", () => {
   });
 });
 
+describe("waist and hips", () => {
+  it("slims the waist by at least the fraction of the hips (the hourglass stays)", () => {
+    const w = 200, h = 320;
+    const person = new Float32Array(w * h);
+    const labels = new Uint8Array(w * h).fill(255);
+    const row = (y: number, x0: number, x1: number, part: number) => {
+      for (let x = Math.round(x0); x < Math.round(x1); x++) {
+        person[y * w + x] = 1;
+        labels[y * w + x] = part;
+      }
+    };
+    for (let y = 15; y < 55; y++) row(y, 85, 115, 0); // head
+    // torso: chest 30 half-width, waist 20 at y=110, hips 32 at y=160
+    const half = (y: number) => (y < 110 ? 30 - (10 * (y - 60)) / 50 : 20 + (12 * (y - 110)) / 50);
+    for (let y = 60; y < 170; y++) row(y, 100 - half(y), 100 + half(y), 12);
+    for (let y = 170; y < 300; y++) {
+      row(y, 70, 98, 16);
+      row(y, 102, 130, 14);
+    }
+    const joints = new Float32Array(JOINT_COUNT * 3);
+    const set = (j: number, x: number, y: number) => joints.set([x, y, 1], j * 3);
+    set(0, 100, 35); set(1, 100, 62);
+    set(2, 72, 62); set(3, 50, 120); set(4, 45, 170);
+    set(5, 128, 62); set(6, 150, 120); set(7, 155, 170);
+    set(8, 85, 165); set(9, 85, 230); set(10, 85, 295);
+    set(11, 115, 165); set(12, 115, 230); set(13, 115, 295);
+    const f = bodyFields({ w, h, person, labels, joints });
+    const frac = (y: number) => f.torso[(y * w + Math.round(100 + half(y)) - 1) * 2] / half(y);
+    expect(frac(110)).toBeGreaterThan(0.05);
+    expect(frac(110)).toBeGreaterThanOrEqual(0.9 * frac(160));
+  });
+});
+
 describe("arm joints by side", () => {
   it("mirrors an elbow or wrist BodyPix put on the other side of the body", () => {
     const J = new Float32Array(JOINT_COUNT * 3);
