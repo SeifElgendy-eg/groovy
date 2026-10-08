@@ -177,9 +177,12 @@ export class Stillness {
   }
 }
 
-/** Legs are slimmed only when both knees and ankles are clearly in the picture. */
+/**
+ * Legs are slimmed only when both knees are clearly in the picture (the thighs and knees; the calves
+ * too when the ankles are in it as well, see field.ts).
+ */
 export function legsVisible(J: ArrayLike<number>, w: number, h: number): boolean {
-  return [R_KNEE, R_ANK, L_KNEE, L_ANK].every((i) => {
+  return [R_KNEE, L_KNEE].every((i) => {
     const px = J[i * 3], py = J[i * 3 + 1];
     return J[i * 3 + 2] >= 0.5 && px >= 0.01 * w && px <= 0.99 * w && py >= 0.01 * h && py <= 0.98 * h;
   });

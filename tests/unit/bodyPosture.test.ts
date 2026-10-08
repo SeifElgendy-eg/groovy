@@ -2,7 +2,7 @@
 // portrait frames, plus the stillness timer, the legs-visible test and arms in front of the body.
 import { describe, expect, it } from "vitest";
 import { checkPosture, legsVisible, Stillness } from "../../src/effects/body/posture";
-import { frontOfBody } from "../../src/effects/body/field";
+import { anklesSeen, frontOfBody } from "../../src/effects/body/field";
 
 /** Body points (OpenPose order) of a person standing in the given pose, in a w x h frame. */
 function person(
@@ -113,12 +113,17 @@ describe("stillness", () => {
 });
 
 describe("legs visible", () => {
-  it("needs both knees and ankles inside the picture", () => {
+  it("needs both knees inside the picture; the ankles only for the calves", () => {
     const J = person(...L);
     expect(legsVisible(J, ...L)).toBe(true);
+    expect(anklesSeen(J, ...L)).toBe(true);
     const cut = J.slice();
-    cut[10 * 3 + 1] = 0.995 * L[1];
-    expect(legsVisible(cut, ...L)).toBe(false);
+    cut[10 * 3 + 1] = 0.995 * L[1]; // an ankle out of the picture: thighs and knees only
+    expect(legsVisible(cut, ...L)).toBe(true);
+    expect(anklesSeen(cut, ...L)).toBe(false);
+    const knee = J.slice();
+    knee[9 * 3 + 1] = 0.995 * L[1];
+    expect(legsVisible(knee, ...L)).toBe(false);
     const unsure = J.slice();
     unsure[12 * 3 + 2] = 0.3;
     expect(legsVisible(unsure, ...L)).toBe(false);

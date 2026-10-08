@@ -2,7 +2,7 @@
 // movement fields, so the page stays responsive.
 import { expose, transfer } from "comlink";
 import * as ort from "onnxruntime-web/wasm";
-import { decodeJoints, decodeParts, resizeMask, toInput, type Grid } from "./bodypix";
+import { decodeJoints, decodeParts, resizeMask, resizeRGB, toInput, type Grid } from "./bodypix";
 import { bodyFields, type BodyFields } from "./field";
 
 export interface BodyJob {
@@ -76,7 +76,8 @@ const api = {
     const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh);
     const labels = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, person);
     for (const t of Object.values(out)) t.dispose();
-    const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints });
+    const rgb = resizeRGB(job.input, job.W, job.H, job.ww, job.wh);
+    const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
     const r: BodyResult = { ...f, joints, ms: { model: t1 - t0, fields: performance.now() - t1 } };
     return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer]);
   },

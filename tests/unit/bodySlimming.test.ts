@@ -1,7 +1,7 @@
 // Body slimming: the helpers it is built on, BodyPix output decoding, and the movement fields'
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
-import { blur, bodyFields, distanceTransform, JOINT_COUNT, jointsBySide, runsOf, sstep } from "../../src/effects/body/field";
+import { blur, bodyFields, distanceTransform, growHands, JOINT_COUNT, jointsBySide, runsOf, sstep } from "../../src/effects/body/field";
 import { decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
@@ -155,5 +155,26 @@ describe("arm joints by side", () => {
     expect(out[4 * 3]).toBeCloseTo(70, 5); // mirrored across the centre (x = 100)
     expect(out[3 * 3]).toBe(70);
     expect(out[7 * 3]).toBe(135);
+  });
+});
+
+describe("whole hands", () => {
+  it("gives fingers lying on the thigh the hand's part, not the leggings around them", () => {
+    const w = 60, h = 80, sw = 40;
+    const m = new Uint8Array(w * h).fill(1);
+    const labels = new Uint8Array(w * h).fill(16); // a thigh
+    const rgb = new Uint8ClampedArray(w * h * 3).fill(20); // dark leggings
+    const skin = (x: number, y: number) => rgb.set([200, 150, 120], (y * w + x) * 3);
+    for (let y = 20; y < 30; y++) for (let x = 25; x < 35; x++) { labels[y * w + x] = 11; skin(x, y); } // the palm
+    for (let y = 30; y < 40; y++) for (let x = 27; x < 33; x++) skin(x, y); // the fingers, labelled thigh
+    const J = new Float32Array(JOINT_COUNT * 3);
+    J.set([30, 2, 0.9], 3 * 3); // elbow above
+    J.set([30, 18, 0.9], 4 * 3); // wrist
+    J.set([-100, -100, 0.9], 7 * 3); // the other wrist, far away
+    growHands(labels, m, rgb, w, h, J, sw);
+    expect(labels[35 * w + 30]).toBe(11); // a finger
+    expect(labels[35 * w + 24]).toBe(16); // leggings beside the fingers
+    expect(labels[10 * w + 30]).toBe(16); // above the wrist: not the hand
+    expect(labels[60 * w + 30]).toBe(16); // far below: not the hand
   });
 });
