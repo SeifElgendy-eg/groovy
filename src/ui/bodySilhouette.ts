@@ -11,8 +11,9 @@
 // 0.62, hip joint 0.51, fingertips 0.37, bideltoid breadth 0.28, hip breadth 0.21, head 0.13;
 // knee 0.29, crotch 0.47 and waist 0.62 up from the usual body-segment ratios; waist about 0.85 of
 // the hip width (between typical male and female shapes). The height is 508 units (5 to 513).
-// The drawn figure is widened by GUIDE_ROOM so it is forgiving. Only the right half is written out (top of the head down to the
-// crotch); the left is its mirror image, so the figure is exactly symmetric.
+// The drawn figure is widened by GUIDE_ROOM so it is forgiving, keeping the arm angle. Only the
+// right half is written out (top of the head down to the crotch); the left is its mirror image, so
+// the figure is exactly symmetric.
 
 /**
  * Sideways room: the figure is drawn this much wider than the average proportions below, so people
@@ -24,32 +25,49 @@ export const GUIDE_ROOM = 1.15;
 export const GUIDE_VIEWBOX = { w: 272, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
 
-/** The points below are written around x = 120; widen them about the guide's centre. */
-const DESIGN_CENTRE_X = 120;
-const widen = ([x, y]: readonly [number, number]): readonly [number, number] => [
-  GUIDE_CENTRE_X + (x - DESIGN_CENTRE_X) * GUIDE_ROOM,
-  y,
-];
-
 type Pt = readonly [number, number];
 
+/** The points below are written around x = 120. */
+const DESIGN_CENTRE_X = 120;
+/** Widen a body point about the guide's centre. */
+const widen = ([x, y]: Pt): Pt => [GUIDE_CENTRE_X + (x - DESIGN_CENTRE_X) * GUIDE_ROOM, y];
+
+/** The arm's centre line, shoulder joint to fingertips (~13 degrees out from vertical). */
+const ARM_FROM: Pt = [178, 100], ARM_TO: Pt = [229, 318];
 /**
- * Right half, clockwise from the top of the head: head, ear, neck, shoulder, outside of the arm,
- * hand, inside of the arm, armpit, side of the body, outside of the leg, foot, inside of the leg,
- * up to the crotch on the centre line.
+ * Widen an arm point: the arm moves out with the shoulder and gets GUIDE_ROOM thicker across, but
+ * keeps its angle (stretching it sideways like the body would splay it further out).
  */
-const RIGHT: Pt[] = [
-  // head (~0.13 of the height) and neck
+function widenArm([x, y]: Pt): Pt {
+  const len = Math.hypot(ARM_TO[0] - ARM_FROM[0], ARM_TO[1] - ARM_FROM[1]);
+  const ux = (ARM_TO[0] - ARM_FROM[0]) / len, uy = (ARM_TO[1] - ARM_FROM[1]) / len;
+  const along = (x - ARM_FROM[0]) * ux + (y - ARM_FROM[1]) * uy;
+  const across = (x - ARM_FROM[0]) * -uy + (y - ARM_FROM[1]) * ux;
+  const [sx, sy] = widen(ARM_FROM);
+  return [sx + along * ux - across * GUIDE_ROOM * uy, sy + along * uy + across * GUIDE_ROOM * ux];
+}
+
+/** Right half, top of the head to the shoulder: head (~0.13 of the height), neck, shoulder line. */
+const HEAD: Pt[] = [
   [120, 5], [133, 7], [142, 15], [145, 28], [145, 42], [142, 55], [136, 66], [130, 73], [133, 80],
-  // shoulder line (acromion ~0.82 of the height up), deltoid (~0.28 of the height across)
-  [138, 86], [152, 90], [168, 93], [182, 98], [191, 106], [195, 118],
-  // outside of the arm, ~13 degrees out: elbow ~0.62 up, wrist, hand (fingertips ~0.37 up)
+  // shoulder line (acromion ~0.82 of the height up)
+  [138, 86], [152, 90], [168, 93],
+];
+
+/** The arm: outside from the deltoid (~0.28 of the height across), hand, inside up to the armpit. */
+const ARM: Pt[] = [
+  [182, 98], [191, 106], [195, 118],
+  // outside of the arm: elbow ~0.62 up, wrist, hand (fingertips ~0.37 up)
   [199, 135], [204, 155], [209, 174], [214, 191], [218, 210], [221, 230], [224, 250], [227, 268],
   [232, 282], [236, 295], [235, 308], [230, 318], [223, 320], [216, 312], [213, 300],
   // inside of the arm up to the armpit, a gap to the body that widens toward the hand
   [210, 285], [208, 272], [204, 254], [200, 236], [195, 217], [188, 199], [183, 182], [179, 165],
   [175, 150], [170, 140],
-  // side of the body: chest, waist (~0.62 up, ~0.85 of the hip width), hips (~0.21 across)
+];
+
+/** Side of the body, the leg and foot, inside of the leg up to the crotch on the centre line. */
+const BODY: Pt[] = [
+  // chest, waist (~0.62 up, ~0.85 of the hip width), hips (~0.21 across)
   [167, 152], [166, 170], [165, 190], [165, 205], [167, 222], [170, 238], [173, 254],
   // outside of the leg: thigh, knee (~0.29 up), calf, ankle, foot
   [172, 272], [170, 295], [166, 322], [162, 346], [159, 368], [161, 390], [162, 412], [159, 440],
@@ -64,7 +82,7 @@ const round = (v: number) => Math.round(v * 100) / 100;
 
 /** The closed outline: a smooth closed Catmull-Rom curve through the right half and its mirror. */
 export function silhouettePath(): string {
-  const right = RIGHT.map(widen);
+  const right = [...HEAD.map(widen), ...ARM.map(widenArm), ...BODY.map(widen)];
   const pts: Pt[] = [...right, ...right.slice(1, -1).reverse().map(mirror)];
   const n = pts.length;
   let d = `M${round(pts[0][0])} ${round(pts[0][1])}`;
