@@ -10,12 +10,26 @@
 // adult anthropometry, NC State Ergonomics Center summary tables): shoulder height 0.82, elbow
 // 0.62, hip joint 0.51, fingertips 0.37, bideltoid breadth 0.28, hip breadth 0.21, head 0.13;
 // knee 0.29, crotch 0.47 and waist 0.62 up from the usual body-segment ratios; waist about 0.85 of
-// the hip width (between typical male and female shapes). The height is 508 units (5 to 513). Only the right half is written out (top of the head down to the
+// the hip width (between typical male and female shapes). The height is 508 units (5 to 513).
+// The drawn figure is widened by GUIDE_ROOM so it is forgiving. Only the right half is written out (top of the head down to the
 // crotch); the left is its mirror image, so the figure is exactly symmetric.
 
-/** SVG viewBox of the guide. */
-export const GUIDE_VIEWBOX = { w: 240, h: 530 } as const;
+/**
+ * Sideways room: the figure is drawn this much wider than the average proportions below, so people
+ * of most builds fit inside it easily (the outline is a pose cue, not a measurement).
+ */
+export const GUIDE_ROOM = 1.15;
+
+/** SVG viewBox of the guide (wide enough for the widened figure). */
+export const GUIDE_VIEWBOX = { w: 272, h: 530 } as const;
 export const GUIDE_CENTRE_X = GUIDE_VIEWBOX.w / 2;
+
+/** The points below are written around x = 120; widen them about the guide's centre. */
+const DESIGN_CENTRE_X = 120;
+const widen = ([x, y]: readonly [number, number]): readonly [number, number] => [
+  GUIDE_CENTRE_X + (x - DESIGN_CENTRE_X) * GUIDE_ROOM,
+  y,
+];
 
 type Pt = readonly [number, number];
 
@@ -50,7 +64,8 @@ const round = (v: number) => Math.round(v * 100) / 100;
 
 /** The closed outline: a smooth closed Catmull-Rom curve through the right half and its mirror. */
 export function silhouettePath(): string {
-  const pts: Pt[] = [...RIGHT, ...RIGHT.slice(1, -1).reverse().map(mirror)];
+  const right = RIGHT.map(widen);
+  const pts: Pt[] = [...right, ...right.slice(1, -1).reverse().map(mirror)];
   const n = pts.length;
   let d = `M${round(pts[0][0])} ${round(pts[0][1])}`;
   for (let i = 0; i < n; i++) {
@@ -63,4 +78,4 @@ export function silhouettePath(): string {
 }
 
 /** Where the feet stand: a ring centred under the two feet. */
-export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 84, ry: 12 } as const;
+export const FEET_RING = { cx: GUIDE_CENTRE_X, cy: 516, rx: 96, ry: 12 } as const;
