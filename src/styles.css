@@ -703,6 +703,7 @@ button:focus-visible {
 }
 .body-guide svg {
   display: block;
+  filter: drop-shadow(0 0 2px rgba(20, 8, 30, 0.85)); /* outline readable on a white wall too */
   width: 100%;
   height: 100%;
   overflow: visible;
