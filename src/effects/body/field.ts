@@ -273,10 +273,13 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number): Floa
   const kneeY = (jy(9) + jy(12)) / 2, ankY = (jy(10) + jy(13)) / 2;
   const thigh = Math.max(kneeY - F.hip[1], 0.3 * tl);
   const crotch = F.hip[1] + 0.15 * thigh;
+  // Strength down the torso: a little over the chest, the same over the whole bust (a strength
+  // that grows down across the bust pulls its lower curve in more than its upper one and makes it
+  // pointed), then growing below the bust to full at the waist.
   const gt = (y: number) =>
     y >= F.neck[1] + 0.12 * tl
-      ? 0.25 + 0.75 * sstep(F.neck[1] + 0.25 * tl, F.neck[1] + 0.75 * tl, y)
-      : 0.25 * sstep(F.neck[1], F.neck[1] + 0.12 * tl, y);
+      ? 0.3 + 0.7 * sstep(F.neck[1] + 0.5 * tl, F.neck[1] + 0.8 * tl, y)
+      : 0.3 * sstep(F.neck[1], F.neck[1] + 0.12 * tl, y);
   const gl = (y: number) => (1 - 0.5 * sstep(kneeY - 0.2 * thigh, kneeY + 0.3 * thigh, y)) * (1 - sstep(ankY - 0.35 * thigh, ankY, y));
   const nomT = FULL.torso * buildK, nomL = FULL.legs * buildK; // 100% strengths, for the fall-off widths
   const row = new Float32Array(w);
@@ -587,6 +590,40 @@ export function frontOfBody(arm: Float32Array, body: Uint8Array, w: number, h: n
   return out;
 }
 
+/**
+ * Give each hand (BodyPix parts 10 and 11, a little grown) one movement, the average over it, in
+ * the field `f` (movement at strength 1; `full`: the strength at 100%). Applied wherever the hand
+ * is on its way at up to 100%.
+ */
+export function rigidHands(f: { dx: Float32Array; dy: Float32Array }, labels: Uint8Array, m: Uint8Array, w: number, h: number, sw: number, full: number): void {
+  const n = w * h;
+  for (const id of [10, 11]) {
+    const hand = new Float32Array(n);
+    let c = 0, vx = 0, vy = 0;
+    for (let i = 0; i < n; i++)
+      if (m[i] && labels[i] === id) {
+        hand[i] = 1;
+        c++;
+        vx += f.dx[i];
+        vy += f.dy[i];
+      }
+    if (c < 10) continue;
+    vx /= c;
+    vy /= c;
+    // a soft hand mask, grown a little: covers the hand's edge, blends into the wrist
+    const soft = blur(hand, w, h, 0.025 * sw + 1);
+    const at = (x: number, y: number) => Math.min(1, sample(soft, w, h, x, y) * 2.5);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const k = Math.max(at(x, y), at(x + 0.5 * full * vx, y + 0.5 * full * vy), at(x + full * vx, y + full * vy));
+        if (!k) continue;
+        f.dx[i] += (vx - f.dx[i]) * k;
+        f.dy[i] += (vy - f.dy[i]) * k;
+      }
+  }
+}
+
 /** Arm joints (elbows, wrists) on the side of their own shoulder: a joint on the wrong side is mirrored across the body. */
 export function jointsBySide(J: Float32Array): Float32Array {
   const out = Float32Array.from(J);
@@ -730,6 +767,11 @@ export function bodyFields(input: BodyInput): BodyFields {
     torso: unit(null, null, torso, swingT),
     legs: unit(null, null, legs, swingL),
   };
+  // Hands move as a whole: every pixel of a hand gets the hand's average movement (no part of a hand
+  // is narrowed, stretched or bent), blending into the wrist.
+  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK);
+  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK);
+  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK);
 
   // The background beside the person follows the person's edge movement smoothly and fades out
   // with distance. The fade width is that of the full (100%) movement, so it is the same for every
