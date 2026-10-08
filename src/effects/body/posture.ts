@@ -1,9 +1,11 @@
 // Posture check for body shaping: is the person standing so the slimming works best? Pure
 // functions on BodyPix body points (OpenPose order, see field.ts JOINT), unit-tested.
 //
-// The best pose (measured on a set of full-body photos): facing the camera, arms hanging about
-// 15-25 degrees out from the body with a clear gap between the hands and the hips, feet about
-// hip-width apart, the whole body in view. Arms at the sides, hands on the hips or in pockets hide
+// The best pose (measured on a set of full-body photos; the cleanest, strongest results all had
+// it): facing the camera, arms hanging 17-20 degrees out (shoulder point to wrist point) with a gap
+// of about half a shoulder width between the hands and the hips, feet hip-width apart (0.7-1x the
+// hip joints' distance), the whole body filling most of the frame's height. The limits below keep
+// people close to that while staying easy to meet. Arms at the sides, hands on the hips or in pockets hide
 // the waist and make the arms and the body move into each other; feet together merge the legs.
 //
 // All the measures are relative to the body itself (its height and shoulder width), not to the
@@ -23,6 +25,7 @@ export type PostureIssue =
   | "armsDown"
   | "armsOut"
   | "armsLower"
+  | "armsIn"
   | "feetApart"
   | "feetCloser";
 
@@ -43,10 +46,11 @@ export const POSTURE_MESSAGES: Record<PostureIssue, string> = {
   faceCamera: "Turn to face the camera straight on.",
   level: "Stand up straight with your shoulders level.",
   armsDown: "Let your arms hang down: hands off your hips and out of your pockets.",
-  armsOut: "Move your arms slightly away from your body.",
-  armsLower: "Lower your arms a little, about a hand's width from your hips.",
+  armsOut: "Move your arms a little away from your body: a hand's width between your hands and hips.",
+  armsLower: "Lower your arms and let them hang by your sides.",
+  armsIn: "Bring your arms a little closer to your body, like the outline.",
   feetApart: "Place your feet a little apart, about hip-width.",
-  feetCloser: "Bring your feet a little closer together.",
+  feetCloser: "Bring your feet a little closer, about hip-width apart.",
 };
 
 export const POSTURE_OK = "Great pose. Hold still…";
@@ -58,20 +62,20 @@ export const POSTURE = {
   minShoulderRatio: 0.16,
   /** Shoulder height difference / shoulder width above this: leaning. */
   maxTilt: 0.25,
-  /** Body height / frame height below this: too far (camera only). */
-  minHeightRatio: 0.5,
+  /** Body height (nose to ankles) / frame height below this: too far, the body would be small (camera only). */
+  minHeightRatio: 0.6,
   /** Hip-centre offset from the frame centre / frame width above this (camera only). */
-  maxOffCentre: 0.15,
-  /** Gap between wrist and hip, sideways, in shoulder widths: at least this. */
-  minHandGap: 0.42,
-  /** Arm angle from vertical (shoulder to wrist), degrees: at least / at most. */
-  minArmAngle: 9,
-  maxArmAngle: 45,
+  maxOffCentre: 0.1,
+  /** Gap between wrist and hip, sideways, in shoulder widths: at least this (best ~0.55-0.7). */
+  minHandGap: 0.48,
+  /** Arm angle from vertical (shoulder to wrist), degrees: at least / at most (best 17-20). */
+  minArmAngle: 12,
+  maxArmAngle: 30,
   /** Wrist height relative to the hips, in body heights: hands this far above the hips are on the hips or in pockets. */
   maxWristAboveHip: 0.06,
-  /** Ankle distance / hip distance: at least / at most. */
-  minFeet: 0.55,
-  maxFeet: 2.4,
+  /** Ankle distance / hip distance: at least / at most (best 0.7-1). */
+  minFeet: 0.6,
+  maxFeet: 1.6,
 } as const;
 
 const result = (issue: PostureIssue | null): PostureResult => ({
@@ -111,8 +115,8 @@ export function checkPosture(J: ArrayLike<number>, w: number, h: number, live: b
   ] as const;
   for (const [S, E, W] of arms) {
     if (s(W) < POSTURE.minScore || s(E) < POSTURE.minScore) return result("notVisible");
-    // raised or held out wide
-    if (y(W) < y(S) || armAngle(S, W) > POSTURE.maxArmAngle) return result("armsLower");
+    if (y(W) < y(S) || armAngle(S, W) > 60) return result("armsLower"); // raised
+    if (armAngle(S, W) > POSTURE.maxArmAngle) return result("armsIn"); // held out wide
     if (y(W) < hipY - POSTURE.maxWristAboveHip * H) return result("armsDown");
   }
   for (const [S, , W, Hp] of arms) {

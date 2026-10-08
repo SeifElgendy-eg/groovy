@@ -58,8 +58,9 @@ describe("posture check", () => {
     expect(checkPosture(person(...L, { armDeg: 2 }), ...L, true).issue).toBe("armsOut");
   });
 
-  it("asks to lower arms held out wide", () => {
-    expect(checkPosture(person(...L, { armDeg: 60 }), ...L, true).issue).toBe("armsLower");
+  it("asks to bring arms held out wide closer, and to lower raised arms", () => {
+    expect(checkPosture(person(...L, { armDeg: 40 }), ...L, true).issue).toBe("armsIn");
+    expect(checkPosture(person(...L, { armDeg: 75 }), ...L, true).issue).toBe("armsLower");
   });
 
   it("catches hands on the hips or in pockets", () => {
@@ -72,7 +73,7 @@ describe("posture check", () => {
 
   it("checks the feet", () => {
     expect(checkPosture(person(...L, { feet: 0.2 }), ...L, true).issue).toBe("feetApart");
-    expect(checkPosture(person(...L, { feet: 3 }), ...L, true).issue).toBe("feetCloser");
+    expect(checkPosture(person(...L, { feet: 2 }), ...L, true).issue).toBe("feetCloser");
   });
 
   it("asks to step back when the head or feet are cut off", () => {
@@ -80,10 +81,10 @@ describe("posture check", () => {
   });
 
   it("checks distance and centring only on the live camera", () => {
-    const far = person(...L, { height: 0.4 });
+    const far = person(...L, { height: 0.5 });
     expect(checkPosture(far, ...L, true).issue).toBe("closer");
     expect(checkPosture(far, ...L, false).ok).toBe(true);
-    const aside = person(...L, { cx: 0.8 * L[0] });
+    const aside = person(...L, { cx: 0.65 * L[0] });
     expect(checkPosture(aside, ...L, true).issue).toBe("centre");
     expect(checkPosture(aside, ...L, false).ok).toBe(true);
   });
