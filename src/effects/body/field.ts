@@ -331,7 +331,7 @@ interface ArmRest {
   arm: Float32Array;
 }
 
-function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?: ArmRest, hands?: Uint8Array): Float32Array {
+function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?: ArmRest): Float32Array {
   const { w, h, sw, jy } = F;
   const dx = new Float32Array(w * h);
   const tl = F.hip[1] - F.neck[1];
@@ -407,7 +407,10 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
         }
         if (!isFinite(a) || !isFinite(b)) [a, b] = main;
       }
-      runs.push({ a, b, c: xc, g: gt(y) * (1 - beta) });
+      // not standing upright (a knee raised, crouching): the hips and whatever is beside them (a
+      // raised thigh) are left as they are, only the waist slims
+      const hipsK = 1 - (1 - upright) * sstep(waist, F.hip[1], y);
+      runs.push({ a, b, c: xc, g: gt(y) * (1 - beta) * hipsK });
     }
     if (legs && y >= crotch) {
       const g = beta * gl(y);
@@ -427,28 +430,14 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     const first = runs[0], last = runs[runs.length - 1];
     eL[y] = keep(first.g * (first.a - first.c), y);
     eR[y] = keep(last.g * (last.b - last.c), h + y);
-    // A hand against the body's side hides its edge there: the outline seen is the hand, which
-    // moves as the arm does. The edge below (or above) the hand follows on smoothly from the hand,
-    // instead of stepping in under it (a notch in a coat or shorts right below the hand).
-    if (rest && hands) {
-      const reach = Math.max(2, Math.round(0.04 * sw)), o = y * w;
-      for (let x = Math.max(0, Math.floor(first.a) - reach); x < first.a; x++) if (hands[o + x]) {
-        eL[y] = rest.arm[y];
-        break;
-      }
-      for (let x = Math.ceil(last.b); x < Math.min(w, last.b + reach); x++) if (hands[o + x]) {
-        eR[y] = rest.arm[h + y];
-        break;
-      }
-    }
     has[y] = 1;
   }
   // The outer edges' movement, smoothed down the body: where the edge seen in the photo jumps (a
-  // hand or forearm hides part of a coat, a hip or a waist), the movement would jump with it and
-  // leave a step or a notch in the outline below the hand.
+  // cardigan's or a shirt's hem, a hand or forearm hiding part of a coat), the movement would jump
+  // with it and leave a step or a notch in the outline. A body slims smoothly from row to row.
   const smoothEdge = (e: Float32Array) => {
     const out = Float32Array.from(e);
-    const s = Math.max(1, 0.08 * sw), r = Math.ceil(2.5 * s);
+    const s = Math.max(1, 0.15 * sw), r = Math.ceil(2.5 * s);
     for (let y = 0; y < h; y++) {
       if (!has[y]) continue;
       let num = 0, den = 0;
@@ -801,11 +790,24 @@ export function frontOfBody(arm: Float32Array, body: Uint8Array, w: number, h: n
 }
 
 /**
- * Give each hand (BodyPix parts 10 and 11, a little grown) one movement, the average over it, in
- * the field `f` (movement at strength 1; `full`: the strength at 100%). Applied wherever the hand
- * is on its way at up to 100%.
+ * Give each hand (BodyPix parts 10 and 11, a little grown) one movement in the field `f` (movement
+ * at strength 1; `full`: the strength at 100%): the average over the hand, or, for a hand against
+ * the body (on the hip, the thigh, a coat's side), the movement of the body around it (`bodyDx`,
+ * the body's own field; `body`: the body mask): the hand rests on it and goes with it. (Kept where
+ * the arm puts it, the body slid away under the hand and left a notch below it.) Applied wherever
+ * the hand is on its way at up to 100%.
  */
-export function rigidHands(f: { dx: Float32Array; dy: Float32Array }, labels: Uint8Array, m: Uint8Array, w: number, h: number, sw: number, full: number): void {
+export function rigidHands(
+  f: { dx: Float32Array; dy: Float32Array },
+  labels: Uint8Array,
+  m: Uint8Array,
+  w: number,
+  h: number,
+  sw: number,
+  full: number,
+  body?: Uint8Array,
+  bodyDx?: Float32Array | null,
+): void {
   const n = w * h;
   for (const id of [10, 11]) {
     const hand = new Float32Array(n);
@@ -820,6 +822,24 @@ export function rigidHands(f: { dx: Float32Array; dy: Float32Array }, labels: Ui
     if (c < 10) continue;
     vx /= c;
     vy /= c;
+    if (body) {
+      // the ring around the hand: how much of it is body, and the body's movement there
+      const ring = blur(hand, w, h, 0.03 * sw + 1);
+      let rc = 0, bc = 0, bx = 0;
+      for (let i = 0; i < n; i++) {
+        if (hand[i] || ring[i] < 0.03) continue;
+        rc++;
+        if (body[i] && !(labels[i] === 10 || labels[i] === 11)) {
+          bc++;
+          bx += bodyDx ? bodyDx[i] : 0;
+        }
+      }
+      const touch = rc ? sstep(0.1, 0.3, bc / rc) : 0;
+      if (touch > 0) {
+        vx += touch * (bx / bc - vx);
+        vy *= 1 - touch;
+      }
+    }
     // a soft hand mask, grown a little: covers the hand's edge, blends into the wrist
     const soft = blur(hand, w, h, 0.025 * sw + 1);
     const at = (x: number, y: number) => Math.min(1, sample(soft, w, h, x, y) * 2.5);
@@ -1003,15 +1023,13 @@ export function bodyFields(input: BodyInput): BodyFields {
     body[i] = 1;
     armHard[i] = 0;
   }
-  const handMask = new Uint8Array(n);
-  for (let i = 0; i < n; i++) handMask[i] = m[i] && (labels[i] === 10 || labels[i] === 11) && !body[i] ? 1 : 0;
   const torso0 = bodyField(body, F, false, buildK);
   const legs0 = bodyField(body, F, true, buildK);
   const arm = armField(input, labels, F, body);
   const swingT = armSwing(input, labels, body, F, torso0, false, FULL.torso * buildK);
-  const torso = bodyField(body, F, false, buildK, swingT.rest, handMask);
+  const torso = bodyField(body, F, false, buildK, swingT.rest);
   const swingL = armSwing(input, labels, body, F, legs0, true, FULL.legs * buildK);
-  const legs = bodyField(body, F, true, buildK, swingL.rest, handMask);
+  const legs = bodyField(body, F, true, buildK, swingL.rest);
   // each pixel follows the arm's motion or the body's, softly blended at the arm's edge
   const wa = blur(armHard, w, h, 0.03 * sw + 1);
   for (let i = 0; i < n; i++) wa[i] = Math.min(1, wa[i] * 1.6);
@@ -1065,9 +1083,9 @@ export function bodyFields(input: BodyInput): BodyFields {
   };
   // Hands move as a whole: every pixel of a hand gets the hand's average movement (no part of a hand
   // is narrowed, stretched or bent), blending into the wrist.
-  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK);
-  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK);
-  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK);
+  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK, body, null);
+  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK, body, torso);
+  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK, body, legs);
 
   // The background beside the person follows the person's edge movement smoothly and fades out
   // with distance. The fade width is that of the full (100%) movement, so it is the same for every
