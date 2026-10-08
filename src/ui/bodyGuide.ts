@@ -53,6 +53,10 @@ function buildTips(): HTMLDivElement {
   card.hidden = true;
   const title = document.createElement("strong");
   title.textContent = "How to stand";
+  const example = document.createElement("img");
+  example.className = "body-guide-example";
+  example.src = "./images/body-pose-example.jpg";
+  example.alt = "Example: a man standing facing the camera, arms slightly away from his body, feet hip-width apart";
   const list = document.createElement("ol");
   for (const [head, detail] of STEPS) {
     const li = document.createElement("li");
@@ -65,7 +69,7 @@ function buildTips(): HTMLDivElement {
   }
   const note = document.createElement("p");
   note.textContent = "Close-fitting clothes give the best result.";
-  card.append(title, list, note);
+  card.append(title, example, list, note);
   return card;
 }
 
