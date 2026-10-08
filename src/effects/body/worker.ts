@@ -50,6 +50,20 @@ const api = {
   async warmUp(base: string): Promise<void> {
     await load(base);
   },
+  /**
+   * Body points only (the live posture check): RGBA pixels at W x H (16k + 1 sides) -> 18 x
+   * [x, y, score] in those pixels.
+   */
+  async pose(base: string, input: Uint8ClampedArray, W: number, H: number): Promise<Float32Array> {
+    const s = await load(base);
+    const feeds = { input: new ort.Tensor("float32", toInput(input, W, H), [1, H, W, 3]) };
+    const out = await s.run(feeds, ["heatmaps", "short_offsets"]);
+    const heat = out.heatmaps;
+    const g: Grid = { gw: heat.dims[2], gh: heat.dims[1], W, H };
+    const joints = decodeJoints(heat.data as Float32Array, out.short_offsets.data as Float32Array, g, W, H);
+    for (const t of Object.values(out)) t.dispose();
+    return transfer(joints, [joints.buffer]);
+  },
   async analyse(job: BodyJob): Promise<BodyResult> {
     const s = await load(job.base);
     const t0 = performance.now();

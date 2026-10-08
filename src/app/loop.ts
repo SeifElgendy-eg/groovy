@@ -6,6 +6,7 @@ import { cameraNeedsEffect, renderAll } from "./render";
 import { state } from "./state";
 import { cameraTuning } from "./cameraTuning";
 import { sourceCanvas } from "./frames";
+import { bodyCoachTick } from "./bodyCoach";
 
 /**
  * Live analysis rate. The live view only drives the capture guide (and the exposure meter); effects
@@ -58,6 +59,7 @@ async function tick(now: number): Promise<void> {
     if (!state.running || state.sourceMode !== "camera") return;
     renderAll();
   }
+  bodyCoachTick(now);
   if (now - perfWindowStart >= 1000) {
     perfBadge.textContent = cameraNeedsEffect()
       ? `PROC ${perf.frames} fps`

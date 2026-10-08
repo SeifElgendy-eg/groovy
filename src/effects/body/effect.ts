@@ -3,8 +3,12 @@
 import { wrap, type Remote } from "comlink";
 import { BODYPIX_LONG_SIDE, inputSide } from "./bodypix";
 import { FULL } from "./field";
+import { checkPosture, legsVisible, type PostureResult } from "./posture";
 import { BodyWarp, type Strengths } from "./warp";
 import type { BodyResult, BodyWorkerApi } from "./worker";
+
+/** Longest side of the image for the live posture check (body points only: small and quick). */
+const POSE_LONG_SIDE = 384;
 
 /** Longest side of the movement fields (they are smooth; the GPU applies them to the full photo). */
 const FIELD_LONG_SIDE = 800;
@@ -32,6 +36,12 @@ export class BodyEffect {
   failed = false;
   /** Timings of the last analysis (diagnostics). */
   lastMs: { model: number; fields: number } | null = null;
+  /** The legs are clearly in the photo (knees and ankles): otherwise they are left as they are. */
+  legs = true;
+  /** How the person stands in the analysed photo (advice only: the slimming runs anyway). */
+  posture: PostureResult | null = null;
+  private posing = false;
+  private poseCanvas: HTMLCanvasElement | null = null;
   private result: BodyResult | null = null;
   private worker: Worker | null = null;
   private api: Remote<BodyWorkerApi> | null = null;
@@ -62,6 +72,35 @@ export class BodyEffect {
     this.stop?.(new Error("cancelled"));
   }
 
+  /**
+   * Body points of a live frame (`source`, w x h) for the posture check, in that frame's pixels.
+   * Null while a photo is being analysed or the last check is still running.
+   */
+  async pose(source: CanvasImageSource, w: number, h: number): Promise<Float32Array | null> {
+    if (this.busy || this.posing || !w || !h) return null;
+    this.posing = true;
+    try {
+      const k = Math.min(1, POSE_LONG_SIDE / Math.max(w, h));
+      const W = inputSide(Math.round(w * k)), H = inputSide(Math.round(h * k));
+      const c = (this.poseCanvas ??= document.createElement("canvas"));
+      c.width = W;
+      c.height = H;
+      const cx = c.getContext("2d", { willReadFrequently: true })!;
+      cx.drawImage(source, 0, 0, W, H);
+      const J = await this.start().pose(document.baseURI, cx.getImageData(0, 0, W, H).data, W, H);
+      for (let i = 0; i < J.length; i += 3) {
+        J[i] *= w / W;
+        J[i + 1] *= h / H;
+      }
+      return J;
+    } catch (err) {
+      console.warn("posture check failed", err);
+      return null;
+    } finally {
+      this.posing = false;
+    }
+  }
+
   /** Analyse the photo (`frame`, photo size) with its person mask. Resolves true when ready. */
   async prepare(frame: HTMLCanvasElement, person: PersonMask): Promise<boolean> {
     this.dirty = false;
@@ -69,6 +108,8 @@ export class BodyEffect {
     this.ready = false;
     this.failed = false;
     this.result = null;
+    this.posture = null;
+    this.legs = true;
     this.warp.clear();
     try {
       const { width: w, height: h } = frame;
@@ -97,6 +138,8 @@ export class BodyEffect {
         return false;
       }
       this.result = r;
+      this.legs = legsVisible(r.joints, ww, wh);
+      this.posture = checkPosture(r.joints, ww, wh, false);
       this.warp.set(frame, r);
       this.ready = true;
       return true;
@@ -118,7 +161,7 @@ export class BodyEffect {
     return {
       arms: FULL.arms * k * s.overall * s.arms,
       torso: FULL.torso * k * s.overall * s.waist,
-      legs: FULL.legs * k * s.overall * s.legs,
+      legs: this.legs ? FULL.legs * k * s.overall * s.legs : 0,
     };
   }
 

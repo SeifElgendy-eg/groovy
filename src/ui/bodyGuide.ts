@@ -12,9 +12,9 @@ const CARD_MIN_SIDE = 190;
 
 const STEPS: [title: string, detail: string][] = [
   ["Face the camera", "Stand straight and look ahead."],
-  ["Arms slightly away", "Leave a small gap between your arms and your body."],
-  ["Feet a little apart", "Weight even, as in the outline."],
-  ["Whole body in the guide", "Keep your whole body roughly inside; a little extra space is okay."],
+  ["Arms slightly away", "Let them hang with about a hand's width between your hands and hips."],
+  ["Feet hip-width apart", "Weight even, as in the outline."],
+  ["Whole body in the guide", "Head to feet inside the outline; a little extra space is okay."],
 ];
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -76,8 +76,24 @@ hint.className = "face-guide-label body-guide-hint";
 hint.textContent = "Face the camera · arms slightly away · feet a little apart · whole body inside the outline";
 hint.hidden = true;
 
+/** Live posture advice (ui: top of the stage), from the posture check in app/bodyCoach.ts. */
+const coach = document.createElement("div");
+coach.className = "body-coach";
+coach.hidden = true;
+coach.setAttribute("role", "status");
+coach.setAttribute("aria-live", "polite");
+
 export function mountBodyGuide(): void {
-  dom.stageWrap.append(figure, tips, hint);
+  dom.stageWrap.append(figure, tips, hint, coach);
+}
+
+/** Show the live posture advice (`ok`: a good pose, the outline turns green), or hide it (null). */
+export function setBodyCoach(advice: { message: string; ok: boolean } | null): void {
+  coach.hidden = advice === null || figure.hidden;
+  figure.classList.toggle("pose-ok", !!advice?.ok);
+  if (!advice) return;
+  if (coach.textContent !== advice.message) coach.textContent = advice.message;
+  coach.classList.toggle("ok", advice.ok);
 }
 
 /** Size/position key of the last layout, so the per-frame calls do not touch the DOM needlessly. */
@@ -89,7 +105,8 @@ export function updateBodyGuide(active: boolean): void {
   stageWrap.classList.toggle("body-guide-on", active);
   if (!active) {
     stageWrap.classList.remove("body-guide-roomy");
-    figure.hidden = tips.hidden = hint.hidden = true;
+    figure.hidden = tips.hidden = hint.hidden = coach.hidden = true;
+    figure.classList.remove("pose-ok");
     lastKey = "";
     return;
   }

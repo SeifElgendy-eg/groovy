@@ -165,12 +165,25 @@ function endCountdown(): void {
   updateFaceGuide(state.facePoints); // the button goes back to its start label
 }
 
+/** The running countdown was started by the hands-free capture (not the button). */
+let autoStarted = false;
+
+/** Hands-free capture (app/bodyCoach.ts): count down `seconds`, then take the photo. */
+export function beginAutoCapture(seconds: number): void {
+  if (countdown || capture.busy || state.sourceMode !== "camera") return;
+  beginCountdown(seconds, true);
+}
+
+/** A hands-free countdown is running (the pose check may stop it if the pose breaks). */
+export const autoCaptureRunning = (): boolean => countdown !== null && autoStarted;
+
 /** Count down `seconds` on the stage, then take the photo. */
-function beginCountdown(seconds: number): void {
+function beginCountdown(seconds: number, auto = false): void {
+  autoStarted = auto;
   countdown = startCountdown(seconds, {
     onTick: (remaining) => {
       state.countdown = remaining;
-      showCountdown(remaining);
+      showCountdown(remaining, autoStarted);
       updateFaceGuide(state.facePoints);
     },
     onDone: () => {

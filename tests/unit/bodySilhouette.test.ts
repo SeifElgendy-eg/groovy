@@ -55,7 +55,7 @@ describe("body guide silhouette", () => {
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const width = Math.max(...xs) - Math.min(...xs);
     const height = Math.max(...ys) - Math.min(...ys);
-    expect(height / width).toBeGreaterThan(2.4);
+    expect(height / width).toBeGreaterThan(2); // widened for a forgiving fit (#38)
     expect(Math.min(...ys)).toBeLessThan(10);
   });
 });

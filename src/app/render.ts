@@ -154,7 +154,9 @@ function renderAcne(w: number, h: number): void {
 function renderBody(w: number, h: number): void {
   const status = dom.bodyStatus;
   if (state.sourceMode !== "photo") {
-    status.textContent = "Stand facing the camera with your whole body in view, then Take photo.";
+    status.textContent = dom.bodyHandsFree.checked
+      ? "Stand in the outline as shown and hold still: the photo is taken for you."
+      : "Stand in the outline as shown, then Take photo.";
     return;
   }
   const person = bodyPerson.mask;
@@ -189,7 +191,10 @@ function renderBody(w: number, h: number): void {
     status.textContent = "No full body found. Use a photo of the whole body, facing the camera.";
     return;
   }
-  status.textContent = "Compare Before and After to preview the weight loss.";
+  const notes = ["Compare Before and After to preview the weight loss."];
+  if (!body.legs) notes.push("The legs are not fully in the photo, so they are left as they are.");
+  if (body.posture && !body.posture.ok) notes.push(`For a better result next time: ${body.posture.message}`);
+  status.textContent = notes.join(" ");
   body.draw(ctx, w, h, settings);
 }
 

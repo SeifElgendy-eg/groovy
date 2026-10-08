@@ -511,6 +511,42 @@ function armSwing(input: BodyInput, labels: Uint8Array, body: Uint8Array, F: Fra
   return out;
 }
 
+/**
+ * Arm pixels with body on both sides along their row, each within `reach` (the arm is in front of
+ * the body there). Body counts only as a stretch of at least `minRun` pixels, so a few body-labelled
+ * pixels along an arm's outer edge do not make a hanging arm "in front".
+ */
+export function frontOfBody(arm: Float32Array, body: Uint8Array, w: number, h: number, reach: number, minRun: number): Uint8Array {
+  const out = new Uint8Array(w * h);
+  const solid = new Uint8Array(w);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    solid.fill(0);
+    for (let x = 0; x < w; ) {
+      if (!body[o + x]) {
+        x++;
+        continue;
+      }
+      let e = x;
+      while (e < w && body[o + e]) e++;
+      if (e - x >= minRun) solid.fill(1, x, e);
+      x = e;
+    }
+    let last = -Infinity; // last solid body pixel to the left
+    const leftAt = new Float32Array(w);
+    for (let x = 0; x < w; x++) {
+      if (solid[x]) last = x;
+      leftAt[x] = last;
+    }
+    let next = Infinity;
+    for (let x = w - 1; x >= 0; x--) {
+      if (solid[x]) next = x;
+      if (arm[o + x] && x - leftAt[x] <= reach && next - x <= reach) out[o + x] = 1;
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- everything together
 
 /** The three unit fields (arms, torso = waist & hips, legs) and the build factor. */
@@ -540,6 +576,14 @@ export function bodyFields(input: BodyInput): BodyFields {
   for (let i = 0; i < n; i++) {
     armHard[i] = m[i] && isArmPart(labels[i]) ? 1 : 0;
     body[i] = P[i] - armHard[i] > 0.5 ? 1 : 0;
+  }
+  // Arm pixels in front of the body (a hand in a pocket or on the hip, a forearm across the belly,
+  // crossed arms) have body on both sides along their row: they move with the body, else the body
+  // slides under them and smears them.
+  const front = frontOfBody(armHard, body, w, h, 0.6 * sw, 0.15 * sw);
+  for (let i = 0; i < n; i++) if (front[i]) {
+    body[i] = 1;
+    armHard[i] = 0;
   }
   const torso = bodyField(body, F, false, buildK);
   const legs = bodyField(body, F, true, buildK);

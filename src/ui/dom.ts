@@ -34,6 +34,7 @@ export const dom = {
   bodyLegsSlider: el<HTMLInputElement>("bodyLegsSlider"),
   bodyLegsValue: el<HTMLElement>("bodyLegsValue"),
   bodyStatus: el<HTMLElement>("bodyStatus"),
+  bodyHandsFree: el<HTMLInputElement>("bodyHandsFree"),
   chooseBodyBtn: el<HTMLButtonElement>("chooseBodyBtn"),
   brightnessValue: el<HTMLElement>("brightnessValue"),
   cameraBtn: el<HTMLButtonElement>("cameraBtn"),
