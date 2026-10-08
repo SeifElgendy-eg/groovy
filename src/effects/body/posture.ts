@@ -11,6 +11,8 @@
 // All the measures are relative to the body itself (its height and shoulder width), not to the
 // frame, so they work in a landscape or a portrait camera alike.
 
+import { jointsBySide } from "./field";
+
 /** Body points used here (OpenPose order). */
 const NOSE = 0, R_SH = 2, R_EL = 3, R_WR = 4, L_SH = 5, L_EL = 6, L_WR = 7;
 const R_HIP = 8, R_KNEE = 9, R_ANK = 10, L_HIP = 11, L_KNEE = 12, L_ANK = 13;
@@ -88,9 +90,10 @@ const result = (issue: PostureIssue | null): PostureResult => ({
  * Check the pose from body points `J` (18 x [x, y, score], pixels of a w x h image). `live`: the
  * camera view (also checks the distance and that the person is centred).
  */
-export function checkPosture(J: ArrayLike<number>, w: number, h: number, live: boolean): PostureResult {
+export function checkPosture(J0: ArrayLike<number>, w: number, h: number, live: boolean): PostureResult {
+  if (J0.length < 54) return result("notVisible");
+  let J: ArrayLike<number> = J0;
   const x = (i: number) => J[i * 3], y = (i: number) => J[i * 3 + 1], s = (i: number) => J[i * 3 + 2];
-  if (J.length < 54) return result("notVisible");
   const needed = [NOSE, R_SH, L_SH, R_HIP, L_HIP, R_KNEE, L_KNEE, R_ANK, L_ANK];
   if (needed.some((i) => !(s(i) >= POSTURE.minScore) || !Number.isFinite(x(i) + y(i)))) return result("notVisible");
 
@@ -106,6 +109,8 @@ export function checkPosture(J: ArrayLike<number>, w: number, h: number, live: b
   const sw = Math.hypot(x(R_SH) - x(L_SH), y(R_SH) - y(L_SH));
   if (sw < POSTURE.minShoulderRatio * H) return result("faceCamera");
   if (Math.abs(y(R_SH) - y(L_SH)) > POSTURE.maxTilt * sw) return result("level");
+  // facing the camera: an elbow or wrist BodyPix put on the other side belongs to this side
+  J = jointsBySide(Float32Array.from(J0));
 
   // arms: hanging down (both checked first), then slightly out with a gap between hands and hips
   const armAngle = (S: number, W: number) => (Math.atan2(Math.abs(x(W) - x(S)), y(W) - y(S)) * 180) / Math.PI;

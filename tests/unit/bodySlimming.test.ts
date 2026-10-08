@@ -1,7 +1,7 @@
 // Body slimming: the helpers it is built on, BodyPix output decoding, and the movement fields'
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
-import { blur, bodyFields, distanceTransform, JOINT_COUNT, runsOf, sstep } from "../../src/effects/body/field";
+import { blur, bodyFields, distanceTransform, JOINT_COUNT, jointsBySide, runsOf, sstep } from "../../src/effects/body/field";
 import { decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
@@ -138,5 +138,22 @@ describe("movement fields on a drawn figure", () => {
     for (const field of [f.arms, f.torso, f.legs]) expect(Math.abs(dx(field, 5, 295))).toBeLessThan(1e-3);
     expect(f.build).toBeGreaterThanOrEqual(0.3);
     expect(f.build).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("arm joints by side", () => {
+  it("mirrors an elbow or wrist BodyPix put on the other side of the body", () => {
+    const J = new Float32Array(JOINT_COUNT * 3);
+    const set = (i: number, x: number, y: number) => J.set([x, y, 0.9], i * 3);
+    set(2, 80, 100); // right shoulder (image left)
+    set(5, 120, 100);
+    set(3, 70, 150);
+    set(4, 130, 200); // right wrist found on the left side
+    set(6, 130, 150);
+    set(7, 135, 200);
+    const out = jointsBySide(J);
+    expect(out[4 * 3]).toBeCloseTo(70, 5); // mirrored across the centre (x = 100)
+    expect(out[3 * 3]).toBe(70);
+    expect(out[7 * 3]).toBe(135);
   });
 });
