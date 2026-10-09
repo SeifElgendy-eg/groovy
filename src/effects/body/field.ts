@@ -546,6 +546,12 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     if (!runs.length) continue;
     rowsOf[y] = runs;
     const first = runs[0], last = runs[runs.length - 1];
+    // the body (or a coat, a shawl) carries on past the photo's edge: there is no edge to bring in
+    // (pulling it in would show the mirrored picture past the border as a smeared strip). The mask
+    // fades a few pixels short of the border.
+    const border = Math.max(3, 0.03 * w);
+    if (first.a <= border) capL[y] = 0;
+    if (last.b >= w - 1 - border) capR[y] = 0;
     const capped = (e: number, cap: number) => Math.sign(e) * Math.min(Math.abs(e), cap);
     eL[y] = capped(keep(first.g * (first.a - first.c), y), capL[y]);
     eR[y] = capped(keep(last.g * (last.b - last.c), h + y), capR[y]);

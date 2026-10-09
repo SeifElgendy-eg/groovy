@@ -1,7 +1,7 @@
 // Body slimming: the helpers it is built on, BodyPix output decoding, and the movement fields'
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
-import { armHanging, blur, bodyFields, distanceTransform, growHands, handShapes, JOINT_COUNT, jointsBySide, rigidHands, runsOf, sstep, unfold } from "../../src/effects/body/field";
+import { armHanging, blur, bodyFields, distanceTransform, FULL, growHands, handShapes, JOINT_COUNT, jointsBySide, rigidHands, runsOf, sstep, unfold } from "../../src/effects/body/field";
 import { addArms, decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
@@ -140,6 +140,40 @@ describe("movement fields on a drawn figure", () => {
     for (const field of [f.arms, f.torso, f.legs]) expect(Math.abs(dx(field, 5, 295))).toBeLessThan(1e-3);
     expect(f.build).toBeGreaterThanOrEqual(0.3);
     expect(f.build).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("a body cut off by the photo's edge", () => {
+  it("keeps the side that runs off the photo where it is, and slims the other", () => {
+    // a figure whose coat (torso) carries on past the right edge of the photo
+    const w = 160, h = 300;
+    const person = new Float32Array(w * h);
+    const labels = new Uint8Array(w * h).fill(255);
+    const fill = (x0: number, y0: number, x1: number, y1: number, part: number) => {
+      for (let y = y0; y < y1; y++)
+        for (let x = x0; x < x1; x++) {
+          person[y * w + x] = 1;
+          labels[y * w + x] = part;
+        }
+    };
+    fill(85, 15, 115, 55, 0);
+    fill(70, 60, w, 160, 12);
+    fill(72, 160, 98, 290, 16);
+    fill(102, 160, 128, 290, 14);
+    fill(52, 62, 66, 170, 4);
+    const joints = new Float32Array(JOINT_COUNT * 3);
+    const set = (j: number, x: number, y: number) => joints.set([x, y, 1], j * 3);
+    set(0, 100, 35); set(1, 100, 62);
+    set(2, 75, 62); set(3, 59, 120); set(4, 59, 170);
+    set(5, 125, 62); set(6, 141, 120); set(7, 141, 170);
+    set(8, 85, 155); set(9, 85, 220); set(10, 85, 285);
+    set(11, 115, 155); set(12, 115, 220); set(13, 115, 285);
+    const f = bodyFields({ w, h, person, labels, joints });
+    const dx = (x: number, y: number) => f.torso[(y * w + x) * 2];
+    expect(dx(71, 130)).toBeLessThan(-1);
+    // (without this, 21 here; the coat inside still narrows a little toward the body, and the
+    // smoothing carries a trace of it to the border: under half a pixel at 100%)
+    for (const x of [w - 1, w - 2]) expect(Math.abs(dx(x, 130) * FULL.torso)).toBeLessThan(0.5);
   });
 });
 
