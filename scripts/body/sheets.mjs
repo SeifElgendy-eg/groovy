@@ -30,8 +30,8 @@ const label = (text, width) =>
 async function tile(name) {
   const d = readDump(path.join(runs[0].dir, "dump", name));
   const photo = d.meta.photo;
-  const meta = await sharp(photo).rotate().metadata();
-  const W = meta.autoOrient?.width ?? meta.width, H = meta.autoOrient?.height ?? meta.height;
+  const { info } = await sharp(photo).rotate().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height;
   const J = d.joints, s = W / d.meta.w;
   const jx = (i) => J[i * 3] * s, jy = (i) => J[i * 3 + 1] * s;
   const sw = Math.max(10, Math.hypot(jx(2) - jx(5), jy(2) - jy(5)));
@@ -44,14 +44,17 @@ async function tile(name) {
     box = [Math.min(...xs) - m, Math.min(...ys) - (crop === "arms" ? 0.3 : 0.9) * sw, Math.max(...xs) + m, Math.max(...ys) + 0.4 * sw];
     box = [Math.max(0, box[0]), Math.max(0, box[1]), Math.min(W, box[2]), Math.min(H, box[3])].map(Math.round);
   }
-  const [x0, y0, x1, y1] = box;
-  const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0);
+  if (!box.every(Number.isFinite) || box[2] - box[0] < 8 || box[3] - box[1] < 8) box = [0, 0, W, H];
+  const [x0, y0] = [Math.min(box[0], W - 8), Math.min(box[1], H - 8)];
+  const cw = Math.min(W - x0, Math.max(8, box[2] - x0)), ch = Math.min(H - y0, Math.max(8, box[3] - y0));
   const tw = Math.max(1, Math.round((cw * TILE_H) / ch));
   const sources = [{ file: photo, label: `Before · ${name}` }, ...runs.map((r) => ({ file: path.join(r.dir, "app", `${name}-${at}.jpg`), label: r.label }))];
   const parts = [];
   for (const [j, src] of sources.entries()) {
     if (!fs.existsSync(src.file)) continue;
-    const img = await sharp(src.file).rotate().resize(W, H, { fit: "fill" }).extract({ left: x0, top: y0, width: cw, height: ch }).resize(tw, TILE_H).toBuffer();
+    // (one resize per sharp pipeline: first to the photo's size, then crop and scale the tile)
+    const full = await sharp(src.file).rotate().resize(W, H, { fit: "fill" }).toBuffer();
+    const img = await sharp(full).extract({ left: x0, top: y0, width: cw, height: ch }).resize(tw, TILE_H).toBuffer();
     parts.push({ input: label(src.label, tw), left: j * (tw + 4), top: 0 }, { input: img, left: j * (tw + 4), top: LABEL_H });
   }
   const width = sources.length * (tw + 4) - 4;

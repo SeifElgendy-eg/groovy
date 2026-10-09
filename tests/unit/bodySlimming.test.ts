@@ -225,12 +225,33 @@ describe("arms the segmenter missed", () => {
 });
 
 describe("fold removal", () => {
-  it("smooths a movement that would fold the picture until it does not", () => {
-    const w = 60, h = 40, n = w * h;
-    const torso = new Float32Array(2 * n);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) torso[2 * (y * w + x)] = x >= 30 && x < 34 ? 6 : 0; // a sharp jump: folds
-    const f = { arms: new Float32Array(2 * n), torso, legs: new Float32Array(2 * n) };
+  const w = 60, h = 40, n = w * h;
+  const field = (fn: (x: number) => number) => {
+    const f = new Float32Array(2 * n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) f[2 * (y * w + x)] = fn(x);
+    return f;
+  };
+  const zero = () => new Float32Array(2 * n);
+
+  it("smooths a movement that would fold the picture until (almost) nothing folds", () => {
+    const f = { arms: zero(), torso: field((x) => (x >= 30 && x < 34 ? 6 : 0)), legs: zero() }; // a sharp jump: folds
     expect(unfold(f, [1, 1, 1], w, h, 40)).toBeGreaterThan(0);
-    expect(unfold(f, [1, 1, 1], w, h, 40)).toBe(0); // nothing left to fix
+    expect(unfold(f, [1, 1, 1], w, h, 40)).toBeLessThanOrEqual(4);
+  });
+
+  it("leaves a strong stretch that does not fold alone", () => {
+    // the picture magnified 4x over 16 pixels (slope -0.75): strong, but no fold
+    const torso = field((x) => (x < 20 ? 0 : x < 36 ? -0.75 * (x - 20) : -12));
+    const before = torso.slice();
+    expect(unfold({ arms: zero(), torso, legs: zero() }, [1, 1, 1], w, h, 40)).toBe(0);
+    expect(torso).toEqual(before);
+  });
+
+  it("finds a fold that shows only with some areas switched off", () => {
+    // the waist alone folds; the legs undo it when all three are on (the app turns the legs off
+    // when the knees are not in the photo, and the sliders mix the areas freely)
+    const torso = field((x) => (x >= 30 && x < 34 ? 6 : 0));
+    const legs = field((x) => (x >= 30 && x < 34 ? -6 : 0));
+    expect(unfold({ arms: zero(), torso, legs }, [1, 1, 1], w, h, 40)).toBeGreaterThan(0);
   });
 });

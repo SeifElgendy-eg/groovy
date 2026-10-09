@@ -45,6 +45,37 @@ export const PART = {
 const isArmPart = (p: number) => p >= 2 && p <= 11;
 const LEFT_ARM = [2, 3, 6, 7, 10];
 const RIGHT_ARM = [4, 5, 8, 9, 11];
+/** A 256-entry table: 1 for the given part ids (for per-pixel tests without searching an array). */
+function partTable(ids: readonly number[]): Uint8Array {
+  const t = new Uint8Array(256);
+  for (const id of ids) t[id] = 1;
+  return t;
+}
+const IS_LEFT_ARM = partTable(LEFT_ARM), IS_RIGHT_ARM = partTable(RIGHT_ARM);
+
+/** Smallest local area scale of the warp at 100% that unfold() lets through (1 = unchanged). */
+export const UNFOLD_MIN_SCALE = 0.1;
+/** unfold() stops when at most this many pixels are left folding. */
+const UNFOLD_LEFT_OK = 4;
+
+/** Support (pixels) of blur() with this sigma: beyond it a blurred point mask is exactly 0. */
+function blurReach(s: number): number {
+  return 3 * Math.max(0, Math.round(Math.sqrt((12 * s * s) / 3 + 1) / 2 - 0.5)) + 1;
+}
+
+/** Bounding box [x0, y0, x1, y1] (inclusive) of the set pixels, or null. */
+function bbox(m: ArrayLike<number>, w: number, h: number): [number, number, number, number] | null {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0, i = 0; y < h; y++)
+    for (let x = 0; x < w; x++, i++)
+      if (m[i]) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+  return x1 < 0 ? null : [x0, y0, x1, y1];
+}
 
 /** Strength at 100% of the overall slider, per area (fraction of the local half-width). */
 export const FULL = { arms: 0.6, torso: 0.3, legs: 0.3 } as const;
@@ -394,6 +425,11 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
   }
   const rowsOf: (Run[] | null)[] = new Array(h).fill(null);
   const eL = new Float32Array(h), eR = new Float32Array(h), has = new Uint8Array(h);
+  // How far each outer edge may move in (unit field): the background between the body and an arm
+  // or hand beside it stretches over the gap between them; squeezed into a narrow gap it would fold
+  // over itself. At 100% the edge moves by at most 0.6 of the stretch's width (the stretch is at
+  // most 0.8 of the gap, below).
+  const capL = new Float32Array(h).fill(Infinity), capR = new Float32Array(h).fill(Infinity);
   // Where an arm's contact with the side ends (a forearm against the waist, at a shirt's hem), the
   // body's edge comes in no further than the arm does: a straight arm cannot follow the waist's
   // curve, and the gap that would open between them there has nothing behind it to show (it would
@@ -424,6 +460,13 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
         }
         if (!isFinite(a) || !isFinite(b)) [a, b] = main;
       }
+      let gapL = Infinity, gapR = Infinity;
+      for (const q of rs) {
+        if (q[1] <= a) gapL = Math.min(gapL, a - q[1]);
+        if (q[0] >= b) gapR = Math.min(gapR, q[0] - b);
+      }
+      capL[y] = (0.6 * 0.8 * gapL) / nomT;
+      capR[y] = (0.6 * 0.8 * gapR) / nomT;
       // not standing upright (a knee raised, crouching): the hips and whatever is beside them (a
       // raised thigh) are left as they are, only the waist slims
       const hipsK = 1 - (1 - upright) * sstep(waist, F.hip[1], y);
@@ -445,8 +488,9 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     if (!runs.length) continue;
     rowsOf[y] = runs;
     const first = runs[0], last = runs[runs.length - 1];
-    eL[y] = keep(first.g * (first.a - first.c), y);
-    eR[y] = keep(last.g * (last.b - last.c), h + y);
+    const capped = (e: number, cap: number) => Math.sign(e) * Math.min(Math.abs(e), cap);
+    eL[y] = capped(keep(first.g * (first.a - first.c), y), capL[y]);
+    eR[y] = capped(keep(last.g * (last.b - last.c), h + y), capR[y]);
     has[y] = 1;
   }
   // The outer edges' movement, smoothed down the body: where the edge seen in the photo jumps (a
@@ -468,7 +512,12 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     }
     return out;
   };
+  // (and capped again: smoothing must not push an edge back into a narrow gap)
   const sL = smoothEdge(eL), sR = smoothEdge(eR);
+  for (let y = 0; y < h; y++) {
+    sL[y] = Math.sign(sL[y]) * Math.min(Math.abs(sL[y]), capL[y]);
+    sR[y] = Math.sign(sR[y]) * Math.min(Math.abs(sR[y]), capR[y]);
+  }
 
   // Pass 2: each run narrows toward its centre; the outer halves of the outermost runs are scaled
   // to give the smoothed edge movement.
@@ -576,10 +625,11 @@ function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: Uint8Arr
   for (const part of ARM_PARTS) {
     const hang = armHanging(F.J, part.side);
     if (hang <= 0) continue;
+    const inPart = partTable(part.ids);
     const pm = new Float32Array(n);
     let cnt = 0, mx = 0, my = 0;
     for (let i = 0; i < n; i++)
-      if (P[i] > 0.5 && part.ids.includes(labels[i])) {
+      if (P[i] > 0.5 && inPart[labels[i]]) {
         pm[i] = 1;
         cnt++;
         mx += i % w;
@@ -613,9 +663,12 @@ function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: Uint8Arr
       const hc = centroid((l) => l === (part.side === "L" ? 10 : 11));
       flip = hc ? dist2(e0, hc) < dist2(e1, hc) : false; // the hand end is "along = 1"
     }
-    const wgt = blur(pm, w, h, 0.06 * sw + 1);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
+    const sigma = 0.06 * sw + 1;
+    const wgt = blur(pm, w, h, sigma);
+    // (the blurred part is exactly 0 beyond the blur's reach around the part)
+    const box = bbox(pm, w, h)!, reach = blurReach(sigma);
+    for (let y = Math.max(0, box[1] - reach); y <= Math.min(h - 1, box[3] + reach); y++)
+      for (let x = Math.max(0, box[0] - reach); x <= Math.min(w - 1, box[2] + reach); x++) {
         const i = y * w + x;
         if (wgt[i] < 1e-4) continue;
         const t = (x - mx) * ux + (y - my) * uy;
@@ -673,14 +726,14 @@ function armSwing(
   const n = w * h;
   const P = input.person;
   const out = { dx: new Float32Array(n), dy: new Float32Array(n), rest: { v: new Float32Array(2 * h), c: new Float32Array(2 * h), arm: new Float32Array(2 * h) } as ArmRest };
-  for (const [side, ids] of [["L", LEFT_ARM], ["R", RIGHT_ARM]] as const) {
+  for (const [side, inArm] of [["L", IS_LEFT_ARM], ["R", IS_RIGHT_ARM]] as const) {
     // only an arm hanging down rests on the body's side and turns in with it
-    const hang = armHanging(F.J, side === "L" ? "L" : "R");
+    const hang = armHanging(F.J, side);
     if (hang <= 0) continue;
     const am = new Float32Array(n);
     let cnt = 0, sx = 0, sy = 0, ymin = h, ymax = -1;
     for (let i = 0; i < n; i++)
-      if (P[i] > 0.5 && ids.includes(labels[i])) {
+      if (P[i] > 0.5 && inArm[labels[i]]) {
         am[i] = 1;
         cnt++;
         const y = (i / w) | 0;
@@ -772,10 +825,22 @@ function armSwing(
       const yy = Math.min(y, yLow);
       out.rest.arm[(left ? 0 : h) + y] = theta * Math.max(0, yy - sy0) + theta2 * Math.max(0, yy - ey0);
     }
-    const wgt = blur(am, w, h, 0.05 * sw + 1);
+    const sigma = 0.05 * sw + 1;
+    const wgt = blur(am, w, h, sigma);
     const at = (x: number, y: number) => Math.min(1, sample(wgt, w, h, x, y) * 3);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
+    // Only near the arm: the blurred arm is 0 beyond the blur's reach, and the arm moves by at
+    // most `full` of its largest turn (at the photo's corners, the furthest from the shoulder).
+    const box = bbox(am, w, h)!;
+    let maxMove = 0;
+    for (const [cx, cy] of [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]]) {
+      const yy = Math.min(cy, yLow);
+      const rx = Math.abs(theta * Math.max(0, yy - sy0)) + Math.abs(theta2 * Math.max(0, yy - ey0));
+      const ry = Math.abs(theta * (cx - sx0)) + Math.abs(theta2 * (cx - ex0));
+      maxMove = Math.max(maxMove, full * Math.hypot(rx, ry));
+    }
+    const reach = blurReach(sigma) + Math.ceil(maxMove) + 2;
+    for (let y = Math.max(0, box[1] - reach); y <= Math.min(h - 1, box[3] + reach); y++)
+      for (let x = Math.max(0, box[0] - reach); x <= Math.min(w - 1, box[2] + reach); x++) {
         const i = y * w + x;
         // (below it the arm moves as its lowest contact row does: no step where the contact ends)
         const yy = Math.min(y, yLow);
@@ -831,93 +896,122 @@ export function frontOfBody(arm: Float32Array, body: Uint8Array, w: number, h: n
   return out;
 }
 
-/**
- * Give each hand (BodyPix parts 10 and 11, a little grown) one movement in the field `f` (movement
- * at strength 1; `full`: the strength at 100%): the average over the hand, or, for a hand against
- * the body (on the hip, the thigh, a coat's side), the movement of the body around it (`bodyDx`,
- * the body's own field; `body`: the body mask): the hand rests on it and goes with it. (Kept where
- * the arm puts it, the body slid away under the hand and left a notch below it.) Applied wherever
- * the hand is on its way at up to 100%.
- */
-export function rigidHands(
-  f: { dx: Float32Array; dy: Float32Array },
-  labels: Uint8Array,
-  m: Uint8Array,
-  w: number,
-  h: number,
-  sw: number,
-  full: number,
-  body?: Uint8Array,
-  bodyDx?: Float32Array | null,
-  J?: Float32Array,
-): void {
+/** A hand, measured once for rigidHands (its pixels, soft edge, the ring around it, its wrist). */
+export interface HandShape {
+  /** The hand's pixels (person pixels with that hand's part), ascending. */
+  pixels: Int32Array;
+  /** Soft hand mask (a little grown), and how far it reaches beyond the box. */
+  soft: Float32Array;
+  reach: number;
+  box: [number, number, number, number];
+  /** Pixels of the ring just around the hand, and those of them that are body (not hand). */
+  ring: number;
+  ringBody: Int32Array;
+  /** Forearm pixels just above the wrist (empty when the wrist is not found). */
+  wrist: Int32Array;
+}
+
+/** Measure both hands (BodyPix parts 10 and 11) for rigidHands. */
+export function handShapes(labels: Uint8Array, m: Uint8Array, w: number, h: number, sw: number, J: Float32Array | null, body: Uint8Array | null): HandShape[] {
   const n = w * h;
+  const out: HandShape[] = [];
   for (const id of [10, 11]) {
     const hand = new Float32Array(n);
-    let c = 0, vx = 0, vy = 0, hx = 0, hy = 0;
+    const px: number[] = [];
+    let hx = 0, hy = 0;
     for (let i = 0; i < n; i++)
       if (m[i] && labels[i] === id) {
         hand[i] = 1;
-        c++;
-        vx += f.dx[i];
-        vy += f.dy[i];
+        px.push(i);
         hx += i % w;
         hy += (i / w) | 0;
       }
-    if (c < 10) continue;
-    vx /= c;
-    vy /= c;
-    hx /= c;
-    hy /= c;
-    let wristFound = false;
-    // The hand goes where its wrist goes: the movement of the forearm just above the wrist. (The
-    // hand's own average also picks up the body's or the background's movement around its edge, and
-    // a hand moved more than its wrist bends at the wrist.)
+    if (px.length < 10) continue;
+    hx /= px.length;
+    hy /= px.length;
+    // the forearm just above this hand's wrist (the wrist nearest to the hand)
+    const wrist: number[] = [];
     if (J) {
       const W = Math.hypot(J[12] - hx, J[13] - hy) <= Math.hypot(J[21] - hx, J[22] - hy) ? 4 : 7;
-      const forearm = W === 4 ? [8, 9] : [6, 7];
+      const forearm = partTable(W === 4 ? [8, 9] : [6, 7]);
       const wx = J[W * 3], wy = J[W * 3 + 1], R = 0.15 * sw;
-      let fc = 0, fx = 0, fy = 0;
       for (let y = Math.max(0, Math.floor(wy - R)); y <= Math.min(h - 1, wy + R); y++)
         for (let x = Math.max(0, Math.floor(wx - R)); x <= Math.min(w - 1, wx + R); x++) {
           const i = y * w + x;
-          if (!m[i] || !forearm.includes(labels[i]) || Math.hypot(x - wx, y - wy) > R) continue;
-          fc++;
-          fx += f.dx[i];
-          fy += f.dy[i];
+          if (m[i] && forearm[labels[i]] && Math.hypot(x - wx, y - wy) <= R) wrist.push(i);
         }
-      if (fc >= 5) {
-        vx = fx / fc;
-        vy = fy / fc;
-        wristFound = true;
+    }
+    // the ring around the hand, and the body in it
+    let ring = 0;
+    const ringBody: number[] = [];
+    if (body) {
+      const rb = blur(hand, w, h, 0.03 * sw + 1);
+      for (let i = 0; i < n; i++) {
+        if (hand[i] || rb[i] < 0.03) continue;
+        ring++;
+        if (body[i] && !(labels[i] === 10 || labels[i] === 11)) ringBody.push(i);
       }
     }
-    if (body) {
-      // the ring around the hand: how much of it is body, and the body's movement there
-      const ring = blur(hand, w, h, 0.03 * sw + 1);
-      let rc = 0, bc = 0, bx = 0;
-      for (let i = 0; i < n; i++) {
-        if (hand[i] || ring[i] < 0.03) continue;
-        rc++;
-        if (body[i] && !(labels[i] === 10 || labels[i] === 11)) {
-          bc++;
-          bx += bodyDx ? bodyDx[i] : 0;
-        }
+    const sigma = 0.025 * sw + 1;
+    out.push({
+      pixels: Int32Array.from(px),
+      soft: blur(hand, w, h, sigma),
+      reach: blurReach(sigma),
+      box: bbox(hand, w, h)!,
+      ring,
+      ringBody: Int32Array.from(ringBody),
+      wrist: wrist.length >= 5 ? Int32Array.from(wrist) : new Int32Array(0),
+    });
+  }
+  return out;
+}
+
+/**
+ * Give each hand one movement in the field `f` (movement at strength 1; `full`: the strength at
+ * 100%): the movement of the forearm just above its wrist (the hand goes where its wrist goes; the
+ * hand's own average also picks up the movement around its edge, and a hand moved more than its
+ * wrist bends at the wrist), or the hand's average when the wrist is not found. A hand against the
+ * body (on the hip, the thigh, a coat's side) whose arm stays goes with the body around it instead
+ * (`bodyDx`, the body's own field in `f`'s area; null: the body does not move in it): kept where the
+ * arm puts it, the body slid away under the hand and left a notch below it. An arm turning in with
+ * the waist takes its hand along. Applied wherever the hand is on its way at up to 100%.
+ */
+export function rigidHands(f: { dx: Float32Array; dy: Float32Array }, hands: HandShape[], w: number, h: number, sw: number, full: number, bodyDx: Float32Array | null): void {
+  for (const hs of hands) {
+    let vx = 0, vy = 0;
+    for (const i of hs.pixels) {
+      vx += f.dx[i];
+      vy += f.dy[i];
+    }
+    vx /= hs.pixels.length;
+    vy /= hs.pixels.length;
+    const wristFound = hs.wrist.length > 0;
+    if (wristFound) {
+      let fx = 0, fy = 0;
+      for (const i of hs.wrist) {
+        fx += f.dx[i];
+        fy += f.dy[i];
       }
-      // (only when the arm itself stays: an arm turning in with the waist takes its hand along,
-      // else the hand stays behind and the wrist bends)
+      vx = fx / hs.wrist.length;
+      vy = fy / hs.wrist.length;
+    }
+    if (hs.ring) {
+      let bx = 0;
+      for (const i of hs.ringBody) bx += bodyDx ? bodyDx[i] : 0;
+      const bc = hs.ringBody.length;
       const still = wristFound ? 1 - sstep(0.02 * sw, 0.05 * sw, Math.abs(full * vx)) : 1;
-      const touch = rc ? sstep(0.1, 0.3, bc / rc) * still : 0;
+      const touch = sstep(0.1, 0.3, bc / hs.ring) * still;
       if (touch > 0) {
         vx += touch * (bx / bc - vx);
         vy *= 1 - touch;
       }
     }
-    // a soft hand mask, grown a little: covers the hand's edge, blends into the wrist
-    const soft = blur(hand, w, h, 0.025 * sw + 1);
-    const at = (x: number, y: number) => Math.min(1, sample(soft, w, h, x, y) * 2.5);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
+    const at = (x: number, y: number) => Math.min(1, sample(hs.soft, w, h, x, y) * 2.5);
+    // only near the hand: the soft mask is 0 beyond its reach, and the hand moves by full * v
+    const reach = hs.reach + Math.ceil(full * Math.hypot(vx, vy)) + 2;
+    const [bx0, by0, bx1, by1] = hs.box;
+    for (let y = Math.max(0, by0 - reach); y <= Math.min(h - 1, by1 + reach); y++)
+      for (let x = Math.max(0, bx0 - reach); x <= Math.min(w - 1, bx1 + reach); x++) {
         const i = y * w + x;
         const k = Math.max(at(x, y), at(x + 0.5 * full * vx, y + 0.5 * full * vy), at(x + full * vx, y + full * vy));
         if (!k) continue;
@@ -1035,7 +1129,7 @@ export function armsBySide(labels: Uint8Array, m: Uint8Array, w: number, h: numb
     for (let x = 0; x < w; x++) {
       const i = y * w + x, l = labels[i];
       if (!m[i] || !isArmPart(l) || x >= xc) continue;
-      votes[LEFT_ARM.includes(l) ? 0 : 1]++;
+      votes[IS_LEFT_ARM[l] ? 0 : 1]++;
     }
   }
   const leftIsLeftArm = votes[0] >= votes[1];
@@ -1045,7 +1139,7 @@ export function armsBySide(labels: Uint8Array, m: Uint8Array, w: number, h: numb
       const i = y * w + x, l = labels[i];
       if (!m[i] || !isArmPart(l)) continue;
       const wantLeftArm = x < xc === leftIsLeftArm;
-      if (LEFT_ARM.includes(l) !== wantLeftArm) labels[i] = OTHER_SIDE[l];
+      if (!!IS_LEFT_ARM[l] !== wantLeftArm) labels[i] = OTHER_SIDE[l];
     }
   }
 }
@@ -1072,14 +1166,14 @@ export function bodyFields(input: BodyInput): BodyFields {
   const labels = Uint8Array.from(input.labels);
   if (facing) armsBySide(labels, m, w, h, F);
   growHands(labels, m, input.rgb, w, h, F.J, sw);
-  const area = (ids: number[]) => {
+  const area = (t: Uint8Array) => {
     let c = 0;
-    for (let i = 0; i < n; i++) if (m[i] && ids.includes(labels[i])) c++;
+    for (let i = 0; i < n; i++) if (m[i] && t[labels[i]]) c++;
     return c;
   };
-  const aL = area(LEFT_ARM), aR = area(RIGHT_ARM), big = Math.max(aL, aR, 1);
-  for (const [a, ids] of [[aL, LEFT_ARM], [aR, RIGHT_ARM]] as const)
-    if (a < 0.3 * big) for (let i = 0; i < n; i++) if (ids.includes(labels[i])) labels[i] = 12;
+  const aL = area(IS_LEFT_ARM), aR = area(IS_RIGHT_ARM), big = Math.max(aL, aR, 1);
+  for (const [a, t] of [[aL, IS_LEFT_ARM], [aR, IS_RIGHT_ARM]] as const)
+    if (a < 0.3 * big) for (let i = 0; i < n; i++) if (t[labels[i]]) labels[i] = 12;
 
   const armHard = new Float32Array(n);
   const body = new Uint8Array(n);
@@ -1157,9 +1251,10 @@ export function bodyFields(input: BodyInput): BodyFields {
   };
   // Hands move as a whole: every pixel of a hand gets the hand's average movement (no part of a hand
   // is narrowed, stretched or bent), blending into the wrist.
-  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK, body, null, F.J);
-  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK, body, torso, F.J);
-  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK, body, legs, F.J);
+  const hands = handShapes(labels, m, w, h, sw, F.J, body);
+  rigidHands(units.arms, hands, w, h, sw, FULL.arms * buildK, null);
+  rigidHands(units.torso, hands, w, h, sw, FULL.torso * buildK, torso);
+  rigidHands(units.legs, hands, w, h, sw, FULL.legs * buildK, legs);
 
   // The background beside the person follows the person's edge movement smoothly and fades out
   // with distance. The fade width is that of the full (100%) movement, so it is the same for every
@@ -1225,8 +1320,11 @@ export function bodyFields(input: BodyInput): BodyFields {
  * Where the movement at 100% would fold the picture over itself (the moved image's neighbouring
  * pixels swap places: a loop or a smear, e.g. in the background just outside an arm that turns in
  * with the waist), smooth the movement there until it no longer folds. The same smoothing is applied
- * to every area's field, so their weighted sum (the sliders) stays consistent. Fields are
- * interleaved (dx, dy); `k`: the 100% strength of each.
+ * to every area's field, so their weighted sum (the sliders) stays consistent. The sliders mix the
+ * areas freely (and the legs are off when the knees are not in the photo), so every on/off mix of
+ * the three areas at 100% is checked, not only all three together. Fields are interleaved (dx, dy);
+ * `k`: the 100% strength of each. Only the neighbourhood of the folds is smoothed (and computed).
+ * Returns how many pixels folded at first.
  */
 export function unfold(
   f: { arms: Float32Array; torso: Float32Array; legs: Float32Array },
@@ -1234,46 +1332,80 @@ export function unfold(
   w: number,
   h: number,
   sw: number,
+  minScale = UNFOLD_MIN_SCALE,
 ): number {
   const n = w * h;
   const keys = ["arms", "torso", "legs"] as const;
-  const MIN = 0.3; // smallest allowed local area scale of the warp (1 = unchanged)
+  const sW = 0.04 * sw + 1, sS = 0.05 * sw + 1; // spread of the smoothing weight, the smoothing itself
+  const margin = blurReach(sW) + blurReach(sS) + 2;
+  const bad = new Uint8Array(n);
+  // the on/off mixes of the three areas (bit j: area j on)
+  const mixes = [7, 1, 2, 4, 3, 5, 6].filter((mix) => [0, 1, 2].some((j) => mix & (1 << j) && k[j] > 0));
+  const A = f.arms, T = f.torso, G = f.legs;
+  const d = new Float64Array(12); // per area: d(dx)/dx, d(dx)/dy, d(dy)/dx, d(dy)/dy at 100%
   let worst = 0;
   for (let it = 0; it < 16; it++) {
-    const sx = new Float32Array(n), sy = new Float32Array(n);
-    for (let i = 0; i < n; i++)
-      keys.forEach((key, j) => {
-        sx[i] += k[j] * f[key][2 * i];
-        sy[i] += k[j] * f[key][2 * i + 1];
-      });
-    const bad = new Float32Array(n);
-    let count = 0;
+    bad.fill(0);
+    let count = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
     for (let y = 1; y < h - 1; y++)
       for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        const ax = 1 + (sx[i + 1] - sx[i - 1]) / 2, ay = (sx[i + w] - sx[i - w]) / 2;
-        const bx = (sy[i + 1] - sy[i - 1]) / 2, by = 1 + (sy[i + w] - sy[i - w]) / 2;
-        if (ax * by - ay * bx < MIN) {
-          bad[i] = 1;
-          count++;
+        const i = y * w + x, r = 2 * (i + 1), l = 2 * (i - 1), u = 2 * (i - w), o = 2 * (i + w);
+        for (let j = 0; j < 3; j++) {
+          const a = j === 0 ? A : j === 1 ? T : G, kk = k[j] / 2;
+          d[4 * j] = kk * (a[r] - a[l]);
+          d[4 * j + 1] = kk * (a[o] - a[u]);
+          d[4 * j + 2] = kk * (a[r + 1] - a[l + 1]);
+          d[4 * j + 3] = kk * (a[o + 1] - a[u + 1]);
+        }
+        for (const mix of mixes) {
+          let ax = 1, ay = 0, bx = 0, by = 1;
+          for (let j = 0; j < 3; j++)
+            if (mix & (1 << j)) {
+              ax += d[4 * j];
+              ay += d[4 * j + 1];
+              bx += d[4 * j + 2];
+              by += d[4 * j + 3];
+            }
+          if (ax * by - ay * bx < minScale) {
+            bad[i] = 1;
+            count++;
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+            break;
+          }
         }
       }
     if (it === 0) worst = count;
-    if (!count) break;
-    const wgt = blur(bad, w, h, 0.04 * sw + 1);
-    for (let i = 0; i < n; i++) wgt[i] = Math.min(1, wgt[i] * 4);
+    // (a few single pixels left: a sub-pixel overlap nobody can see; not worth another round)
+    if (count <= UNFOLD_LEFT_OK) break;
+    // a window around the folds, wide enough that blurring inside it equals blurring the whole
+    // field wherever the smoothing applies
+    const wx0 = Math.max(0, x0 - margin), wy0 = Math.max(0, y0 - margin);
+    const wx1 = Math.min(w - 1, x1 + margin), wy1 = Math.min(h - 1, y1 + margin);
+    const ww = wx1 - wx0 + 1, wh = wy1 - wy0 + 1, wn = ww * wh;
+    const cut = (get: (i: number) => number) => {
+      const out = new Float32Array(wn);
+      for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) out[y * ww + x] = get((wy0 + y) * w + wx0 + x);
+      return out;
+    };
+    // (at the window's border the blur sees replicated edges instead of the field beyond: the
+    // margin keeps that away from where the weight is not 0)
+    const wgt = blur(cut((i) => bad[i]), ww, wh, sW);
+    for (let i = 0; i < wn; i++) wgt[i] = Math.min(1, wgt[i] * 4);
     for (const key of keys) {
-      const fx = new Float32Array(n), fy = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        fx[i] = f[key][2 * i];
-        fy[i] = f[key][2 * i + 1];
-      }
-      const bx = blur(fx, w, h, 0.05 * sw + 1), by = blur(fy, w, h, 0.05 * sw + 1);
-      for (let i = 0; i < n; i++) {
-        if (!wgt[i]) continue;
-        f[key][2 * i] = fx[i] + (bx[i] - fx[i]) * wgt[i];
-        f[key][2 * i + 1] = fy[i] + (by[i] - fy[i]) * wgt[i];
-      }
+      const a = f[key];
+      const fx = cut((i) => a[2 * i]), fy = cut((i) => a[2 * i + 1]);
+      const bx = blur(fx, ww, wh, sS), by = blur(fy, ww, wh, sS);
+      for (let y = 0; y < wh; y++)
+        for (let x = 0; x < ww; x++) {
+          const j = y * ww + x;
+          if (!wgt[j]) continue;
+          const i = (wy0 + y) * w + wx0 + x;
+          a[2 * i] = fx[j] + (bx[j] - fx[j]) * wgt[j];
+          a[2 * i + 1] = fy[j] + (by[j] - fy[j]) * wgt[j];
+        }
     }
   }
   return worst;
