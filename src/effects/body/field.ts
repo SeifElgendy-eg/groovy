@@ -807,21 +807,47 @@ export function rigidHands(
   full: number,
   body?: Uint8Array,
   bodyDx?: Float32Array | null,
+  J?: Float32Array,
 ): void {
   const n = w * h;
   for (const id of [10, 11]) {
     const hand = new Float32Array(n);
-    let c = 0, vx = 0, vy = 0;
+    let c = 0, vx = 0, vy = 0, hx = 0, hy = 0;
     for (let i = 0; i < n; i++)
       if (m[i] && labels[i] === id) {
         hand[i] = 1;
         c++;
         vx += f.dx[i];
         vy += f.dy[i];
+        hx += i % w;
+        hy += (i / w) | 0;
       }
     if (c < 10) continue;
     vx /= c;
     vy /= c;
+    hx /= c;
+    hy /= c;
+    // The hand goes where its wrist goes: the movement of the forearm just above the wrist. (The
+    // hand's own average also picks up the body's or the background's movement around its edge, and
+    // a hand moved more than its wrist bends at the wrist.)
+    if (J) {
+      const W = Math.hypot(J[12] - hx, J[13] - hy) <= Math.hypot(J[21] - hx, J[22] - hy) ? 4 : 7;
+      const forearm = W === 4 ? [8, 9] : [6, 7];
+      const wx = J[W * 3], wy = J[W * 3 + 1], R = 0.15 * sw;
+      let fc = 0, fx = 0, fy = 0;
+      for (let y = Math.max(0, Math.floor(wy - R)); y <= Math.min(h - 1, wy + R); y++)
+        for (let x = Math.max(0, Math.floor(wx - R)); x <= Math.min(w - 1, wx + R); x++) {
+          const i = y * w + x;
+          if (!m[i] || !forearm.includes(labels[i]) || Math.hypot(x - wx, y - wy) > R) continue;
+          fc++;
+          fx += f.dx[i];
+          fy += f.dy[i];
+        }
+      if (fc >= 5) {
+        vx = fx / fc;
+        vy = fy / fc;
+      }
+    }
     if (body) {
       // the ring around the hand: how much of it is body, and the body's movement there
       const ring = blur(hand, w, h, 0.03 * sw + 1);
@@ -1083,9 +1109,9 @@ export function bodyFields(input: BodyInput): BodyFields {
   };
   // Hands move as a whole: every pixel of a hand gets the hand's average movement (no part of a hand
   // is narrowed, stretched or bent), blending into the wrist.
-  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK, body, null);
-  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK, body, torso);
-  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK, body, legs);
+  rigidHands(units.arms, labels, m, w, h, sw, FULL.arms * buildK, body, null, F.J);
+  rigidHands(units.torso, labels, m, w, h, sw, FULL.torso * buildK, body, torso, F.J);
+  rigidHands(units.legs, labels, m, w, h, sw, FULL.legs * buildK, body, legs, F.J);
 
   // The background beside the person follows the person's edge movement smoothly and fades out
   // with distance. The fade width is that of the full (100%) movement, so it is the same for every
