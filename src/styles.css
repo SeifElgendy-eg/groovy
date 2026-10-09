@@ -1236,7 +1236,7 @@ body:not(.home-screen) .stage-wrap {
   display: none !important;
 }
 
-/* Body shaping over the photo (ui/bodyProgress.ts): processing (with the step), done, or not applied. */
+/* Body shaping over the photo while it is processed (ui/bodyProgress.ts). */
 .body-progress {
   position: absolute;
   z-index: 9;
@@ -1284,21 +1284,6 @@ body:not(.home-screen) .stage-wrap {
   .body-progress.working .body-progress-icon {
     animation: photo-processing-spin 0.85s linear infinite;
   }
-}
-.body-progress.done {
-  background: #1f6b4fe8;
-}
-.body-progress.done .body-progress-icon::before {
-  content: "✓";
-}
-.body-progress.ready .body-progress-icon::before {
-  content: "✓";
-}
-.body-progress.failed {
-  background: #7a2433eb;
-}
-.body-progress.failed .body-progress-icon::before {
-  content: "!";
 }
 .body-progress[hidden] {
   display: none;

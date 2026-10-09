@@ -4,7 +4,7 @@ import { wrap, type Remote } from "comlink";
 import { BODYPIX_LONG_SIDE, inputSide, maskUnsure, personBox } from "./bodypix";
 import { FULL } from "./field";
 import { checkPosture, legsVisible, type PostureResult } from "./posture";
-import { backdropGain, MAX_MISMATCH, personCover } from "./backdrop";
+import { backdropGain, MAX_MISMATCH, personCover, placeBackdrop, type Placement } from "./backdrop";
 import { BodyWarp, type Strengths } from "./warp";
 import { findPose, warmUpPose } from "./mediapipe";
 import type { BodyResult, BodyWorkerApi } from "./worker";
@@ -62,6 +62,11 @@ export class BodyEffect {
   onStep: (() => void) | null = null;
   /** Whose body points the last analysis used: "both" (BodyPix and MediaPipe), "bodypix". */
   pointsFrom: "both" | "bodypix" = "bodypix";
+  /**
+   * How much of the 100% strength this photo gets (field.ts strengthCaps): a body that would look
+   * deformed at full strength gets less.
+   */
+  cap = 1;
   /** Whose outline of the person the last analysis used. */
   outline: "segmenter" | "bodypix" = "segmenter";
   private posing = false;
@@ -140,6 +145,7 @@ export class BodyEffect {
     this.posture = null;
     this.legs = true;
     this.backdropState = "none";
+    this.cap = 1;
     this.warp.clear();
     const setStep = (t: string | null) => {
       this.step = t;
@@ -202,6 +208,7 @@ export class BodyEffect {
       // the backdrop's cover from the mask with the arms filled in (an arm the segmenter missed
       // would be painted over with the wall)
       this.backdropState = this.useBackdrop(frame, { data: r.person, w: ww, h: wh });
+      this.cap = r.cap;
       this.ready = true;
       return true;
     } catch (err) {
@@ -222,8 +229,10 @@ export class BodyEffect {
    * around the person matches it once its colours are corrected.
    */
   private useBackdrop(frame: HTMLCanvasElement, person: PersonMask): "used" | "mismatch" | "none" {
-    const plate = this.plate;
-    if (!plate || plate.width !== frame.width || plate.height !== frame.height) return "none";
+    const shot = this.plate;
+    if (!shot) return "none";
+    // (a different size of the same camera view: scaled to the photo; another aspect is another view)
+    if (Math.abs(shot.width / shot.height - frame.width / frame.height) > 0.02) return "none";
     const long = Math.max(person.w, person.h);
     const mask = { data: person.data, w: person.w, h: person.h };
     const cover = personCover(mask, 0.003 * long, 0.002 * long);
@@ -241,11 +250,41 @@ export class BodyEffect {
       return cx.getImageData(0, 0, w, h).data;
     };
     const far = personCover(mask, 0.04 * long, 0);
-    const away = new Float32Array(w * h);
+    const near = new Float32Array(w * h);
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++)
-        away[y * w + x] = far.data[Math.min(far.h - 1, Math.floor(((y + 0.5) * far.h) / h)) * far.w + Math.min(far.w - 1, Math.floor(((x + 0.5) * far.w) / w))];
-    const gain = backdropGain(small(frame), small(plate), w, h, away);
+        near[y * w + x] = far.data[Math.min(far.h - 1, Math.floor(((y + 0.5) * far.h) / h)) * far.w + Math.min(far.w - 1, Math.floor(((x + 0.5) * far.w) / w))];
+    const photo = small(frame);
+    // the backdrop as the camera saw it, at the photo's size
+    const placed = (p: Placement | null) => {
+      const c = document.createElement("canvas");
+      c.width = frame.width;
+      c.height = frame.height;
+      const cx = c.getContext("2d")!;
+      if (p) {
+        // (where the moved backdrop leaves a gap at the frame's edge, the photo itself)
+        cx.drawImage(frame, 0, 0);
+        const ox = (frame.width - 1) / 2, oy = (frame.height - 1) / 2;
+        cx.setTransform(p.scale, 0, 0, p.scale, ox + p.dx * frame.width - p.scale * ox, oy + p.dy * frame.height - p.scale * oy);
+      }
+      cx.drawImage(shot, 0, 0, frame.width, frame.height);
+      return c;
+    };
+    let plate = placed(null);
+    let gain = backdropGain(photo, small(plate), w, h, near);
+    // Not the same view: a webcam that reframes itself (or a nudge) zooms and shifts it between the
+    // two shots. Find where the backdrop sits in the photo, and use it there if that matches.
+    if (gain.mismatch > 0.5 * MAX_MISMATCH) {
+      const p = placeBackdrop(photo, small(plate), w, h, Float32Array.from(near, (v) => 1 - v));
+      if (Math.abs(p.scale - 1) > 0.003 || Math.abs(p.dx * w) > 0.5 || Math.abs(p.dy * h) > 0.5) {
+        const moved = placed(p);
+        const g = backdropGain(photo, small(moved), w, h, near);
+        if (g.mismatch < gain.mismatch) {
+          plate = moved;
+          gain = g;
+        }
+      }
+    }
     if (gain.mismatch > MAX_MISMATCH) {
       this.warp.setBackdrop(null);
       return "mismatch";
@@ -254,9 +293,10 @@ export class BodyEffect {
     return "used";
   }
 
+
   /** Strengths for the warp from the sliders (and the person's build). */
   strengths(s: BodySettings): Strengths {
-    const k = this.result?.build ?? 1;
+    const k = (this.result?.build ?? 1) * this.cap;
     return {
       arms: FULL.arms * k * s.overall * s.arms,
       torso: FULL.torso * k * s.overall * s.waist,

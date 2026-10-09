@@ -81,8 +81,15 @@ export const POSTURE = {
   /** Arm angle from vertical (shoulder to wrist), degrees: at least / at most (best 17-20). */
   minArmAngle: 12,
   maxArmAngle: 30,
-  /** Wrist height relative to the hips, in body heights: hands this far above the hips are on the hips or in pockets. */
-  maxWristAboveHip: 0.06,
+  /**
+   * Wrist height relative to the hips, in body heights: hands this far above the hips are on the
+   * hips (or held up); from `bentWristAboveHip` up, with the elbow bent past `bentElbow` degrees,
+   * too. (BodyPix's wrist points sit high: a hanging arm's wrist is often a little above the hip
+   * points, 0.06 H on a laptop camera.)
+   */
+  maxWristAboveHip: 0.12,
+  bentWristAboveHip: 0.03,
+  bentElbow: 45,
   /** Ankle distance / hip distance: at least / at most (best 0.7-1). */
   minFeet: 0.6,
   maxFeet: 1.6,
@@ -125,6 +132,12 @@ export function checkPosture(J0: ArrayLike<number>, w: number, h: number, live: 
 
   // arms: hanging down (both checked first), then slightly out with a gap between hands and hips
   const armAngle = (S: number, W: number) => (Math.atan2(Math.abs(x(W) - x(S)), y(W) - y(S)) * 180) / Math.PI;
+  // how far the forearm turns from the upper arm's direction (0: a straight arm)
+  const elbowBend = (S: number, E: number, W: number) => {
+    const ux = x(E) - x(S), uy = y(E) - y(S), fx = x(W) - x(E), fy = y(W) - y(E);
+    const c = (ux * fx + uy * fy) / (Math.hypot(ux, uy) * Math.hypot(fx, fy) || 1);
+    return (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
+  };
   const arms = [
     [R_SH, R_EL, R_WR, R_HIP],
     [L_SH, L_EL, L_WR, L_HIP],
@@ -133,7 +146,8 @@ export function checkPosture(J0: ArrayLike<number>, w: number, h: number, live: 
     if (s(W) < POSTURE.minScore || s(E) < POSTURE.minScore) return result("notVisible");
     if (y(W) < y(S) || armAngle(S, W) > 60) found.push("armsLower"); // raised
     else if (armAngle(S, W) > POSTURE.maxArmAngle) found.push("armsIn"); // held out wide
-    else if (y(W) < hipY - POSTURE.maxWristAboveHip * H) found.push("armsDown");
+    else if (y(W) < hipY - POSTURE.maxWristAboveHip * H || (y(W) < hipY - POSTURE.bentWristAboveHip * H && elbowBend(S, E, W) > POSTURE.bentElbow))
+      found.push("armsDown");
   }
   for (const [S, , W, Hp] of arms) {
     const angle = armAngle(S, W);

@@ -11,10 +11,10 @@ import { state } from "./state";
 
 /** Time between posture checks (each is a quick BodyPix pass on a small frame). */
 const CHECK_MS = 300;
-/** A good pose held this long starts the hands-free countdown. */
-const HOLD_MS = 900;
+/** A good pose held this long starts the hands-free countdown (about two checks in a row). */
+const HOLD_MS = 500;
 /** Hands-free countdown, seconds. */
-const AUTO_SECONDS = 3;
+const AUTO_SECONDS = 2;
 /** The hands-free countdown stops after this many checks in a row without a usable pose (one bad
  * reading of a noisy body point should not cancel it). */
 const BREAK_CHECKS = 2;
@@ -22,7 +22,7 @@ const BREAK_CHECKS = 2;
 let lastCheck = -Infinity;
 let running = false;
 // (body points from the quick small-frame pass jitter by a few percent of the height)
-const stillness = new Stillness(0.05);
+const stillness = new Stillness(0.07);
 let broken = 0;
 
 /** Hands-free capture is switched on in the body panel. */

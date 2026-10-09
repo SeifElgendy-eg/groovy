@@ -154,24 +154,25 @@ function renderAcne(w: number, h: number): void {
 
 let analysisStart = 0;
 let analysisMs = 0;
-body.onStep = () => setBodyProgress(progressOf(readBodySettings()));
+body.onStep = () => setBodyProgress(progressOf());
 
-/** The body's processing state for the indicator over the photo. */
-function progressOf(settings: { overall: number; arms: number; waist: number; legs: number }): Parameters<typeof setBodyProgress>[0] {
+/**
+ * The indicator over the photo: shown only while the body is being processed; gone the moment the
+ * result is ready (the photo is what matters then). What the analysis used goes to the console.
+ */
+function progressOf(): Parameters<typeof setBodyProgress>[0] {
   if (body.busy || body.dirty) return { kind: "working", step: body.step ?? "Starting", since: analysisStart || performance.now() };
-  if (body.failed) return { kind: "failed", message: "No full body found: use a photo of the whole body, facing the camera." };
-  if (!body.ready) return null;
-  const s = body.strengths(settings);
-  if (s.arms + s.torso + s.legs <= 0) return { kind: "ready", detail: `Analysed in ${(analysisMs / 1000).toFixed(1)} s: move the Weight loss slider (and keep an area on).` };
-  const parts = [
-    `${Math.round(settings.overall * 100)}% weight loss`,
-    `ready in ${(analysisMs / 1000).toFixed(1)} s`,
-    body.legs ? "arms, waist & legs" : "arms & waist (legs not in view)",
-    body.pointsFrom === "both" ? "body points: BodyPix + MediaPipe" : "body points: BodyPix",
-  ];
-  if (body.outline === "bodypix") parts.push("outline: BodyPix (the person was hard to make out)");
-  if (body.backdropState === "used") parts.push("backdrop used");
-  return { kind: "done", detail: parts.join(" · ") };
+  return null;
+}
+
+/** One line in the console per analysis: what it found and used (for checking a kiosk). */
+function logAnalysis(): void {
+  if (body.failed) return console.info("body shaping: no full body found");
+  console.info(
+    `body shaping ready in ${(analysisMs / 1000).toFixed(1)} s: ${body.legs ? "arms, waist & legs" : "arms & waist (legs not in view)"}; ` +
+      `body points ${body.pointsFrom === "both" ? "BodyPix + MediaPipe" : "BodyPix"}; outline ${body.outline}; backdrop ${body.backdropState}; ` +
+      `strength cap ${body.cap.toFixed(2)}`,
+  );
 }
 
 function renderBody(w: number, h: number): void {
@@ -191,7 +192,7 @@ function renderBody(w: number, h: number): void {
   }
   if (settings.overall <= 0) {
     status.textContent = "Move the Weight loss slider to preview the result.";
-    setBodyProgress(body.ready || body.failed || body.busy ? progressOf(settings) : null);
+    setBodyProgress(progressOf());
     if (!body.dirty || body.busy) return;
   }
   // A new photo while the last one is still being analysed: stop that analysis.
@@ -206,15 +207,16 @@ function renderBody(w: number, h: number): void {
       .then((ok) => {
         analysisMs = performance.now() - start;
         if (ok) noteWork("body analysis", analysisMs);
+        logAnalysis();
       })
       .finally(() => {
         if (!anyBusy()) delete document.body.dataset.effectsBusy;
         renderAll();
       });
-    setBodyProgress(progressOf(settings));
+    setBodyProgress(progressOf());
     return;
   }
-  setBodyProgress(progressOf(settings));
+  setBodyProgress(progressOf());
   if (body.busy) return;
   if (body.failed) {
     status.textContent = "No full body found. Use a photo of the whole body, facing the camera.";

@@ -177,6 +177,43 @@ describe("a body cut off by the photo's edge", () => {
   });
 });
 
+describe("100% strength from the body's proportions", () => {
+  const figure = (half: number) => {
+    const w = 200, h = 300;
+    const person = new Float32Array(w * h);
+    const labels = new Uint8Array(w * h).fill(255);
+    const fill = (x0: number, y0: number, x1: number, y1: number, part: number) => {
+      for (let y = y0; y < y1; y++)
+        for (let x = x0; x < x1; x++) {
+          person[y * w + x] = 1;
+          labels[y * w + x] = part;
+        }
+    };
+    fill(85, 15, 115, 55, 0);
+    fill(100 - half, 60, 100 + half, 160, 12);
+    fill(72, 160, 98, 290, 16);
+    fill(102, 160, 128, 290, 14);
+    fill(100 - half - 20, 62, 100 - half - 6, 170, 4);
+    fill(100 + half + 6, 62, 100 + half + 20, 170, 2);
+    const joints = new Float32Array(JOINT_COUNT * 3);
+    const set = (j: number, x: number, y: number) => joints.set([x, y, 1], j * 3);
+    set(0, 100, 35); set(1, 100, 62);
+    set(2, 75, 62); set(3, 100 - half - 13, 120); set(4, 100 - half - 13, 170);
+    set(5, 125, 62); set(6, 100 + half + 13, 120); set(7, 100 + half + 13, 170);
+    set(8, 85, 155); set(9, 85, 220); set(10, 85, 285);
+    set(11, 115, 155); set(12, 115, 220); set(13, 115, 285);
+    return bodyFields({ w, h, person, labels, joints });
+  };
+  it("slims a wide waist more than one already near sensible proportions, and the cap is a share", () => {
+    const wide = figure(36), slim = figure(22);
+    expect(wide.build).toBeGreaterThan(slim.build);
+    for (const f of [wide, slim]) {
+      expect(f.cap).toBeGreaterThan(0);
+      expect(f.cap).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe("waist and hips", () => {
   it("slims the waist by at least the fraction of the hips (the hourglass stays)", () => {
     const w = 200, h = 320;

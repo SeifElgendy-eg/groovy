@@ -83,3 +83,82 @@ export function backdropGain(photo: Uint8ClampedArray, plate: Uint8ClampedArray,
       for (let c = 0; c < 3; c++) diff += Math.abs(photo[i * 4 + c] - plate[i * 4 + c] * data[i * 3 + c]) / 255;
   return { data, w, h, mismatch: wsum ? diff / (3 * wsum) : 1 };
 }
+
+/** How the backdrop sits in the photo: zoomed by `scale` about the frame's centre, then moved by (dx, dy) (fractions of the width / height). */
+export interface Placement {
+  scale: number;
+  dx: number;
+  dy: number;
+  /** Mean edge difference over the background after the placement (lower is better; 0 = same edges). */
+  cost: number;
+}
+
+/** Edges of a small RGBA image (gradient magnitude of its brightness), scaled to a mean of 1 over `use`. */
+function edges(rgba: Uint8ClampedArray, w: number, h: number, use: Float32Array): Float32Array {
+  const g = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) g[i] = 0.299 * rgba[i * 4] + 0.587 * rgba[i * 4 + 1] + 0.114 * rgba[i * 4 + 2];
+  const s = blur(g, w, h, 0.8);
+  const e = new Float32Array(w * h);
+  let sum = 0, c = 0;
+  for (let y = 1; y < h - 1; y++)
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      e[i] = Math.hypot(s[i + 1] - s[i - 1], s[i + w] - s[i - w]);
+      if (use[i]) (sum += e[i]), c++;
+    }
+  const k = c && sum ? c / sum : 1;
+  for (let i = 0; i < e.length; i++) e[i] *= k;
+  return e;
+}
+
+/**
+ * Where the empty backdrop sits in the photo (small RGBA images, w x h, same size): a laptop or
+ * webcam that reframes itself (auto-framing, a nudge) zooms and shifts the view between the two
+ * shots, and the backdrop would no longer match. Searched over zoom 0.85-1.18 and shifts up to 15%
+ * of the frame, on the edges of the background (`away` > 0: away from the person), which do not
+ * change with the exposure. Coarse to fine.
+ */
+export function placeBackdrop(photo: Uint8ClampedArray, plate: Uint8ClampedArray, w: number, h: number, away: Float32Array): Placement {
+  const use = new Float32Array(w * h);
+  for (let i = 0; i < use.length; i++) use[i] = away[i] > 0.5 ? 1 : 0;
+  const A = edges(photo, w, h, use), B = edges(plate, w, h, use);
+  let useN = 0;
+  for (let i = 0; i < use.length; i++) useN += use[i];
+  const cx = (w - 1) / 2, cy = (h - 1) / 2;
+  const cost = (scale: number, dx: number, dy: number, step: number) => {
+    let sum = 0, c = 0;
+    const tx = dx * w, ty = dy * h;
+    for (let y = 1; y < h - 1; y += step)
+      for (let x = 1; x < w - 1; x += step) {
+        const i = y * w + x;
+        if (!use[i]) continue;
+        // the backdrop pixel that lands here
+        const px = (x - cx - tx) / scale + cx, py = (y - cy - ty) / scale + cy;
+        const xi = Math.round(px), yi = Math.round(py);
+        if (xi < 1 || yi < 1 || xi >= w - 1 || yi >= h - 1) continue;
+        sum += Math.abs(A[i] - B[yi * w + xi]);
+        c++;
+      }
+    // (a placement that leaves too little of the background to compare is no match)
+    return c > (0.5 * useN) / (step * step) ? sum / c : Infinity;
+  };
+  let best: Placement = { scale: 1, dx: 0, dy: 0, cost: cost(1, 0, 0, 1) };
+  // coarse: every other pixel, zoom in ~2% steps, shifts by 2 pixels
+  for (let scale = 0.85; scale <= 1.18; scale *= 1.02)
+    for (let sy = -0.15; sy <= 0.15; sy += 2 / h)
+      for (let sx = -0.15; sx <= 0.15; sx += 2 / w) {
+        const c = cost(scale, sx, sy, 2);
+        if (c < best.cost) best = { scale, dx: sx, dy: sy, cost: c };
+      }
+  // fine: around the best, every pixel
+  const b0 = best;
+  best = { ...b0, cost: cost(b0.scale, b0.dx, b0.dy, 1) };
+  for (let ds = -2; ds <= 2; ds++)
+    for (let iy = -2; iy <= 2; iy++)
+      for (let ix = -2; ix <= 2; ix++) {
+        const scale = b0.scale * (1 + 0.005 * ds), dx = b0.dx + (0.5 * ix) / w, dy = b0.dy + (0.5 * iy) / h;
+        const c = cost(scale, dx, dy, 1);
+        if (c < best.cost) best = { scale, dx, dy, cost: c };
+      }
+  return best;
+}

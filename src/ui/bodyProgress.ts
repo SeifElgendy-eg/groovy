@@ -1,16 +1,11 @@
-// Over the photo in body shaping: whether the body is still being processed (and which step), or
-// done (and what was applied), or failed. A clear, always-visible answer to "is it working?".
+// Over the photo in body shaping, only while the body is being processed: which step, and for how
+// long. It goes away as soon as the result is shown.
 import { dom } from "./dom";
 
-export type BodyProgress =
-  | { kind: "working"; step: string; since: number }
-  | { kind: "done"; detail: string }
-  | { kind: "ready"; detail: string }
-  | { kind: "failed"; message: string }
-  | null;
+export type BodyProgress = { kind: "working"; step: string; since: number } | null;
 
 const box = document.createElement("div");
-box.className = "body-progress";
+box.className = "body-progress working";
 box.hidden = true;
 box.setAttribute("role", "status");
 box.setAttribute("aria-live", "polite");
@@ -32,35 +27,22 @@ export function mountBodyProgress(): void {
 function paint(): void {
   const p = current;
   box.hidden = p === null;
-  box.classList.remove("working", "done", "ready", "failed");
   if (!p) return;
-  box.classList.add(p.kind);
-  if (p.kind === "working") {
-    title.textContent = `Processing the body… ${Math.floor((performance.now() - p.since) / 1000)} s`;
-    detail.textContent = p.step;
-  } else if (p.kind === "done") {
-    title.textContent = "Done: body shaping applied";
-    detail.textContent = p.detail;
-  } else if (p.kind === "ready") {
-    title.textContent = "Done: ready to preview";
-    detail.textContent = p.detail;
-  } else {
-    title.textContent = "Body shaping not applied";
-    detail.textContent = p.message;
-  }
+  title.textContent = `Processing the body… ${Math.floor((performance.now() - p.since) / 1000)} s`;
+  detail.textContent = p.step;
 }
 
 /** Show the body's processing state over the photo (null: hide). */
 export function setBodyProgress(p: BodyProgress): void {
   const same =
     JSON.stringify(p) === JSON.stringify(current) ||
-    (p?.kind === "working" && current?.kind === "working" && p.step === current.step);
-  if (p?.kind === "working" && current?.kind === "working") p = { ...p, since: current.since };
+    (p !== null && current !== null && p.step === current.step);
+  if (p && current) p = { ...p, since: current.since };
   current = p;
   if (!same) paint();
   // the seconds keep counting while it works
-  if (p?.kind === "working" && !timer) timer = window.setInterval(paint, 500);
-  if (p?.kind !== "working" && timer) {
+  if (p && !timer) timer = window.setInterval(paint, 500);
+  if (!p && timer) {
     clearInterval(timer);
     timer = 0;
   }

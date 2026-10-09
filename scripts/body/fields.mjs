@@ -55,13 +55,14 @@ for (const name of names) {
   const { w, h } = d.meta;
   const t = performance.now();
   const joints = jointsFor(name, d);
-  const r = field.bodyFields({ w, h, person: d.in_person.slice(), labels: d.in_labels.slice(), joints, rgb: d.in_rgb });
+  const dbg = {};
+  const r = field.bodyFields({ w, h, person: d.in_person.slice(), labels: d.in_labels.slice(), joints, rgb: d.in_rgb, debug: dbg });
   const ms = performance.now() - t;
   total += ms;
-  writeDump(path.join(o.out, "dump", name), { ...d.meta, build: r.build, ms: { fields: ms } }, {
+  writeDump(path.join(o.out, "dump", name), { ...d.meta, build: r.build, cap: r.cap, ms: { fields: ms } }, {
     arms: r.arms, torso: r.torso, legs: r.legs, labels: r.labels, person: d.person, joints,
   });
-  let line = `${name}: ${ms.toFixed(0)} ms`;
+  let line = `${name}: ${ms.toFixed(0)} ms, strength ${r.build.toFixed(2)} cap ${r.cap.toFixed(2)}` + (o.verbose ? ` ${Object.entries(dbg).map(([k, v]) => `${k} ${v.toFixed(3)}`).join(" ")}` : "");
   if (o.compare) {
     let m = 0;
     for (const k of ["arms", "torso", "legs"]) for (let i = 0; i < r[k].length; i++) m = Math.max(m, Math.abs(r[k][i] - d[k][i]));
@@ -71,7 +72,8 @@ for (const name of names) {
   }
   if (o.render) {
     const { data, info } = await sharp(d.meta.photo).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    const k = [field.FULL.arms * r.build, field.FULL.torso * r.build, d.meta.legs === false ? 0 : field.FULL.legs * r.build];
+    const c = r.build * r.cap;
+    const k = [field.FULL.arms * c, field.FULL.torso * c, d.meta.legs === false ? 0 : field.FULL.legs * c];
     const img = warpRGB(data, info.width, info.height, [r.arms, r.torso, r.legs], k, w, h);
     fs.mkdirSync(path.join(o.out, "app"), { recursive: true });
     await sharp(img, { raw: { width: info.width, height: info.height, channels: 3 } }).jpeg({ quality: 92 }).toFile(path.join(o.out, "app", `${name}-100.jpg`));
