@@ -34,6 +34,11 @@ export type PostureIssue =
 export interface PostureResult {
   /** No issue: a good pose for the slimming. */
   ok: boolean;
+  /**
+   * Good enough to take the photo: whatever is left is a tip (arms a little further out, the feet,
+   * level shoulders), not something that spoils the slimming. Hands-free capture waits for this.
+   */
+  ready: boolean;
   /** The first thing to fix (most important first), or null. */
   issue: PostureIssue | null;
   /** What to tell the person. */
@@ -57,6 +62,9 @@ export const POSTURE_MESSAGES: Record<PostureIssue, string> = {
 
 export const POSTURE_OK = "Great pose. Hold still…";
 
+/** Issues that are only tips: the photo can be taken with them (see PostureResult.ready). */
+export const POSTURE_TIPS: ReadonlySet<PostureIssue> = new Set(["level", "armsOut", "armsIn", "feetApart", "feetCloser"]);
+
 /** Limits of the pose, relative to the body (see the file comment). */
 export const POSTURE = {
   minScore: 0.4,
@@ -65,9 +73,9 @@ export const POSTURE = {
   /** Shoulder height difference / shoulder width above this: leaning. */
   maxTilt: 0.25,
   /** Body height (nose to ankles) / frame height below this: too far, the body would be small (camera only). */
-  minHeightRatio: 0.6,
+  minHeightRatio: 0.5,
   /** Hip-centre offset from the frame centre / frame width above this (camera only). */
-  maxOffCentre: 0.1,
+  maxOffCentre: 0.15,
   /** Gap between wrist and hip, sideways, in shoulder widths: at least this (best ~0.55-0.7). */
   minHandGap: 0.48,
   /** Arm angle from vertical (shoulder to wrist), degrees: at least / at most (best 17-20). */
@@ -82,6 +90,7 @@ export const POSTURE = {
 
 const result = (issue: PostureIssue | null): PostureResult => ({
   ok: issue === null,
+  ready: issue === null || POSTURE_TIPS.has(issue),
   issue,
   message: issue ? POSTURE_MESSAGES[issue] : POSTURE_OK,
 });
@@ -108,7 +117,9 @@ export function checkPosture(J0: ArrayLike<number>, w: number, h: number, live: 
 
   const sw = Math.hypot(x(R_SH) - x(L_SH), y(R_SH) - y(L_SH));
   if (sw < POSTURE.minShoulderRatio * H) return result("faceCamera");
-  if (Math.abs(y(R_SH) - y(L_SH)) > POSTURE.maxTilt * sw) return result("level");
+  // the rest, in order of importance; something that spoils the slimming comes before a tip
+  const found: PostureIssue[] = [];
+  if (Math.abs(y(R_SH) - y(L_SH)) > POSTURE.maxTilt * sw) found.push("level");
   // facing the camera: an elbow or wrist BodyPix put on the other side belongs to this side
   J = jointsBySide(Float32Array.from(J0));
 
@@ -120,21 +131,21 @@ export function checkPosture(J0: ArrayLike<number>, w: number, h: number, live: 
   ] as const;
   for (const [S, E, W] of arms) {
     if (s(W) < POSTURE.minScore || s(E) < POSTURE.minScore) return result("notVisible");
-    if (y(W) < y(S) || armAngle(S, W) > 60) return result("armsLower"); // raised
-    if (armAngle(S, W) > POSTURE.maxArmAngle) return result("armsIn"); // held out wide
-    if (y(W) < hipY - POSTURE.maxWristAboveHip * H) return result("armsDown");
+    if (y(W) < y(S) || armAngle(S, W) > 60) found.push("armsLower"); // raised
+    else if (armAngle(S, W) > POSTURE.maxArmAngle) found.push("armsIn"); // held out wide
+    else if (y(W) < hipY - POSTURE.maxWristAboveHip * H) found.push("armsDown");
   }
   for (const [S, , W, Hp] of arms) {
     const angle = armAngle(S, W);
     const gap = (Math.abs(x(W) - hipX) - Math.abs(x(Hp) - hipX)) / sw;
-    if (angle < POSTURE.minArmAngle || gap < POSTURE.minHandGap) return result("armsOut");
+    if (angle < POSTURE.minArmAngle || gap < POSTURE.minHandGap) found.push("armsOut");
   }
 
   const hipW = Math.max(1, Math.abs(x(R_HIP) - x(L_HIP)));
   const feet = Math.abs(x(R_ANK) - x(L_ANK)) / hipW;
-  if (feet < POSTURE.minFeet) return result("feetApart");
-  if (feet > POSTURE.maxFeet) return result("feetCloser");
-  return result(null);
+  if (feet < POSTURE.minFeet) found.push("feetApart");
+  if (feet > POSTURE.maxFeet) found.push("feetCloser");
+  return result(found.find((i) => !POSTURE_TIPS.has(i)) ?? found[0] ?? null);
 }
 
 /** Body points watched for stillness: nose, shoulders, wrists, hips, ankles. */

@@ -43,7 +43,7 @@ try {
     }
     if ($null -eq $listener) { throw 'No available local port. Close earlier copies and try again.' }
     Open-App "$url/?v=$ver"
-    $mime = @{'.html'='text/html; charset=utf-8';'.js'='text/javascript';'.mjs'='text/javascript';'.css'='text/css';'.wasm'='application/wasm';'.json'='application/json';'.png'='image/png';'.jpg'='image/jpeg';'.jpeg'='image/jpeg';'.svg'='image/svg+xml';'.ico'='image/x-icon';'.task'='application/octet-stream';'.tflite'='application/octet-stream';'.onnx'='application/octet-stream'}
+    $mime = @{'.html'='text/html; charset=utf-8';'.js'='text/javascript';'.mjs'='text/javascript';'.css'='text/css';'.wasm'='application/wasm';'.json'='application/json';'.png'='image/png';'.jpg'='image/jpeg';'.jpeg'='image/jpeg';'.svg'='image/svg+xml';'.ico'='image/x-icon';'.task'='application/octet-stream';'.tflite'='application/octet-stream';'.onnx'='application/octet-stream';'.data'='application/octet-stream';'.binarypb'='application/octet-stream';'.txt'='text/plain; charset=utf-8'}
     while ($true) {
         $client = $listener.AcceptTcpClient()
         try {

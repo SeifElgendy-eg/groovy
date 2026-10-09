@@ -61,6 +61,15 @@ jobs:
           $model = Get-Bytes 'models/face_landmarker.task'
           $expectedModel = (Get-Item (Join-Path $pkg 'app/models/face_landmarker.task')).Length
           if ($model.RawContentLength -ne $expectedModel) { throw 'model size mismatch' }
+          # Every file of the app (with an extension) must be served whole: a type missing from the
+          # launcher's list is a 404, and whatever needs that file breaks only in the kiosk.
+          $app = Join-Path $pkg 'app'
+          $missing = @()
+          foreach ($f in Get-ChildItem -LiteralPath $app -Recurse -File | Where-Object { $_.Extension }) {
+            $rel = $f.FullName.Substring($app.Length + 1).Replace('\', '/')
+            try { $r = Invoke-WebRequest "$base/$rel" -UseBasicParsing -TimeoutSec 60; if ($r.RawContentLength -ne $f.Length) { $missing += "$rel (size)" } } catch { $missing += $rel }
+          }
+          if ($missing.Count) { throw "not served by the launcher: $($missing -join ', ')" }
           foreach ($bad in @('launcher/start-windows.ps1','../launcher/start-windows.ps1','offline-assets.sha256.json','.git/config')) {
             try { Invoke-WebRequest "$base/$bad" -UseBasicParsing -TimeoutSec 5 | Out-Null; throw "should be blocked: $bad" } catch { if ($_.Exception.Message -like 'should be blocked*') { throw } }
           }

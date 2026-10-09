@@ -7,6 +7,7 @@ import { getSourceDims } from "../app/frames";
 import { state } from "../app/state";
 import type { NormalizedLandmark } from "../effects/skin/input";
 import { mountBodyGuide, updateBodyGuide } from "./bodyGuide";
+import { mountBodyProgress } from "./bodyProgress";
 import { mountCountdown } from "./countdown";
 import { dom } from "./dom";
 
@@ -44,6 +45,7 @@ export function mountFaceGuide(): void {
   mountBodyGuide();
   mountCountdown();
   dom.stageWrap.append(photoProcessingCue);
+  mountBodyProgress();
   window.addEventListener("resize", () => updateFaceGuide(state.facePoints));
 }
 

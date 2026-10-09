@@ -6,6 +6,7 @@ import type { SkinInput } from "../effects/skin/input";
 import { readBodySettings, readBotoxDoses, readLipParams } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { hidePhotoProcessingCue, showPhotoProcessingCue } from "../ui/faceGuide";
+import { setBodyProgress } from "../ui/bodyProgress";
 import { acne, body, bodyPerson, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
@@ -151,6 +152,28 @@ function renderAcne(w: number, h: number): void {
   if (ready) acne.draw(ctx, w, h, amount, scars, pores, redness);
 }
 
+let analysisStart = 0;
+let analysisMs = 0;
+body.onStep = () => setBodyProgress(progressOf(readBodySettings()));
+
+/** The body's processing state for the indicator over the photo. */
+function progressOf(settings: { overall: number; arms: number; waist: number; legs: number }): Parameters<typeof setBodyProgress>[0] {
+  if (body.busy || body.dirty) return { kind: "working", step: body.step ?? "Starting", since: analysisStart || performance.now() };
+  if (body.failed) return { kind: "failed", message: "No full body found: use a photo of the whole body, facing the camera." };
+  if (!body.ready) return null;
+  const s = body.strengths(settings);
+  if (s.arms + s.torso + s.legs <= 0) return { kind: "ready", detail: `Analysed in ${(analysisMs / 1000).toFixed(1)} s: move the Weight loss slider (and keep an area on).` };
+  const parts = [
+    `${Math.round(settings.overall * 100)}% weight loss`,
+    `ready in ${(analysisMs / 1000).toFixed(1)} s`,
+    body.legs ? "arms, waist & legs" : "arms & waist (legs not in view)",
+    body.pointsFrom === "both" ? "body points: BodyPix + MediaPipe" : "body points: BodyPix",
+  ];
+  if (body.outline === "bodypix") parts.push("outline: BodyPix (the person was hard to make out)");
+  if (body.backdropState === "used") parts.push("backdrop used");
+  return { kind: "done", detail: parts.join(" · ") };
+}
+
 function renderBody(w: number, h: number): void {
   const status = dom.bodyStatus;
   if (state.sourceMode !== "photo") {
@@ -160,14 +183,16 @@ function renderBody(w: number, h: number): void {
     return;
   }
   const person = bodyPerson.mask;
+  const settings = readBodySettings();
   if (!person) {
     status.textContent = state.modelReady ? "Analysing the photo…" : "Loading models…";
+    setBodyProgress({ kind: "working", step: state.modelReady ? "Finding the person in the photo" : "Loading the models", since: performance.now() });
     return;
   }
-  const settings = readBodySettings();
   if (settings.overall <= 0) {
     status.textContent = "Move the Weight loss slider to preview the result.";
-    return;
+    setBodyProgress(body.ready || body.failed || body.busy ? progressOf(settings) : null);
+    if (!body.dirty || body.busy) return;
   }
   // A new photo while the last one is still being analysed: stop that analysis.
   if (body.dirty && body.busy) body.cancel();
@@ -175,17 +200,21 @@ function renderBody(w: number, h: number): void {
     document.body.dataset.effectsBusy = "1";
     status.textContent = "Analysing the body…";
     const start = performance.now();
+    analysisStart = start;
     void body
       .prepare(sourceCanvas, person)
       .then((ok) => {
-        if (ok) noteWork("body analysis", performance.now() - start);
+        analysisMs = performance.now() - start;
+        if (ok) noteWork("body analysis", analysisMs);
       })
       .finally(() => {
         if (!anyBusy()) delete document.body.dataset.effectsBusy;
         renderAll();
       });
+    setBodyProgress(progressOf(settings));
     return;
   }
+  setBodyProgress(progressOf(settings));
   if (body.busy) return;
   if (body.failed) {
     status.textContent = "No full body found. Use a photo of the whole body, facing the camera.";
@@ -282,6 +311,7 @@ export function renderAll(): void {
 function drawStage(): void {
   const { w, h } = getSourceDims();
   if (!w || !h) return;
+  if (state.module !== "body" || state.sourceMode !== "photo") setBodyProgress(null);
   ctx.clearRect(0, 0, w, h);
   if (state.sourceMode === "camera" && (!cameraNeedsEffect() || !state.faceAligned)) return;
   // Composite the effect over the exact captured frame used by the models.

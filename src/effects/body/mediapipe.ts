@@ -15,10 +15,14 @@ export type Landmarks = number[][];
 
 interface PoseFrame extends Window {
   poseReady: Promise<void>;
+  /** Resolves (with the reason) when MediaPipe cannot work in this page. */
+  poseFailed: Promise<string>;
   findPose(image: CanvasImageSource, w: number, h: number): Promise<Landmarks | null>;
 }
 
 let ready: Promise<PoseFrame> | null = null;
+/** MediaPipe cannot load here (a file missing, no WebGL): not tried again until the page reloads. */
+let unavailable = false;
 /** One photo at a time. */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -34,6 +38,7 @@ function load(base: string): Promise<PoseFrame> {
         const w = f.contentWindow as PoseFrame | null;
         if (!w?.findPose) return reject(new Error("MediaPipe Pose did not load"));
         w.poseReady.then(() => resolve(w), reject);
+        w.poseFailed.then((why) => reject(new Error(why)));
       };
       f.onerror = () => reject(new Error("MediaPipe Pose frame did not load"));
       f.src = new URL(FRAME, base).href;
@@ -41,7 +46,7 @@ function load(base: string): Promise<PoseFrame> {
     });
     ready.catch((err) => {
       console.warn("MediaPipe Pose unavailable (BodyPix's body points are used alone)", err);
-      ready = null; // try again with the next photo
+      unavailable = true;
     });
   }
   return ready;
@@ -54,6 +59,7 @@ export function warmUpPose(base: string): void {
 
 /** The body's landmarks in this photo (w x h), or null (none found, or MediaPipe unavailable). */
 export function findPose(base: string, image: CanvasImageSource, w: number, h: number): Promise<Landmarks | null> {
+  if (unavailable) return Promise.resolve(null);
   const run = queue.then(async () => {
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => (timer = window.setTimeout(() => reject(new Error("MediaPipe Pose timed out")), TIMEOUT_MS)));

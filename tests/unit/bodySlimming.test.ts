@@ -2,7 +2,7 @@
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
 import { armHanging, blur, bodyFields, distanceTransform, FULL, growHands, handShapes, JOINT_COUNT, jointsBySide, rigidHands, runsOf, sstep, unfold } from "../../src/effects/body/field";
-import { addArms, decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
+import { addArms, decodeJoints, decodeParts, inputSide, maskUnsure, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
 const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -245,6 +245,20 @@ describe("whole hands", () => {
     expect(labels[35 * w + 24]).toBe(16); // leggings beside the fingers
     expect(labels[10 * w + 30]).toBe(16); // above the wrist: not the hand
     expect(labels[60 * w + 30]).toBe(16); // far below: not the hand
+  });
+});
+
+describe("an unsure person mask", () => {
+  it("is one with more half-sure than sure pixels, or almost nothing sure", () => {
+    const m = (sure: number, half: number) => {
+      const a = new Float32Array(1000);
+      a.fill(0.9, 0, sure);
+      a.fill(0.3, sure, sure + half);
+      return a;
+    };
+    expect(maskUnsure(m(200, 40))).toBe(false); // a clear photo
+    expect(maskUnsure(m(30, 130))).toBe(true); // a dim camera: the body only half-seen
+    expect(maskUnsure(m(5, 0))).toBe(true);
   });
 });
 
