@@ -22,6 +22,8 @@ jobs:
   package:
     runs-on: windows-latest
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.pkg.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -101,9 +103,9 @@ jobs:
           path: release/Groovy-Windows/
           if-no-files-found: error
           retention-days: 30
-      # (the zip, for the GitHub release of a version tag)
+      # (the zip, for the GitHub release: a version tag, or the latest main)
       - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         with:
           name: release-zip
           path: release/Groovy-Windows.zip
@@ -120,18 +122,39 @@ jobs:
 
   release:
     name: Publish the zip as a GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A version tag (v1.2.0) gets its own release. Every push to main updates the "kiosk-latest"
+    # release, so this link always downloads the newest tested build, with no sign-in (public repo):
+    #   https://github.com/<owner>/<repo>/releases/download/kiosk-latest/Groovy-Windows.zip
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: package
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: release-zip
-      - name: Create the release
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" Groovy-Windows.zip \
-            --repo "$GITHUB_REPOSITORY" --title "Groovy $GITHUB_REF_NAME" --generate-notes
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # (the release may already exist, made by hand on GitHub with this tag)
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" Groovy-Windows.zip --clobber --repo "$GITHUB_REPOSITORY"
+            else
+              gh release create "$GITHUB_REF_NAME" Groovy-Windows.zip \
+                --repo "$GITHUB_REPOSITORY" --title "Groovy $GITHUB_REF_NAME" --generate-notes
+            fi
+          else
+            # the latest main: replaced (tag moved to this commit) on every push
+            gh release delete kiosk-latest --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+            gh release create kiosk-latest Groovy-Windows.zip --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease --title "Groovy (latest main, $VERSION)" \
+              --notes "The newest build of main, tested on Windows. Download Groovy-Windows.zip, unzip it, and run Start Groovy.vbs. Version $VERSION (also in the app folder's version.txt)."
+          fi
+          echo "Public download: https://github.com/$GITHUB_REPOSITORY/releases/download/$( [[ "$GITHUB_REF" == refs/tags/v* ]] && echo "$GITHUB_REF_NAME" || echo kiosk-latest )/Groovy-Windows.zip" >> "$GITHUB_STEP_SUMMARY"
