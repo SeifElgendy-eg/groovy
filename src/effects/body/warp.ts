@@ -32,7 +32,12 @@ void main() {
   vec2 p = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y); // y down, like the photo
   vec2 uv = p / uSize;
   vec2 d = uS.x * texture(uArms, uv).rg + uS.y * texture(uTorso, uv).rg + uS.z * texture(uLegs, uv).rg;
-  vec2 s = clamp(p + d * uScale, vec2(0.5), uSize - 0.5);
+  // a point moved past the photo's edge is mirrored back inside (clamping it repeats the edge
+  // pixel: streaks)
+  vec2 r = p + d * uScale;
+  r = mix(r, 1.0 - r, step(r, vec2(0.0)));
+  r = mix(r, 2.0 * uSize - 1.0 - r, step(uSize, r));
+  vec2 s = clamp(r, vec2(0.5), uSize - 0.5);
   vec3 warped = texture(uFrame, s / uSize).rgb;
   if (uUsePlate < 0.5) {
     outColor = vec4(warped, 1.0);
@@ -252,8 +257,9 @@ export class BodyWarp {
     };
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
-        const sx = Math.min(Math.max(x + field(x, y, 0) * kx, 0), W - 1);
-        const sy = Math.min(Math.max(y + field(x, y, 1) * ky, 0), H - 1);
+        const mirror = (v: number, n: number) => (v < 0 ? -v : v > n - 1 ? 2 * (n - 1) - v : v);
+        const sx = Math.min(Math.max(mirror(x + field(x, y, 0) * kx, W), 0), W - 1);
+        const sy = Math.min(Math.max(mirror(y + field(x, y, 1) * ky, H), 0), H - 1);
         const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = Math.min(x0 + 1, W - 1), y1 = Math.min(y0 + 1, H - 1);
         const tx = sx - x0, ty = sy - y0, o = (y * W + x) * 4;
         let was = 0, now = 0;

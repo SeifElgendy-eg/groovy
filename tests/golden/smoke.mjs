@@ -142,7 +142,8 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
 
   await body.click(".capture-photo");
   const running = await ui();
-  const runningOk = running.counting && running.number === "5" && running.button === "Cancel" && !running.still;
+  // (5, or 4 when the machine is slow to answer: the countdown ticks every second)
+  const runningOk = running.counting && ["5", "4"].includes(running.number) && running.button === "Cancel" && !running.still;
   console.log(runningOk ? "ok  " : "FAIL", "pressing the button starts the countdown", JSON.stringify(running));
   if (!runningOk) bad++;
 

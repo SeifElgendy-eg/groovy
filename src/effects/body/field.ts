@@ -69,6 +69,8 @@ export interface BodyFields {
   legs: Float32Array;
   /** 0.3 (slim) .. 1 (heavy): scales the maximum. */
   build: number;
+  /** Body parts as the fields used them (arms by side, whole hands): for checks and the debug view. */
+  labels: Uint8Array;
 }
 
 // ---------------------------------------------------------------- small helpers
@@ -527,6 +529,24 @@ const ARM_PARTS: ArmPart[] = [
   { ids: [8, 9], side: "R", upper: false },
 ];
 
+/**
+ * How much an arm hangs down (1) rather than being raised, held out or sharply bent (0), from its
+ * body points (side "R": joints 2-4, "L": 5-7). Arms are slimmed by narrowing each part across its
+ * own direction, which is reliable on an arm hanging by the body; on a raised arm, an arm bent to
+ * the face or hip, or crossed arms (often in baggy sleeves), the parts are mislabelled and
+ * narrowing them twists the arm, so those arms are slimmed less, down to not at all.
+ */
+export function armHanging(J: ArrayLike<number>, side: "L" | "R"): number {
+  const [S, E, W] = side === "R" ? [2, 3, 4] : [5, 6, 7];
+  const x = (i: number) => J[i * 3], y = (i: number) => J[i * 3 + 1];
+  if (J[E * 3 + 2] < 0.3 || J[W * 3 + 2] < 0.3) return 0.5;
+  const fromDown = (a: number, b: number) => (Math.atan2(Math.abs(x(b) - x(a)), y(b) - y(a)) * 180) / Math.PI; // 0 = straight down, 180 = up
+  const upper = fromDown(S, E), fore = fromDown(E, W);
+  const ux = x(E) - x(S), uy = y(E) - y(S), fx = x(W) - x(E), fy = y(W) - y(E);
+  const bend = (Math.acos(Math.max(-1, Math.min(1, (ux * fx + uy * fy) / (Math.hypot(ux, uy) * Math.hypot(fx, fy) || 1)))) * 180) / Math.PI;
+  return (1 - sstep(35, 60, Math.max(upper, fore))) * (1 - sstep(35, 70, bend));
+}
+
 /** Arm slimming at strength 1: each part narrows across its own direction toward its centre line. */
 function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: Uint8Array): { dx: Float32Array; dy: Float32Array } {
   const { w, h, sw } = F;
@@ -554,6 +574,8 @@ function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: Uint8Arr
   };
   const minArea = Math.max(30, 0.003 * sw * sw);
   for (const part of ARM_PARTS) {
+    const hang = armHanging(F.J, part.side);
+    if (hang <= 0) continue;
     const pm = new Float32Array(n);
     let cnt = 0, mx = 0, my = 0;
     for (let i = 0; i < n; i++)
@@ -610,7 +632,7 @@ function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: Uint8Arr
         const across = av <= r ? v : Math.sign(v) * r * clamp(1 - (av - r) / (0.6 * r), 0, 1);
         const ex = mx + tc * ux + Math.sign(v) * (r + 0.04 * sw) * nx, ey = my + tc * uy + Math.sign(v) * (r + 0.04 * sw) * ny;
         const against = clamp(1.6 * sample(near, w, h, ex, ey) - 0.2, 0, 1);
-        const disp = g * across * wgt[i] * (1 - against);
+        const disp = hang * g * across * wgt[i] * (1 - against);
         numX[i] += disp * nx;
         numY[i] += disp * ny;
         den[i] += wgt[i];
@@ -652,6 +674,9 @@ function armSwing(
   const P = input.person;
   const out = { dx: new Float32Array(n), dy: new Float32Array(n), rest: { v: new Float32Array(2 * h), c: new Float32Array(2 * h), arm: new Float32Array(2 * h) } as ArmRest };
   for (const [side, ids] of [["L", LEFT_ARM], ["R", RIGHT_ARM]] as const) {
+    // only an arm hanging down rests on the body's side and turns in with it
+    const hang = armHanging(F.J, side === "L" ? "L" : "R");
+    if (hang <= 0) continue;
     const am = new Float32Array(n);
     let cnt = 0, sx = 0, sy = 0, ymin = h, ymax = -1;
     for (let i = 0; i < n; i++)
@@ -725,6 +750,8 @@ function armSwing(
     }
     // below the lowest contact the arm is not pushed any further: it moves on with that point
     // (an arm touching only near the armpit is not swung across by its whole length)
+    theta *= hang;
+    theta2 *= hang;
     const yLow = rows.reduce((m, r) => Math.max(m, r.y), sy0);
     for (const r of rows) {
       const k = (left ? 0 : h) + r.y;
@@ -1191,7 +1218,7 @@ export function bodyFields(input: BodyInput): BodyFields {
   };
   const out = { arms: pack("arms"), torso: pack("torso"), legs: pack("legs") };
   unfold(out, [sA, sT, sL], w, h, sw);
-  return { w, h, ...out, build: buildK };
+  return { w, h, ...out, build: buildK, labels };
 }
 
 /**
@@ -1212,7 +1239,7 @@ export function unfold(
   const keys = ["arms", "torso", "legs"] as const;
   const MIN = 0.3; // smallest allowed local area scale of the warp (1 = unchanged)
   let worst = 0;
-  for (let it = 0; it < 8; it++) {
+  for (let it = 0; it < 16; it++) {
     const sx = new Float32Array(n), sy = new Float32Array(n);
     for (let i = 0; i < n; i++)
       keys.forEach((key, j) => {

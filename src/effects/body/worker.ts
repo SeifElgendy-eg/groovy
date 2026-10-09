@@ -89,7 +89,7 @@ const api = {
     for (let i = 0; i < job.ww * job.wh; i++) rgb.set(job.rgba.subarray(i * 4, i * 4 + 3), i * 3);
     const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
     const r: BodyResult = { ...f, joints, person, ms: { model: t1 - t0, fields: performance.now() - t1 } };
-    return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer]);
+    return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer, r.labels.buffer]);
   },
 };
 
