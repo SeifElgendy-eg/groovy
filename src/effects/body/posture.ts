@@ -11,7 +11,7 @@
 // All the measures are relative to the body itself (its height and shoulder width), not to the
 // frame, so they work in a landscape or a portrait camera alike.
 
-import { jointsBySide } from "./field";
+import { jointsBySide, pointsSeen } from "./field";
 
 /** Body points used here (OpenPose order). */
 const NOSE = 0, R_SH = 2, R_EL = 3, R_WR = 4, L_SH = 5, L_EL = 6, L_WR = 7;
@@ -182,8 +182,5 @@ export class Stillness {
  * too when the ankles are in it as well, see field.ts).
  */
 export function legsVisible(J: ArrayLike<number>, w: number, h: number): boolean {
-  return [R_KNEE, L_KNEE].every((i) => {
-    const px = J[i * 3], py = J[i * 3 + 1];
-    return J[i * 3 + 2] >= 0.5 && px >= 0.01 * w && px <= 0.99 * w && py >= 0.01 * h && py <= 0.98 * h;
-  });
+  return pointsSeen(J, w, h, [R_KNEE, L_KNEE]);
 }

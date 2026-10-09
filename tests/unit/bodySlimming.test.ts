@@ -1,7 +1,7 @@
 // Body slimming: the helpers it is built on, BodyPix output decoding, and the movement fields'
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
-import { blur, bodyFields, distanceTransform, growHands, JOINT_COUNT, jointsBySide, runsOf, sstep, unfold } from "../../src/effects/body/field";
+import { armHanging, blur, bodyFields, distanceTransform, growHands, handShapes, JOINT_COUNT, jointsBySide, rigidHands, runsOf, sstep, unfold } from "../../src/effects/body/field";
 import { addArms, decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
@@ -253,5 +253,111 @@ describe("fold removal", () => {
     const torso = field((x) => (x >= 30 && x < 34 ? 6 : 0));
     const legs = field((x) => (x >= 30 && x < 34 ? -6 : 0));
     expect(unfold({ arms: zero(), torso, legs }, [1, 1, 1], w, h, 40)).toBeGreaterThan(0);
+  });
+});
+
+describe("hands move as one piece", () => {
+  // a forearm (rows 10-24) ending in a hand (rows 25-32) at x 17-23; wrist point at (20, 24)
+  const w = 40, h = 40, n = w * h, sw = 40;
+  const setup = (bodyAround: boolean) => {
+    const m = new Uint8Array(n), labels = new Uint8Array(n).fill(255), body = new Uint8Array(n);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (x >= 17 && x <= 23 && y >= 10 && y <= 32) {
+          m[i] = 1;
+          labels[i] = y <= 24 ? 8 : 11;
+        } else if (bodyAround && y >= 22) {
+          m[i] = body[i] = 1;
+          labels[i] = 16;
+        }
+      }
+    const J = new Float32Array(JOINT_COUNT * 3);
+    J.set([20, 2, 1], 3 * 3);
+    J.set([20, 24, 1], 4 * 3);
+    J.set([-200, -200, 1], 7 * 3);
+    return { m, labels, body, J };
+  };
+  const at = (f: Float32Array, x: number, y: number) => f[y * w + x];
+
+  it("goes where its wrist goes", () => {
+    const { m, labels, J } = setup(false);
+    const f = { dx: new Float32Array(n), dy: new Float32Array(n) };
+    for (let i = 0; i < n; i++) f.dx[i] = labels[i] === 8 ? 2 : labels[i] === 11 ? 5 : 0;
+    rigidHands(f, handShapes(labels, m, w, h, sw, J, null), w, h, sw, 1, null);
+    expect(at(f.dx, 20, 29)).toBeCloseTo(2, 3);
+    expect(at(f.dx, 18, 31)).toBeCloseTo(2, 3);
+  });
+
+  it("rests on the body and goes with it while its arm stays", () => {
+    const { m, labels, body, J } = setup(true);
+    const f = { dx: new Float32Array(n), dy: new Float32Array(n) };
+    const bodyDx = new Float32Array(n);
+    for (let i = 0; i < n; i++) bodyDx[i] = body[i] ? -3 : 0;
+    f.dx.set(bodyDx);
+    rigidHands(f, handShapes(labels, m, w, h, sw, J, body), w, h, sw, 1, bodyDx);
+    expect(at(f.dx, 20, 29)).toBeCloseTo(-3, 1);
+  });
+
+  it("goes with its arm when the arm moves, even on the body", () => {
+    const { m, labels, body, J } = setup(true);
+    const f = { dx: new Float32Array(n), dy: new Float32Array(n) };
+    const bodyDx = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      bodyDx[i] = body[i] ? -3 : 0;
+      f.dx[i] = labels[i] === 8 ? 4 : bodyDx[i];
+    }
+    rigidHands(f, handShapes(labels, m, w, h, sw, J, body), w, h, sw, 1, bodyDx);
+    expect(at(f.dx, 20, 29)).toBeCloseTo(4, 1);
+  });
+});
+
+describe("arms that rest on the body", () => {
+  const figure = (gap: number) => {
+    const w = 200, h = 300;
+    const person = new Float32Array(w * h);
+    const labels = new Uint8Array(w * h).fill(255);
+    const fill = (x0: number, y0: number, x1: number, y1: number, part: number) => {
+      for (let y = y0; y < y1; y++)
+        for (let x = x0; x < x1; x++) {
+          person[y * w + x] = 1;
+          labels[y * w + x] = part;
+        }
+    };
+    fill(85, 15, 115, 55, 0);
+    fill(70, 60, 130, 160, 12);
+    fill(72, 160, 98, 290, 16);
+    fill(102, 160, 128, 290, 14);
+    // arms hanging straight down beside the torso, `gap` pixels from it
+    fill(56 - gap, 62, 70 - gap, 120, 4);
+    fill(56 - gap, 120, 70 - gap, 170, 8);
+    fill(130 + gap, 62, 144 + gap, 120, 2);
+    fill(130 + gap, 120, 144 + gap, 170, 6);
+    const joints = new Float32Array(JOINT_COUNT * 3);
+    const set = (j: number, x: number, y: number) => joints.set([x, y, 1], j * 3);
+    set(0, 100, 35); set(1, 100, 62);
+    set(2, 72, 62); set(3, 63 - gap, 120); set(4, 63 - gap, 170);
+    set(5, 128, 62); set(6, 137 + gap, 120); set(7, 137 + gap, 170);
+    set(8, 85, 155); set(9, 85, 220); set(10, 85, 285);
+    set(11, 115, 155); set(12, 115, 220); set(13, 115, 285);
+    return { w, f: bodyFields({ w, h, person, labels, joints }) };
+  };
+
+  it("an arm against the waist turns in with it; a free arm stays", () => {
+    const touching = figure(0), free = figure(10);
+    const dxAt = (r: { w: number; f: { torso: Float32Array } }, x: number, y: number) => r.f.torso[(y * r.w + x) * 2];
+    // image-left forearm: the waist's edge next to it moves in (dx < 0 there), and so does the arm
+    expect(dxAt(touching, 63, 150)).toBeLessThan(-1);
+    expect(Math.abs(dxAt(free, 53, 150))).toBeLessThan(0.3);
+  });
+
+  it("only arms hanging down count as hanging", () => {
+    const J = new Float32Array(JOINT_COUNT * 3);
+    J.set([72, 62, 1], 2 * 3);
+    J.set([63, 120, 1], 3 * 3);
+    J.set([63, 170, 1], 4 * 3);
+    expect(armHanging(J, "R")).toBeCloseTo(1, 3);
+    J.set([110, 90, 1], 4 * 3); // forearm bent up across the body
+    expect(armHanging(J, "R")).toBe(0);
   });
 });

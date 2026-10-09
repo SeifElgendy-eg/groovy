@@ -184,18 +184,6 @@ export function resizeMask(src: Float32Array, sw: number, sh: number, dw: number
   return out;
 }
 
-/** RGBA pixels at W x H -> RGB (3 bytes per pixel) at w x h, bilinear. */
-export function resizeRGB(rgba: Uint8ClampedArray, W: number, H: number, w: number, h: number): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(w * h * 3);
-  const ch = new Float32Array(W * H);
-  for (let c = 0; c < 3; c++) {
-    for (let i = 0; i < W * H; i++) ch[i] = rgba[i * 4 + c];
-    const r = resizeMask(ch, W, H, w, h);
-    for (let i = 0; i < w * h; i++) out[i * 3 + c] = r[i];
-  }
-  return out;
-}
-
 /** RGBA pixels (model input size) -> the model's input tensor data (NHWC, RGB in [-1, 1]). */
 export function toInput(rgba: Uint8ClampedArray, W: number, H: number): Float32Array {
   const out = new Float32Array(W * H * 3);

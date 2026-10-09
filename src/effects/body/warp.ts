@@ -80,6 +80,8 @@ export class BodyWarp {
   readonly canvas = document.createElement("canvas");
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
+  /** Uniform locations, looked up once after linking. */
+  private loc: Record<string, WebGLUniformLocation | null> = {};
   private tex: Record<"frame" | "arms" | "torso" | "legs" | "plate" | "cover" | "gain", WebGLTexture> | null = null;
   private backdrop: BackdropSet | null = null;
   private cpuPlate: ImageData | null = null;
@@ -115,6 +117,8 @@ export class BodyWarp {
       gl.linkProgram(p);
       if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "link");
       this.program = p;
+      for (const name of ["uFrame", "uArms", "uTorso", "uLegs", "uPlate", "uCover", "uGain", "uSize", "uScale", "uS", "uUsePlate"])
+        this.loc[name] = gl.getUniformLocation(p, name);
     } catch (err) {
       console.warn("body warp: WebGL2 unavailable, using the CPU", err);
       return null;
@@ -214,15 +218,16 @@ export class BodyWarp {
       gl.useProgram(this.program);
       const t = this.tex;
       const units = [t.frame, t.arms, t.torso, t.legs, t.plate, t.cover, t.gain];
+      const L = this.loc;
       ["uFrame", "uArms", "uTorso", "uLegs", "uPlate", "uCover", "uGain"].forEach((name, i) => {
         gl.activeTexture(gl.TEXTURE0 + i);
         gl.bindTexture(gl.TEXTURE_2D, units[i]);
-        gl.uniform1i(gl.getUniformLocation(this.program!, name), i);
+        gl.uniform1i(L[name], i);
       });
-      gl.uniform2f(gl.getUniformLocation(this.program, "uSize"), frame.width, frame.height);
-      gl.uniform2f(gl.getUniformLocation(this.program, "uScale"), frame.width / f.w, frame.height / f.h);
-      gl.uniform3f(gl.getUniformLocation(this.program, "uS"), s.arms, s.torso, s.legs);
-      gl.uniform1f(gl.getUniformLocation(this.program, "uUsePlate"), this.backdrop ? 1 : 0);
+      gl.uniform2f(L.uSize, frame.width, frame.height);
+      gl.uniform2f(L.uScale, frame.width / f.w, frame.height / f.h);
+      gl.uniform3f(L.uS, s.arms, s.torso, s.legs);
+      gl.uniform1f(L.uUsePlate, this.backdrop ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       return this.canvas;
     }
@@ -242,28 +247,30 @@ export class BodyWarp {
     const bd = this.backdrop;
     if (bd && !this.cpuPlate) this.cpuPlate = bd.plate.getContext("2d")!.getImageData(0, 0, W, H);
     const plate = bd ? this.cpuPlate!.data : null;
-    const field = (x: number, y: number, c: 0 | 1) => {
-      const fx = Math.min(Math.max(x / kx - 0.5, 0), f.w - 1), fy = Math.min(Math.max(y / ky - 0.5, 0), f.h - 1);
+    const layers = ([[f.arms, s.arms], [f.torso, s.torso], [f.legs, s.legs]] as const).filter(([, k]) => k);
+    // movement at (x, y) (photo pixels; the field is sampled as the GPU samples its texture)
+    let mx = 0, my = 0;
+    const move = (x: number, y: number) => {
+      const fx = Math.min(Math.max((x + 0.5) / kx - 0.5, 0), f.w - 1), fy = Math.min(Math.max((y + 0.5) / ky - 0.5, 0), f.h - 1);
       const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(x0 + 1, f.w - 1), y1 = Math.min(y0 + 1, f.h - 1);
       const tx = fx - x0, ty = fy - y0;
-      let v = 0;
-      for (const [arr, k] of [[f.arms, s.arms], [f.torso, s.torso], [f.legs, s.legs]] as const) {
-        if (!k) continue;
-        const a = arr[(y0 * f.w + x0) * 2 + c], b = arr[(y0 * f.w + x1) * 2 + c];
-        const cc = arr[(y1 * f.w + x0) * 2 + c], d = arr[(y1 * f.w + x1) * 2 + c];
-        v += k * ((a + (b - a) * tx) * (1 - ty) + (cc + (d - cc) * tx) * ty);
+      const a = (y0 * f.w + x0) * 2, b = (y0 * f.w + x1) * 2, c = (y1 * f.w + x0) * 2, d = (y1 * f.w + x1) * 2;
+      mx = my = 0;
+      for (const [arr, k] of layers) {
+        mx += k * ((arr[a] + (arr[b] - arr[a]) * tx) * (1 - ty) + (arr[c] + (arr[d] - arr[c]) * tx) * ty);
+        my += k * ((arr[a + 1] + (arr[b + 1] - arr[a + 1]) * tx) * (1 - ty) + (arr[c + 1] + (arr[d + 1] - arr[c + 1]) * tx) * ty);
       }
-      return v;
     };
+    const mirror = (v: number, n: number) => (v < 0 ? -v : v > n - 1 ? 2 * (n - 1) - v : v);
+    const wv = [0, 0, 0];
     for (let y = 0; y < H; y++)
       for (let x = 0; x < W; x++) {
-        const mirror = (v: number, n: number) => (v < 0 ? -v : v > n - 1 ? 2 * (n - 1) - v : v);
-        const sx = Math.min(Math.max(mirror(x + field(x, y, 0) * kx, W), 0), W - 1);
-        const sy = Math.min(Math.max(mirror(y + field(x, y, 1) * ky, H), 0), H - 1);
+        move(x, y);
+        const sx = Math.min(Math.max(mirror(x + mx * kx, W), 0), W - 1);
+        const sy = Math.min(Math.max(mirror(y + my * ky, H), 0), H - 1);
         const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = Math.min(x0 + 1, W - 1), y1 = Math.min(y0 + 1, H - 1);
         const tx = sx - x0, ty = sy - y0, o = (y * W + x) * 4;
         let was = 0, now = 0;
-        const wv = [0, 0, 0];
         for (let c = 0; c < 3; c++) {
           const a = src[(y0 * W + x0) * 4 + c], b = src[(y0 * W + x1) * 4 + c];
           const cc = src[(y1 * W + x0) * 4 + c], d = src[(y1 * W + x1) * 4 + c];

@@ -93,11 +93,22 @@ const api = {
     const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh, job.crop);
     // arms and hands the segmenter missed (see addArms)
     const bp = decodeSegments(out.segments.data as Float32Array, g, job.ww, job.wh, job.crop);
-    addArms(person, bp, decodeParts(parts.data as Float32Array, g, job.ww, job.wh, bp, job.crop));
-    const labels = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, person, job.crop);
+    // the body parts, decoded once for both masks (BodyPix's and the app's, which only grows inside
+    // BodyPix's), then kept where each mask has the person
+    const n = job.ww * job.wh;
+    const either = new Float32Array(n);
+    for (let i = 0; i < n; i++) either[i] = Math.max(person[i], bp[i]);
+    const parts0 = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, either, job.crop);
+    const within = (mask: Float32Array) => parts0.map((p, i) => (mask[i] > 0.3 ? p : 255));
+    addArms(person, bp, within(bp));
+    const labels = within(person);
     for (const t of Object.values(out)) t.dispose();
-    const rgb = new Uint8ClampedArray(job.ww * job.wh * 3);
-    for (let i = 0; i < job.ww * job.wh; i++) rgb.set(job.rgba.subarray(i * 4, i * 4 + 3), i * 3);
+    const rgb = new Uint8ClampedArray(n * 3);
+    for (let i = 0, j = 0; i < n; i++, j += 3) {
+      rgb[j] = job.rgba[i * 4];
+      rgb[j + 1] = job.rgba[i * 4 + 1];
+      rgb[j + 2] = job.rgba[i * 4 + 2];
+    }
     const inputs = job.debug ? { person: person.slice(), labels: labels.slice(), joints: joints.slice(), rgb: rgb.slice() } : undefined;
     const t2 = performance.now();
     const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });

@@ -1,7 +1,7 @@
 // The empty backdrop (a photo of the booth with nobody in it): when the slimmed body no longer covers
 // part of where the body was, the backdrop shows there, instead of stretched background pixels.
 // Pure functions on small arrays (unit-tested); the drawing is in warp.ts.
-import { blur } from "./field";
+import { blur, distanceTransform } from "./field";
 
 /** A single-channel map (0..1) at its own resolution. */
 export interface Map1 {
@@ -22,32 +22,19 @@ export interface Gain {
 /** Above this mismatch the backdrop is not the scene of the photo (camera moved, lights changed). */
 export const MAX_MISMATCH = 0.06;
 
-/** Separable max filter of radius r (square neighbourhood). */
-function maxFilter(src: Float32Array, w: number, h: number, r: number): Float32Array {
-  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      let m = 0;
-      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++) m = Math.max(m, src[y * w + k]);
-      tmp[y * w + x] = m;
-    }
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      let m = 0;
-      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) m = Math.max(m, tmp[k * w + x]);
-      out[y * w + x] = m;
-    }
-  return out;
-}
-
 /**
  * Where the person is, grown by `grow` pixels and softened over `soft` pixels: covers the soft
  * edge of the person (hair, the mask's own blur) so no outline of the old body is left behind.
  */
 export function personCover(mask: Map1, grow: number, soft: number): Map1 {
-  const hard = new Float32Array(mask.data.length);
-  for (let i = 0; i < hard.length; i++) hard[i] = mask.data[i] > 0.3 ? 1 : 0;
-  const grown = maxFilter(hard, mask.w, mask.h, Math.max(0, Math.round(grow)));
+  // grown by `grow` pixels in every direction (round, from the distance to the person: fast at
+  // any size, unlike a max filter)
+  const n = mask.data.length;
+  const outside = new Uint8Array(n);
+  for (let i = 0; i < n; i++) outside[i] = mask.data[i] > 0.3 ? 0 : 1;
+  const dist = distanceTransform(outside, mask.w, mask.h);
+  const grown = new Float32Array(n);
+  for (let i = 0; i < n; i++) grown[i] = dist[i] <= grow ? 1 : 0;
   const data = soft > 0 ? blur(grown, mask.w, mask.h, soft) : grown;
   for (let i = 0; i < data.length; i++) data[i] = Math.min(1, Math.max(0, (data[i] - 0.1) / 0.8));
   return { data, w: mask.w, h: mask.h };
