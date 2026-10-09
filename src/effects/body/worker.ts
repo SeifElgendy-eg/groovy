@@ -24,6 +24,8 @@ export interface BodyJob {
   crop: Crop;
   /** The photo's colours at the working resolution (RGBA). */
   rgba: Uint8ClampedArray;
+  /** The segmenter's mask is unsure (see maskUnsure): BodyPix's own outline is used instead. */
+  unsure?: boolean;
   /** Also return the fields' inputs (debug and regression tools: scripts/body/). */
   debug?: boolean;
 }
@@ -48,6 +50,8 @@ export interface BodyResult extends BodyFields {
   ms: { model: number; fields: number };
   /** Per limb (R arm, L arm, R leg, L leg, hips): whose points were used ("mp", "bp", "-"). */
   limbs: string[];
+  /** Whose outline of the person was used: the app's segmenter, or BodyPix's (segmenter unsure). */
+  outline: "segmenter" | "bodypix";
   inputs?: BodyInputs;
 }
 
@@ -109,10 +113,12 @@ const api = {
     const heat = out.heatmaps, offs = out.short_offsets, parts = out.part_heatmaps;
     const g: Grid = { gw: heat.dims[2], gh: heat.dims[1], W: job.W, H: job.H };
     const t1 = performance.now();
-    const person = resizeMask(job.person, job.pw, job.ph, job.ww, job.wh);
+    let person = resizeMask(job.person, job.pw, job.ph, job.ww, job.wh);
     const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh, job.crop);
     // arms and hands the segmenter missed (see addArms)
     const bp = decodeSegments(out.segments.data as Float32Array, g, job.ww, job.wh, job.crop);
+    // the segmenter could not make out the person: BodyPix's outline instead (made for whole bodies)
+    if (job.unsure) person = bp.slice();
     // the body parts, decoded once for both masks (BodyPix's and the app's, which only grows inside
     // BodyPix's), then kept where each mask has the person
     const n = job.ww * job.wh;
@@ -149,7 +155,7 @@ const api = {
       : undefined;
     const t2 = performance.now();
     const f = bodyFields({ w, h, person, labels, joints, rgb });
-    const r: BodyResult = { ...f, joints, person, inputs, limbs: fused?.chosen ?? [], ms: { model, fields: performance.now() - t2 } };
+    const r: BodyResult = { ...f, joints, person, inputs, limbs: fused?.chosen ?? [], outline: job.unsure ? "bodypix" : "segmenter", ms: { model, fields: performance.now() - t2 } };
     return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer, r.labels.buffer]);
   },
 };

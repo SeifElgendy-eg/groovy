@@ -109,6 +109,21 @@ export function decodeParts(parts: Float32Array, g: Grid, ww: number, wh: number
  * The box around the person (mask above 0.3), grown by `margin` of its height on every side and
  * kept inside the image, in the mask's own pixels; null when there is nobody.
  */
+/**
+ * The segmenter is unsure of the person (a dim or washed-out camera picture, a person far away):
+ * more of the mask is half-sure (0.15-0.5) than sure (> 0.5), or almost nothing is sure. Its
+ * outline is then not used (BodyPix's is), nor its box (BodyPix looks at the whole photo). On the
+ * test photos the half-sure share is at most 0.45 of the sure one; on a dim laptop camera 4.6.
+ */
+export function maskUnsure(mask: Float32Array): boolean {
+  let sure = 0, half = 0;
+  for (const v of mask) {
+    if (v > 0.5) sure++;
+    else if (v > 0.15) half++;
+  }
+  return half > sure || sure < 0.01 * mask.length;
+}
+
 export function personBox(mask: Float32Array, w: number, h: number, margin: number): Crop | null {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++)

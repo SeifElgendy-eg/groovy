@@ -15,10 +15,15 @@ const CHECK_MS = 300;
 const HOLD_MS = 900;
 /** Hands-free countdown, seconds. */
 const AUTO_SECONDS = 3;
+/** The hands-free countdown stops after this many checks in a row without a usable pose (one bad
+ * reading of a noisy body point should not cancel it). */
+const BREAK_CHECKS = 2;
 
 let lastCheck = -Infinity;
 let running = false;
-const stillness = new Stillness();
+// (body points from the quick small-frame pass jitter by a few percent of the height)
+const stillness = new Stillness(0.05);
+let broken = 0;
 
 /** Hands-free capture is switched on in the body panel. */
 const handsFree = () => dom.bodyHandsFree.checked;
@@ -26,6 +31,7 @@ const handsFree = () => dom.bodyHandsFree.checked;
 /** Stop coaching (left the camera or the service). */
 export function resetBodyCoach(): void {
   stillness.reset();
+  broken = 0;
   lastCheck = -Infinity;
   setBodyCoach(null);
 }
@@ -50,10 +56,14 @@ export function bodyCoachTick(now: number): void {
     .then((J) => {
       if (!J || state.module !== "body" || state.sourceMode !== "camera") return;
       const r = checkPosture(J, w, h, true);
-      const held = r.ok ? stillness.update(J, performance.now()) : (stillness.reset(), 0);
-      if (autoCaptureRunning() && !r.ok) cancelCountdown(); // the pose broke: start again when it is back
-      setBodyCoach({ message: r.message, ok: r.ok });
-      if (r.ok && held >= HOLD_MS && handsFree() && state.countdown === null) beginAutoCapture(AUTO_SECONDS);
+      // A pose with only a tip left (arms a little further out, the feet) is good enough for the
+      // photo: the tip is shown, the capture goes ahead.
+      const held = r.ready ? stillness.update(J, performance.now()) : (stillness.reset(), 0);
+      broken = r.ready ? 0 : broken + 1;
+      if (autoCaptureRunning() && broken >= BREAK_CHECKS) cancelCountdown(); // the pose broke: start again when it is back
+      const message = r.ok || !r.ready ? r.message : `Good. Hold still… Tip: ${r.message}`;
+      setBodyCoach({ message, ok: r.ready });
+      if (r.ready && held >= HOLD_MS && handsFree() && state.countdown === null) beginAutoCapture(AUTO_SECONDS);
     })
     .finally(() => (running = false));
 }
