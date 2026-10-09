@@ -23,6 +23,16 @@ export interface BodyJob {
   crop: Crop;
   /** The photo's colours at the working resolution (RGBA). */
   rgba: Uint8ClampedArray;
+  /** Also return the fields' inputs (debug and regression tools: scripts/body/). */
+  debug?: boolean;
+}
+
+/** What the movement fields were computed from (with `debug`): enough to recompute them offline. */
+export interface BodyInputs {
+  person: Float32Array;
+  labels: Uint8Array;
+  joints: Float32Array;
+  rgb: Uint8ClampedArray;
 }
 
 export interface BodyResult extends BodyFields {
@@ -31,6 +41,7 @@ export interface BodyResult extends BodyFields {
   /** The person mask at the working resolution, with the arms the segmenter missed filled in. */
   person: Float32Array;
   ms: { model: number; fields: number };
+  inputs?: BodyInputs;
 }
 
 const MODEL = "models/bodypix-mobilenet-v1-100-s8.onnx";
@@ -87,8 +98,10 @@ const api = {
     for (const t of Object.values(out)) t.dispose();
     const rgb = new Uint8ClampedArray(job.ww * job.wh * 3);
     for (let i = 0; i < job.ww * job.wh; i++) rgb.set(job.rgba.subarray(i * 4, i * 4 + 3), i * 3);
+    const inputs = job.debug ? { person: person.slice(), labels: labels.slice(), joints: joints.slice(), rgb: rgb.slice() } : undefined;
+    const t2 = performance.now();
     const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
-    const r: BodyResult = { ...f, joints, person, ms: { model: t1 - t0, fields: performance.now() - t1 } };
+    const r: BodyResult = { ...f, joints, person, inputs, ms: { model: t1 - t0, fields: performance.now() - t2 } };
     return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer, r.labels.buffer]);
   },
 };

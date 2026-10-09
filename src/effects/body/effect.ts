@@ -18,6 +18,12 @@ const POSE_LONG_SIDE = 384;
 const FIELD_LONG_SIDE = 800;
 const FIELD_MAX_PIXELS = 650_000;
 
+/**
+ * Debug and regression mode (`?debug=body` in the page's address): the worker also returns the fields'
+ * inputs, kept with the result (scripts/body/ reads them). Off in normal use.
+ */
+const BODY_DEBUG = typeof location !== "undefined" && new URLSearchParams(location.search).get("debug") === "body";
+
 /** The person mask from the app's segmenter (0..1, its own resolution). */
 export interface PersonMask {
   data: Float32Array;
@@ -52,6 +58,10 @@ export class BodyEffect {
   private posing = false;
   private poseCanvas: HTMLCanvasElement | null = null;
   private result: BodyResult | null = null;
+  /** The last analysis (fields, body points; with ?debug=body also its inputs): for the debug tools. */
+  get analysis(): BodyResult | null {
+    return this.result;
+  }
   private worker: Worker | null = null;
   private api: Remote<BodyWorkerApi> | null = null;
   private stop: ((e: Error) => void) | null = null;
@@ -150,7 +160,7 @@ export class BodyEffect {
       const api = this.start();
       const cancelled = new Promise<never>((_, reject) => (this.stop = reject));
       const r = await Promise.race([
-        api.analyse({ base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba }),
+        api.analyse({ base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, debug: BODY_DEBUG }),
         cancelled,
       ]);
       this.lastMs = r.ms;
