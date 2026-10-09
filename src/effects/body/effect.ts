@@ -165,7 +165,9 @@ export class BodyEffect {
       this.legs = legsVisible(r.joints, ww, wh);
       this.posture = checkPosture(r.joints, ww, wh, false);
       this.warp.set(frame, r);
-      this.backdropState = this.useBackdrop(frame, person);
+      // the backdrop's cover from the mask with the arms filled in (an arm the segmenter missed
+      // would be painted over with the wall)
+      this.backdropState = this.useBackdrop(frame, { data: r.person, w: ww, h: wh });
       this.ready = true;
       return true;
     } catch (err) {

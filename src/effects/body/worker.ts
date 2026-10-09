@@ -2,7 +2,7 @@
 // movement fields, so the page stays responsive.
 import { expose, transfer } from "comlink";
 import * as ort from "onnxruntime-web/wasm";
-import { decodeJoints, decodeParts, resizeMask, toInput, type Crop, type Grid } from "./bodypix";
+import { addArms, decodeJoints, decodeParts, decodeSegments, resizeMask, toInput, type Crop, type Grid } from "./bodypix";
 import { bodyFields, type BodyFields } from "./field";
 
 export interface BodyJob {
@@ -28,6 +28,8 @@ export interface BodyJob {
 export interface BodyResult extends BodyFields {
   /** Body points at the working resolution (x, y, score per joint), for the debug view. */
   joints: Float32Array;
+  /** The person mask at the working resolution, with the arms the segmenter missed filled in. */
+  person: Float32Array;
   ms: { model: number; fields: number };
 }
 
@@ -72,19 +74,22 @@ const api = {
     const s = await load(job.base);
     const t0 = performance.now();
     const feeds = { input: new ort.Tensor("float32", toInput(job.input, job.W, job.H), [1, job.H, job.W, 3]) };
-    const out = await s.run(feeds, ["heatmaps", "short_offsets", "part_heatmaps"]);
+    const out = await s.run(feeds, ["heatmaps", "short_offsets", "part_heatmaps", "segments"]);
     const heat = out.heatmaps, offs = out.short_offsets, parts = out.part_heatmaps;
     const g: Grid = { gw: heat.dims[2], gh: heat.dims[1], W: job.W, H: job.H };
     const t1 = performance.now();
     const person = resizeMask(job.person, job.pw, job.ph, job.ww, job.wh);
     const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh, job.crop);
+    // arms and hands the segmenter missed (see addArms)
+    const bp = decodeSegments(out.segments.data as Float32Array, g, job.ww, job.wh, job.crop);
+    addArms(person, bp, decodeParts(parts.data as Float32Array, g, job.ww, job.wh, bp, job.crop));
     const labels = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, person, job.crop);
     for (const t of Object.values(out)) t.dispose();
     const rgb = new Uint8ClampedArray(job.ww * job.wh * 3);
     for (let i = 0; i < job.ww * job.wh; i++) rgb.set(job.rgba.subarray(i * 4, i * 4 + 3), i * 3);
     const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
-    const r: BodyResult = { ...f, joints, ms: { model: t1 - t0, fields: performance.now() - t1 } };
-    return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer]);
+    const r: BodyResult = { ...f, joints, person, ms: { model: t1 - t0, fields: performance.now() - t1 } };
+    return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer]);
   },
 };
 

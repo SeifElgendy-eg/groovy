@@ -1,8 +1,8 @@
 // Body slimming: the helpers it is built on, BodyPix output decoding, and the movement fields'
 // basic behaviour on a drawn figure.
 import { describe, expect, it } from "vitest";
-import { blur, bodyFields, distanceTransform, growHands, JOINT_COUNT, jointsBySide, runsOf, sstep } from "../../src/effects/body/field";
-import { decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
+import { blur, bodyFields, distanceTransform, growHands, JOINT_COUNT, jointsBySide, runsOf, sstep, unfold } from "../../src/effects/body/field";
+import { addArms, decodeJoints, decodeParts, inputSide, STRIDE } from "../../src/effects/body/bodypix";
 
 let seed = 11;
 const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -118,8 +118,10 @@ describe("movement fields on a drawn figure", () => {
     expect(dx(f.torso, 72, 130)).toBeLessThan(-1);
     expect(dx(f.torso, 127, 130)).toBeGreaterThan(1);
     const ratio = -dx(f.torso, 72, 130) / dx(f.torso, 128, 130);
-    expect(ratio).toBeGreaterThan(0.95);
-    expect(ratio).toBeLessThan(1.05);
+    // (within 10%: the arms 4 px from the torso squeeze the gap, and the fold smoothing there
+    // differs a little between the sides of this drawn figure)
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
     expect(Math.abs(dx(f.torso, 100, 130))).toBeLessThan(0.5);
   });
 
@@ -209,5 +211,26 @@ describe("whole hands", () => {
     expect(labels[35 * w + 24]).toBe(16); // leggings beside the fingers
     expect(labels[10 * w + 30]).toBe(16); // above the wrist: not the hand
     expect(labels[60 * w + 30]).toBe(16); // far below: not the hand
+  });
+});
+
+describe("arms the segmenter missed", () => {
+  it("takes BodyPix's person value for sure arm and hand pixels only", () => {
+    const person = Float32Array.from([0.1, 0.1, 0.1, 0.9, 0.1]);
+    const bp = Float32Array.from([0.9, 0.9, 0.5, 0.9, 0.9]);
+    const parts = Uint8Array.from([6, 12, 8, 6, 11]); // forearm, torso, forearm (unsure), forearm (already in), hand
+    expect(addArms(person, bp, parts)).toBe(2);
+    expect(Array.from(person).map((v) => +v.toFixed(2))).toEqual([0.9, 0.1, 0.1, 0.9, 0.9]);
+  });
+});
+
+describe("fold removal", () => {
+  it("smooths a movement that would fold the picture until it does not", () => {
+    const w = 60, h = 40, n = w * h;
+    const torso = new Float32Array(2 * n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) torso[2 * (y * w + x)] = x >= 30 && x < 34 ? 6 : 0; // a sharp jump: folds
+    const f = { arms: new Float32Array(2 * n), torso, legs: new Float32Array(2 * n) };
+    expect(unfold(f, [1, 1, 1], w, h, 40)).toBeGreaterThan(0);
+    expect(unfold(f, [1, 1, 1], w, h, 40)).toBe(0); // nothing left to fix
   });
 });

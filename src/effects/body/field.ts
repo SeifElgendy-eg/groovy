@@ -842,6 +842,7 @@ export function rigidHands(
     vy /= c;
     hx /= c;
     hy /= c;
+    let wristFound = false;
     // The hand goes where its wrist goes: the movement of the forearm just above the wrist. (The
     // hand's own average also picks up the body's or the background's movement around its edge, and
     // a hand moved more than its wrist bends at the wrist.)
@@ -861,6 +862,7 @@ export function rigidHands(
       if (fc >= 5) {
         vx = fx / fc;
         vy = fy / fc;
+        wristFound = true;
       }
     }
     if (body) {
@@ -875,7 +877,10 @@ export function rigidHands(
           bx += bodyDx ? bodyDx[i] : 0;
         }
       }
-      const touch = rc ? sstep(0.1, 0.3, bc / rc) : 0;
+      // (only when the arm itself stays: an arm turning in with the waist takes its hand along,
+      // else the hand stays behind and the wrist bends)
+      const still = wristFound ? 1 - sstep(0.02 * sw, 0.05 * sw, Math.abs(full * vx)) : 1;
+      const touch = rc ? sstep(0.1, 0.3, bc / rc) * still : 0;
       if (touch > 0) {
         vx += touch * (bx / bc - vx);
         vy *= 1 - touch;
@@ -1184,5 +1189,65 @@ export function bodyFields(input: BodyInput): BodyFields {
     }
     return out;
   };
-  return { w, h, arms: pack("arms"), torso: pack("torso"), legs: pack("legs"), build: buildK };
+  const out = { arms: pack("arms"), torso: pack("torso"), legs: pack("legs") };
+  unfold(out, [sA, sT, sL], w, h, sw);
+  return { w, h, ...out, build: buildK };
+}
+
+/**
+ * Where the movement at 100% would fold the picture over itself (the moved image's neighbouring
+ * pixels swap places: a loop or a smear, e.g. in the background just outside an arm that turns in
+ * with the waist), smooth the movement there until it no longer folds. The same smoothing is applied
+ * to every area's field, so their weighted sum (the sliders) stays consistent. Fields are
+ * interleaved (dx, dy); `k`: the 100% strength of each.
+ */
+export function unfold(
+  f: { arms: Float32Array; torso: Float32Array; legs: Float32Array },
+  k: [number, number, number],
+  w: number,
+  h: number,
+  sw: number,
+): number {
+  const n = w * h;
+  const keys = ["arms", "torso", "legs"] as const;
+  const MIN = 0.3; // smallest allowed local area scale of the warp (1 = unchanged)
+  let worst = 0;
+  for (let it = 0; it < 8; it++) {
+    const sx = new Float32Array(n), sy = new Float32Array(n);
+    for (let i = 0; i < n; i++)
+      keys.forEach((key, j) => {
+        sx[i] += k[j] * f[key][2 * i];
+        sy[i] += k[j] * f[key][2 * i + 1];
+      });
+    const bad = new Float32Array(n);
+    let count = 0;
+    for (let y = 1; y < h - 1; y++)
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const ax = 1 + (sx[i + 1] - sx[i - 1]) / 2, ay = (sx[i + w] - sx[i - w]) / 2;
+        const bx = (sy[i + 1] - sy[i - 1]) / 2, by = 1 + (sy[i + w] - sy[i - w]) / 2;
+        if (ax * by - ay * bx < MIN) {
+          bad[i] = 1;
+          count++;
+        }
+      }
+    if (it === 0) worst = count;
+    if (!count) break;
+    const wgt = blur(bad, w, h, 0.04 * sw + 1);
+    for (let i = 0; i < n; i++) wgt[i] = Math.min(1, wgt[i] * 4);
+    for (const key of keys) {
+      const fx = new Float32Array(n), fy = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        fx[i] = f[key][2 * i];
+        fy[i] = f[key][2 * i + 1];
+      }
+      const bx = blur(fx, w, h, 0.05 * sw + 1), by = blur(fy, w, h, 0.05 * sw + 1);
+      for (let i = 0; i < n; i++) {
+        if (!wgt[i]) continue;
+        f[key][2 * i] = fx[i] + (bx[i] - fx[i]) * wgt[i];
+        f[key][2 * i + 1] = fy[i] + (by[i] - fy[i]) * wgt[i];
+      }
+    }
+  }
+  return worst;
 }

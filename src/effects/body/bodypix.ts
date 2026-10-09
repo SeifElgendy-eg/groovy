@@ -126,6 +126,47 @@ export function personBox(mask: Float32Array, w: number, h: number, margin: numb
   return { x: ax, y: ay, w: bx - ax, h: by - ay };
 }
 
+/**
+ * BodyPix's own person probability (its "segments" output, logits on the grid) at the working
+ * resolution, 0 outside the crop.
+ */
+export function decodeSegments(seg: Float32Array, g: Grid, ww: number, wh: number, crop?: Crop): Float32Array {
+  const out = new Float32Array(ww * wh);
+  const c0: Crop = crop ?? { x: 0, y: 0, w: ww, h: wh };
+  const sx = g.W / (c0.w * STRIDE), sy = g.H / (c0.h * STRIDE);
+  const yA = Math.max(0, Math.floor(c0.y)), yB = Math.min(wh, Math.ceil(c0.y + c0.h));
+  const xA = Math.max(0, Math.floor(c0.x)), xB = Math.min(ww, Math.ceil(c0.x + c0.w));
+  for (let y = yA; y < yB; y++) {
+    const fy = Math.min(Math.max((y - c0.y) * sy, 0), g.gh - 1);
+    const y0 = Math.floor(fy), y1 = Math.min(y0 + 1, g.gh - 1), ty = fy - y0;
+    for (let x = xA; x < xB; x++) {
+      const fx = Math.min(Math.max((x - c0.x) * sx, 0), g.gw - 1);
+      const x0 = Math.floor(fx), x1 = Math.min(x0 + 1, g.gw - 1), tx = fx - x0;
+      const top = seg[y0 * g.gw + x0] + (seg[y0 * g.gw + x1] - seg[y0 * g.gw + x0]) * tx;
+      const bot = seg[y1 * g.gw + x0] + (seg[y1 * g.gw + x1] - seg[y1 * g.gw + x0]) * tx;
+      out[y * ww + x] = 1 / (1 + Math.exp(-(top + (bot - top) * ty)));
+    }
+  }
+  return out;
+}
+
+/**
+ * Fill in the arms and hands the person mask missed: the app's segmenter can lose a bare arm in
+ * front of a wall of skin-like colour (brick, wood), and an arm missing from the mask is treated as
+ * background (moved like it, painted over by the backdrop). Where BodyPix is sure of a person and
+ * calls it an arm or a hand, the mask takes BodyPix's value. Changes `person` in place.
+ */
+export function addArms(person: Float32Array, bp: Float32Array, parts: Uint8Array): number {
+  let added = 0;
+  for (let i = 0; i < person.length; i++) {
+    const p = parts[i];
+    if (p < 2 || p > 11 || bp[i] <= 0.6 || person[i] >= bp[i]) continue;
+    if (person[i] < 0.5) added++;
+    person[i] = bp[i];
+  }
+  return added;
+}
+
 /** Bilinear resize of a single-channel float image. */
 export function resizeMask(src: Float32Array, sw: number, sh: number, dw: number, dh: number): Float32Array {
   const out = new Float32Array(dw * dh);
