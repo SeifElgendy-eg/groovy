@@ -7,11 +7,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 /** Strength at 100% per area (must match FULL in src/effects/body/field.ts; read from it). */
-export async function loadField() {
-  const out = path.join(ROOT, "node_modules/.cache/body-tools/field.mjs");
+export async function loadField(file = "field") {
+  const out = path.join(ROOT, `node_modules/.cache/body-tools/${file}.mjs`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  const r = spawnSync(path.join(ROOT, "node_modules/.bin/rolldown"), [path.join(ROOT, "src/effects/body/field.ts"), "--platform", "node", "--format", "esm", "-o", out, "--log-level", "warn"], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`bundling field.ts failed:\n${r.stderr}${r.stdout}`);
+  const r = spawnSync(path.join(ROOT, "node_modules/.bin/rolldown"), [path.join(ROOT, `src/effects/body/${file}.ts`), "--platform", "node", "--format", "esm", "-o", out, "--log-level", "warn"], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`bundling ${file}.ts failed:\n${r.stderr}${r.stdout}`);
   return import(`${pathToFileURL(out).href}?t=${Date.now()}`);
 }
 

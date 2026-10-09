@@ -58,7 +58,11 @@ async function tile(name) {
     parts.push({ input: label(src.label, tw), left: j * (tw + 4), top: 0 }, { input: img, left: j * (tw + 4), top: LABEL_H });
   }
   const width = sources.length * (tw + 4) - 4;
-  return { width, buf: await sharp({ create: { width, height: TILE_H + LABEL_H, channels: 3, background: "white" } }).composite(parts).jpeg().toBuffer() };
+  const buf = await sharp({ create: { width, height: TILE_H + LABEL_H, channels: 3, background: "white" } }).composite(parts).jpeg().toBuffer();
+  if (width <= SHEET_W) return { width, buf };
+  // too wide for a sheet (a wide crop): scale down, keeping the row height
+  const fit = await sharp(buf).resize(SHEET_W).toBuffer();
+  return { width: SHEET_W, buf: await sharp({ create: { width: SHEET_W, height: TILE_H + LABEL_H, channels: 3, background: "white" } }).composite([{ input: fit, left: 0, top: 0 }]).jpeg().toBuffer() };
 }
 
 const tiles = [];
