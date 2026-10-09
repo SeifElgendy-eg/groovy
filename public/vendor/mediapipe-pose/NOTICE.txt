@@ -1,0 +1,4 @@
+MediaPipe Pose (legacy solution), @mediapipe/pose 0.5.1675469404, from npm.
+Copyright Google LLC. Licensed under the Apache License 2.0 (see LICENSE).
+Only the files the app uses are included: the SIMD WebAssembly build and the "full" landmark model.
+Used offline to find body points, checked against BodyPix's body parts (src/effects/body/joints.ts).

@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; connect-src 'self'; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
+    />
+    <!-- MediaPipe Pose in its own page: its WebAssembly loader uses page globals (Module) that the
+         app's other MediaPipe (face, segmentation) also uses. The app calls findPose() below. -->
+    <script src="pose.js"></script>
+    <script src="frame.js"></script>
+  </head>
+  <body></body>
+</html>

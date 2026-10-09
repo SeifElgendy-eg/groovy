@@ -6,6 +6,7 @@ import { FULL } from "./field";
 import { checkPosture, legsVisible, type PostureResult } from "./posture";
 import { backdropGain, MAX_MISMATCH, personCover } from "./backdrop";
 import { BodyWarp, type Strengths } from "./warp";
+import { findPose, warmUpPose } from "./mediapipe";
 import type { BodyResult, BodyWorkerApi } from "./worker";
 
 /** Longest side of the image for the live posture check (body points only: small and quick). */
@@ -46,7 +47,7 @@ export class BodyEffect {
   /** The last analysis failed (no person found, model error): shown as a status. */
   failed = false;
   /** Timings of the last analysis (diagnostics). */
-  lastMs: { model: number; fields: number } | null = null;
+  lastMs: { model: number; fields: number; pose: number } | null = null;
   /** The legs are clearly in the photo (knees and ankles): otherwise they are left as they are. */
   legs = true;
   /** How the person stands in the analysed photo (advice only: the slimming runs anyway). */
@@ -77,6 +78,7 @@ export class BodyEffect {
 
   /** Load the model in the background (first photo then does not wait for it). */
   warmUp(): void {
+    warmUpPose(document.baseURI);
     void this.start()
       .warmUp(document.baseURI)
       .catch((err) => console.warn("body model failed to load", err));
@@ -159,11 +161,15 @@ export class BodyEffect {
       const rgba = fcx.getImageData(0, 0, ww, wh).data;
       const api = this.start();
       const cancelled = new Promise<never>((_, reject) => (this.stop = reject));
-      const r = await Promise.race([
-        api.analyse({ base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, debug: BODY_DEBUG }),
-        cancelled,
-      ]);
-      this.lastMs = r.ms;
+      // BodyPix in the worker and MediaPipe Pose here at the same time; the worker then takes each
+      // limb's points from whichever lies on the right body parts (joints.ts)
+      const tp = performance.now();
+      let poseMs = 0;
+      const landmarks = findPose(document.baseURI, frame, w, h).then((lm) => ((poseMs = performance.now() - tp), lm));
+      const job = { base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, debug: BODY_DEBUG };
+      const [, lm] = await Promise.race([Promise.all([api.analyse(job), landmarks]), cancelled]);
+      const r = await Promise.race([api.fields(lm), cancelled]);
+      this.lastMs = { ...r.ms, pose: poseMs };
       // No body found (BodyPix's shoulders unsure or on top of each other): nothing to slim.
       const conf = Math.min(r.joints[2 * 3 + 2], r.joints[5 * 3 + 2]);
       const sw = Math.hypot(r.joints[2 * 3] - r.joints[5 * 3], r.joints[2 * 3 + 1] - r.joints[5 * 3 + 1]);

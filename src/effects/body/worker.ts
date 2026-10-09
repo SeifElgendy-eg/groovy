@@ -4,6 +4,7 @@ import { expose, transfer } from "comlink";
 import * as ort from "onnxruntime-web/wasm";
 import { addArms, decodeJoints, decodeParts, decodeSegments, resizeMask, toInput, type Crop, type Grid } from "./bodypix";
 import { bodyFields, type BodyFields } from "./field";
+import { fromMediaPipe, fuseJoints } from "./joints";
 
 export interface BodyJob {
   /** The page's base URL (models/ and vendor/ live under it). */
@@ -31,8 +32,12 @@ export interface BodyJob {
 export interface BodyInputs {
   person: Float32Array;
   labels: Uint8Array;
+  /** The body points the fields used (BodyPix's, with MediaPipe's limbs where they fit). */
   joints: Float32Array;
   rgb: Uint8ClampedArray;
+  /** BodyPix's and MediaPipe's own points (MediaPipe's: empty when it found none). */
+  bodypix: Float32Array;
+  mediapipe: Float32Array;
 }
 
 export interface BodyResult extends BodyFields {
@@ -41,8 +46,21 @@ export interface BodyResult extends BodyFields {
   /** The person mask at the working resolution, with the arms the segmenter missed filled in. */
   person: Float32Array;
   ms: { model: number; fields: number };
+  /** Per limb (R arm, L arm, R leg, L leg, hips): whose points were used ("mp", "bp", "-"). */
+  limbs: string[];
   inputs?: BodyInputs;
 }
+
+/** A photo between analyse() and fields(): BodyPix's output, waiting for MediaPipe's points. */
+interface Pending {
+  job: BodyJob;
+  person: Float32Array;
+  labels: Uint8Array;
+  joints: Float32Array;
+  rgb: Uint8ClampedArray;
+  model: number;
+}
+let pending: Pending | null = null;
 
 const MODEL = "models/bodypix-mobilenet-v1-100-s8.onnx";
 let session: Promise<ort.InferenceSession> | null = null;
@@ -81,7 +99,9 @@ const api = {
     for (const t of Object.values(out)) t.dispose();
     return transfer(joints, [joints.buffer]);
   },
-  async analyse(job: BodyJob): Promise<BodyResult> {
+  /** BodyPix on the photo; then fields() (with MediaPipe's points, found meanwhile on the page). */
+  async analyse(job: BodyJob): Promise<void> {
+    pending = null;
     const s = await load(job.base);
     const t0 = performance.now();
     const feeds = { input: new ort.Tensor("float32", toInput(job.input, job.W, job.H), [1, job.H, job.W, 3]) };
@@ -109,10 +129,27 @@ const api = {
       rgb[j + 1] = job.rgba[i * 4 + 1];
       rgb[j + 2] = job.rgba[i * 4 + 2];
     }
-    const inputs = job.debug ? { person: person.slice(), labels: labels.slice(), joints: joints.slice(), rgb: rgb.slice() } : undefined;
+    pending = { job, person, labels, joints, rgb, model: t1 - t0 };
+  },
+  /**
+   * The movement fields of the analysed photo. `landmarks`: MediaPipe Pose's for the photo
+   * ([x, y, visibility] x 33, 0..1), or null: each limb takes MediaPipe's points where they lie on
+   * the right body parts, else BodyPix's (joints.ts).
+   */
+  async fields(landmarks: number[][] | null): Promise<BodyResult> {
+    if (!pending) throw new Error("no photo analysed");
+    const { job, person, labels, rgb, model, joints: bodypix } = pending;
+    pending = null;
+    const w = job.ww, h = job.wh;
+    const mp = landmarks && landmarks.length >= 33 ? fromMediaPipe(landmarks, w, h) : null;
+    const fused = mp ? fuseJoints({ w, h, person, labels, bodypix, mediapipe: mp }) : null;
+    const joints = fused ? fused.joints : bodypix;
+    const inputs = job.debug
+      ? { person: person.slice(), labels: labels.slice(), joints: joints.slice(), rgb: rgb.slice(), bodypix: bodypix.slice(), mediapipe: mp ?? new Float32Array(0) }
+      : undefined;
     const t2 = performance.now();
-    const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
-    const r: BodyResult = { ...f, joints, person, inputs, ms: { model: t1 - t0, fields: performance.now() - t2 } };
+    const f = bodyFields({ w, h, person, labels, joints, rgb });
+    const r: BodyResult = { ...f, joints, person, inputs, limbs: fused?.chosen ?? [], ms: { model, fields: performance.now() - t2 } };
     return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer, r.person.buffer, r.labels.buffer]);
   },
 };

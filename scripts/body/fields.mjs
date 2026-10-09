@@ -9,8 +9,9 @@
 //   --compare  print the largest difference to the fields dumped by the app (0 = identical)
 //   --pose <file.json>  use these body points instead of BodyPix's: MediaPipe Pose landmarks per
 //              photo ({ "<any path>/<name>.<ext>": { lm: [[x, y, visibility] x 33] (0..1) } })
-//   --fuse     with --pose: per limb, MediaPipe's points where they lie on the right body parts,
-//              else BodyPix's (src/effects/body/joints.ts)
+//   --fuse     per limb, MediaPipe's points (--pose, or the app's) where they lie on the right body
+//              parts, else BodyPix's (src/effects/body/joints.ts). Without --pose/--fuse: the app's points.
+//   --bodypix  BodyPix's points alone (as before MediaPipe)
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
@@ -26,14 +27,20 @@ const field = await loadField();
 const joints2 = await loadField("joints");
 const pose = o.pose ? Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(o.pose, "utf8"))).map(([k, v]) => [path.basename(k).replace(/\.\w+$/, ""), v])) : null;
 const chosen = {};
-/** The body points to use: BodyPix's, or with --pose MediaPipe's (--fuse: checked against the body parts). */
+/**
+ * The body points to use: as the app did (default), or from BodyPix's and MediaPipe's own points:
+ * --pose: MediaPipe's from that file (else the app's dumped ones), --fuse: combined (joints.ts).
+ */
 function jointsFor(name, d) {
-  const lm = pose?.[name]?.lm;
-  if (!lm) return d.in_joints.slice();
+  if (o.bodypix) return (d.in_bodypix ?? d.in_joints).slice();
+  if (!o.pose && !o.fuse) return d.in_joints.slice();
   const { w, h } = d.meta;
-  const mp = joints2.fromMediaPipe(lm, w, h);
-  if (!o.fuse) return mp;
-  const f = joints2.fuseJoints({ w, h, person: d.in_person, labels: d.in_labels, bodypix: d.in_joints, mediapipe: mp });
+  const bodypix = d.in_bodypix ?? d.in_joints; // older dumps: in_joints were BodyPix's
+  const lm = pose?.[name]?.lm;
+  const mp = lm ? joints2.fromMediaPipe(lm, w, h) : d.in_mediapipe?.length ? d.in_mediapipe : null;
+  if (!mp) return bodypix.slice();
+  if (!o.fuse) return mp.slice();
+  const f = joints2.fuseJoints({ w, h, person: d.in_person, labels: d.in_labels, bodypix, mediapipe: mp });
   chosen[name] = f.chosen;
   return f.joints;
 }

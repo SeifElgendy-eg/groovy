@@ -28,9 +28,10 @@ node scripts/body/fields.mjs --runs ../body-runs/base --out ../body-runs/try --c
 
 Runs the current `src/effects/body/field.ts` on the dumped inputs. `--compare` prints how much the
 fields differ from the app run (0 = identical: use it to check that a speed-up changes nothing),
-`--render` writes the 100% pictures (without the backdrop). `--pose <landmarks.json>` uses MediaPipe
-Pose's body points instead of BodyPix's; add `--fuse` to keep, per limb, only the points that lie on
-the right BodyPix body parts (`src/effects/body/joints.ts`).
+`--render` writes the 100% pictures (without the backdrop). The app combines BodyPix's and MediaPipe Pose's body points
+(per limb, the ones that lie on the right BodyPix body parts: `src/effects/body/joints.ts`); the
+dumps keep both. `--bodypix` uses BodyPix's points alone, `--fuse` recombines them (after a change
+to `joints.ts`), and `--pose <landmarks.json>` takes MediaPipe's from a file instead.
 
 ## 3. Measure and compare
 

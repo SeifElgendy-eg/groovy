@@ -96,9 +96,13 @@ for (const photo of photos) {
       return btoa(s);
     };
     const arrays = { arms: r.arms, torso: r.torso, legs: r.legs, labels: r.labels, person: r.person, joints: r.joints };
-    if (r.inputs) Object.assign(arrays, { in_person: r.inputs.person, in_labels: r.inputs.labels, in_joints: r.inputs.joints, in_rgb: r.inputs.rgb });
+    if (r.inputs)
+      Object.assign(arrays, {
+        in_person: r.inputs.person, in_labels: r.inputs.labels, in_joints: r.inputs.joints, in_rgb: r.inputs.rgb,
+        in_bodypix: r.inputs.bodypix, in_mediapipe: r.inputs.mediapipe,
+      });
     return {
-      meta: { w: r.w, h: r.h, build: r.build, ms: r.ms, legs: globalThis.groovyBody.legs },
+      meta: { w: r.w, h: r.h, build: r.build, ms: { ...r.ms, ...globalThis.groovyBody.lastMs }, limbs: r.limbs, legs: globalThis.groovyBody.legs },
       arrays: Object.fromEntries(Object.entries(arrays).map(([k, a]) => [k, [a.constructor.name, b64(a)]])),
       status: document.getElementById("bodyStatus").textContent.trim(),
     };
@@ -117,7 +121,8 @@ for (const photo of photos) {
   );
   writeDump(path.join(out, "dump", name), { ...dump.meta, photo: path.resolve(photo), status: dump.status }, arrays);
   const ms = Date.now() - t0;
-  console.log(`${name}: ${ms} ms (model ${dump.meta.ms.model.toFixed(0)} ms, fields ${dump.meta.ms.fields.toFixed(0)} ms) | ${dump.status}`);
+  const t = dump.meta.ms;
+  console.log(`${name}: ${ms} ms (model ${t.model.toFixed(0)} ms, MediaPipe ${(t.pose ?? 0).toFixed(0)} ms, fields ${t.fields.toFixed(0)} ms; limbs ${(dump.meta.limbs ?? []).join(" ") || "BodyPix"}) | ${dump.status}`);
   summary.push({ name, analysed: true, ms, ...dump.meta.ms });
 }
 fs.writeFileSync(path.join(out, "run.json"), JSON.stringify({ photos: summary, errors }, null, 1));
