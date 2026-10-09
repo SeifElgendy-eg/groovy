@@ -66,7 +66,11 @@ export class BodyEffect {
    * How much of the 100% strength this photo gets (field.ts strengthCaps): a body that would look
    * deformed at full strength gets less.
    */
-  cap = 1;
+  cap = { all: 1, arms: 1 };
+  /** The share of the full strength (FULL) 100% is for this photo (its proportions, field.ts). */
+  get strength(): number {
+    return this.result?.build ?? 1;
+  }
   /** Whose outline of the person the last analysis used. */
   outline: "segmenter" | "bodypix" = "segmenter";
   private posing = false;
@@ -145,7 +149,7 @@ export class BodyEffect {
     this.posture = null;
     this.legs = true;
     this.backdropState = "none";
-    this.cap = 1;
+    this.cap = { all: 1, arms: 1 };
     this.warp.clear();
     const setStep = (t: string | null) => {
       this.step = t;
@@ -296,9 +300,9 @@ export class BodyEffect {
 
   /** Strengths for the warp from the sliders (and the person's build). */
   strengths(s: BodySettings): Strengths {
-    const k = (this.result?.build ?? 1) * this.cap;
+    const k = (this.result?.build ?? 1) * this.cap.all;
     return {
-      arms: FULL.arms * k * s.overall * s.arms,
+      arms: FULL.arms * k * this.cap.arms * s.overall * s.arms,
       torso: FULL.torso * k * s.overall * s.waist,
       legs: this.legs ? FULL.legs * k * s.overall * s.legs : 0,
     };

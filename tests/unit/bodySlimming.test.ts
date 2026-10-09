@@ -207,10 +207,11 @@ describe("100% strength from the body's proportions", () => {
   it("slims a wide waist more than one already near sensible proportions, and the cap is a share", () => {
     const wide = figure(36), slim = figure(22);
     expect(wide.build).toBeGreaterThan(slim.build);
-    for (const f of [wide, slim]) {
-      expect(f.cap).toBeGreaterThan(0);
-      expect(f.cap).toBeLessThanOrEqual(1);
-    }
+    for (const f of [wide, slim])
+      for (const c of [f.cap.all, f.cap.arms]) {
+        expect(c).toBeGreaterThan(0);
+        expect(c).toBeLessThanOrEqual(1);
+      }
   });
 });
 
