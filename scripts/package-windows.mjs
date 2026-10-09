@@ -65,12 +65,19 @@ for (const f of ["Start Groovy.vbs", "Create Desktop Shortcut.vbs", "WINDOWS_OFF
   fs.copyFileSync(path.join(root, f), path.join(out, f));
 fs.copyFileSync(path.join(root, "launcher", "start-windows.ps1"), path.join(out, "launcher", "start-windows.ps1"));
 
-let commit = "dev";
-try {
-  commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: root }).toString().trim();
-} catch {}
+// The commit the package is built from. CI sets GROOVY_COMMIT: on a pull request the checkout is
+// GitHub's temporary merge commit, whose hash is on no branch; the pull request's own head is.
+let commit = (process.env.GROOVY_COMMIT ?? "").slice(0, 7);
+if (!commit)
+  try {
+    commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: root }).toString().trim();
+  } catch {
+    commit = "dev";
+  }
 const version = `${new Date().toISOString().slice(0, 10)}-${commit}`;
 fs.writeFileSync(path.join(out, "app", "version.txt"), version + "\n");
+// (for CI: names the artifact after the version)
+fs.writeFileSync(path.join(root, "release", "version.txt"), version + "\n");
 
 // 4. Integrity manifest + zip (forward-slash names; the launcher and Windows both accept them).
 const files = {};

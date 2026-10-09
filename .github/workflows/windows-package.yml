@@ -29,7 +29,15 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run package:windows
+      - name: Build the package
+        id: pkg
+        shell: bash
+        env:
+          # the commit the zip is built from (on a pull request: its head, not GitHub's merge commit)
+          GROOVY_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          npm run package:windows
+          echo "version=$(cat release/version.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Start the Windows launcher and check what it serves
         shell: pwsh
@@ -73,18 +81,40 @@ jobs:
           foreach ($bad in @('launcher/start-windows.ps1','../launcher/start-windows.ps1','offline-assets.sha256.json','.git/config')) {
             try { Invoke-WebRequest "$base/$bad" -UseBasicParsing -TimeoutSec 5 | Out-Null; throw "should be blocked: $bad" } catch { if ($_.Exception.Message -like 'should be blocked*') { throw } }
           }
+          # The app itself, as the kiosk runs it: Edge on the launcher. Every file it asks for must
+          # be served, the models (MediaPipe Pose included) must load, a photo must get through.
+          node tests/windows/zip-smoke.mjs $base $app
+          if ($LASTEXITCODE -ne 0) { throw 'the app does not work from the package' }
           # A second start must reuse the running server and exit.
           $second = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps) -PassThru -WindowStyle Hidden
           if (-not $second.WaitForExit(15000)) { throw 'second launch did not reuse the running server' }
           'launcher OK'
           Stop-Process -Id $p.Id -Force
 
+      # The package folder as the artifact: one download, unzip, run "Start Groovy.vbs" (uploading
+      # the zip itself gave a zip inside a zip). Named after the version shown in the app.
       - uses: actions/upload-artifact@v7
         with:
-          name: Groovy-Windows
-          path: release/Groovy-Windows.zip
+          name: Groovy-Windows-${{ steps.pkg.outputs.version }}
+          path: release/Groovy-Windows/
           if-no-files-found: error
           retention-days: 30
+      # (the zip, for the GitHub release of a version tag)
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-zip
+          path: release/Groovy-Windows.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### Groovy for Windows ${{ steps.pkg.outputs.version }}"
+            echo "Download the **Groovy-Windows-${{ steps.pkg.outputs.version }}** artifact below, unzip it, and run **Start Groovy.vbs**."
+            echo "The version is also in the app folder's \`version.txt\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Publish the zip as a GitHub release
@@ -96,7 +126,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: Groovy-Windows
+          name: release-zip
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
