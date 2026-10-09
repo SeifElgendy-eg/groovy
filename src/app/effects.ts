@@ -15,6 +15,8 @@ export const wrinkles = new WrinklesEffect();
 export const lipRenderer = new LipRenderer();
 export const skinBrightness = new SkinBrightness();
 export const body = new BodyEffect();
+// Debug and regression tools (scripts/body/) read the body analysis from here with ?debug=body.
+if (new URLSearchParams(location.search).get("debug") === "body") (globalThis as { groovyBody?: BodyEffect }).groovyBody = body;
 
 /** Person mask of the current photo for body slimming (from the multiclass segmenter), or null. */
 export const bodyPerson: { mask: PersonMask | null } = { mask: null };

@@ -703,6 +703,7 @@ button:focus-visible {
 }
 .body-guide svg {
   display: block;
+  filter: drop-shadow(0 0 2px rgba(20, 8, 30, 0.85)); /* outline readable on a white wall too */
   width: 100%;
   height: 100%;
   overflow: visible;
@@ -804,6 +805,54 @@ button:focus-visible {
 .body-guide-tips[hidden],
 .body-guide-hint[hidden] {
   display: none;
+}
+/* Staff setting: the booth's empty backdrop (app/backdrop.ts). */
+.backdrop-setup {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 6px;
+}
+.backdrop-setup strong {
+  display: block;
+  font-size: 14px;
+}
+.backdrop-setup .small-note {
+  display: block;
+  margin-top: 2px;
+}
+.backdrop-setup button {
+  flex: none;
+}
+/* Live posture advice (app/bodyCoach.ts): top centre, green for a good pose. */
+.body-coach {
+  position: absolute;
+  z-index: 8;
+  top: 58px; /* below the status badges */
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(92%, 560px);
+  width: max-content;
+  border-radius: 22px;
+  padding: 10px 20px;
+  background: #24152fe8;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+.body-coach.ok {
+  background: #1f6b4fe8;
+}
+.body-coach[hidden] {
+  display: none;
+}
+.body-guide.pose-ok .body-guide-figure {
+  stroke: #84e4bc;
+  stroke-dasharray: none;
+  fill: rgba(132, 228, 188, 0.14);
 }
 /* The outline's feet are at the bottom centre: with room at the sides, "Take photo" moves aside. */
 .stage-wrap.body-guide-roomy .capture-photo {

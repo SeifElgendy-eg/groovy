@@ -11,10 +11,10 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const CARD_MIN_SIDE = 190;
 
 const STEPS: [title: string, detail: string][] = [
-  ["Face the camera", "Stand straight and look ahead."],
-  ["Arms slightly away", "Leave a small gap between your arms and your body."],
-  ["Feet a little apart", "Weight even, as in the outline."],
-  ["Whole body in the guide", "Keep your whole body roughly inside; a little extra space is okay."],
+  ["Face the camera", "Stand straight, shoulders level, look ahead."],
+  ["Arms slightly out", "Let them hang a little away from your body, a hand's width from your hips, like the outline."],
+  ["Feet hip-width apart", "Not together, not wide; weight on both feet."],
+  ["Fill the outline", "Head to feet inside it, in the middle of the frame."],
 ];
 
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -64,7 +64,7 @@ function buildTips(): HTMLDivElement {
     list.append(li);
   }
   const note = document.createElement("p");
-  note.textContent = "Close-fitting clothes give the best result.";
+  note.textContent = "Close-fitting clothes and a plain wall behind you give the best result.";
   card.append(title, list, note);
   return card;
 }
@@ -73,11 +73,27 @@ const figure = buildFigure();
 const tips = buildTips();
 const hint = document.createElement("div");
 hint.className = "face-guide-label body-guide-hint";
-hint.textContent = "Face the camera · arms slightly away · feet a little apart · whole body inside the outline";
+hint.textContent = "Face the camera · arms slightly out, a hand's width from your hips · feet hip-width apart · fill the outline";
 hint.hidden = true;
 
+/** Live posture advice (ui: top of the stage), from the posture check in app/bodyCoach.ts. */
+const coach = document.createElement("div");
+coach.className = "body-coach";
+coach.hidden = true;
+coach.setAttribute("role", "status");
+coach.setAttribute("aria-live", "polite");
+
 export function mountBodyGuide(): void {
-  dom.stageWrap.append(figure, tips, hint);
+  dom.stageWrap.append(figure, tips, hint, coach);
+}
+
+/** Show the live posture advice (`ok`: a good pose, the outline turns green), or hide it (null). */
+export function setBodyCoach(advice: { message: string; ok: boolean } | null): void {
+  coach.hidden = advice === null || figure.hidden;
+  figure.classList.toggle("pose-ok", !!advice?.ok);
+  if (!advice) return;
+  if (coach.textContent !== advice.message) coach.textContent = advice.message;
+  coach.classList.toggle("ok", advice.ok);
 }
 
 /** Size/position key of the last layout, so the per-frame calls do not touch the DOM needlessly. */
@@ -89,7 +105,8 @@ export function updateBodyGuide(active: boolean): void {
   stageWrap.classList.toggle("body-guide-on", active);
   if (!active) {
     stageWrap.classList.remove("body-guide-roomy");
-    figure.hidden = tips.hidden = hint.hidden = true;
+    figure.hidden = tips.hidden = hint.hidden = coach.hidden = true;
+    figure.classList.remove("pose-ok");
     lastKey = "";
     return;
   }

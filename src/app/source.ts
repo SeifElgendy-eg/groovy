@@ -165,12 +165,25 @@ function endCountdown(): void {
   updateFaceGuide(state.facePoints); // the button goes back to its start label
 }
 
+/** The running countdown was started by the hands-free capture (not the button). */
+let autoStarted = false;
+
+/** Hands-free capture (app/bodyCoach.ts): count down `seconds`, then take the photo. */
+export function beginAutoCapture(seconds: number): void {
+  if (countdown || capture.busy || state.sourceMode !== "camera") return;
+  beginCountdown(seconds, true);
+}
+
+/** A hands-free countdown is running (the pose check may stop it if the pose breaks). */
+export const autoCaptureRunning = (): boolean => countdown !== null && autoStarted;
+
 /** Count down `seconds` on the stage, then take the photo. */
-function beginCountdown(seconds: number): void {
+function beginCountdown(seconds: number, auto = false): void {
+  autoStarted = auto;
   countdown = startCountdown(seconds, {
     onTick: (remaining) => {
       state.countdown = remaining;
-      showCountdown(remaining);
+      showCountdown(remaining, autoStarted);
       updateFaceGuide(state.facePoints);
     },
     onDone: () => {
@@ -182,6 +195,20 @@ function beginCountdown(seconds: number): void {
   });
 }
 
+/** The current camera frame as a canvas, mirrored (as the user saw it), at the camera's resolution. */
+export function grabFrame(): HTMLCanvasElement {
+  const { video } = dom;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const c = canvas.getContext("2d")!;
+  c.translate(canvas.width, 0);
+  c.scale(-1, 1);
+  // Software lift for a face the camera could not make bright enough (1 = untouched).
+  drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
+  return canvas;
+}
+
 /** Freeze the current camera frame (mirrored, as the user saw it) and use it as the photo. */
 async function takePhoto(): Promise<void> {
   const { video } = dom;
@@ -189,17 +216,7 @@ async function takePhoto(): Promise<void> {
   capture.busy = true;
   captureBtn.disabled = true;
   try {
-    const still = tracked.sync("taking the photo", () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const c = canvas.getContext("2d")!;
-      c.translate(canvas.width, 0);
-      c.scale(-1, 1);
-      // Software lift for a face the camera could not make bright enough (1 = untouched).
-      drawLifted(c, video, canvas.width, canvas.height, cameraTuning.lift);
-      return canvas;
-    });
+    const still = tracked.sync("taking the photo", grabFrame);
     state.showBefore = false;
     syncBefore();
     state.capturedPhoto = true;

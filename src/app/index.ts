@@ -16,6 +16,7 @@ import { mountFaceGuide } from "../ui/faceGuide";
 import { mountCameraPanel } from "../ui/cameraPanel";
 import { mountLipTuning } from "../ui/lipTuning";
 import { mountStatusToast, setStatus } from "../ui/status";
+import { mountBackdrop } from "./backdrop";
 import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
@@ -213,6 +214,7 @@ function bindControls(): void {
 
 export function start(): void {
   mountFaceGuide();
+  mountBackdrop();
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();
