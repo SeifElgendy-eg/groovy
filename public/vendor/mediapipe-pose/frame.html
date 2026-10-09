@@ -8,8 +8,9 @@
     />
     <!-- MediaPipe Pose in its own page: its WebAssembly loader uses page globals (Module) that the
          app's other MediaPipe (face, segmentation) also uses. The app calls findPose() below. -->
-    <script src="pose.js"></script>
-    <script src="frame.js"></script>
+    <!-- deferred: pose.js adds its loader scripts to <body>, which must exist by then (Edge) -->
+    <script defer src="pose.js"></script>
+    <script defer src="frame.js"></script>
   </head>
   <body></body>
 </html>
