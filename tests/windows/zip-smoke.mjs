@@ -79,6 +79,8 @@ await step("a photo goes through body shaping to the end", async () => {
 await browser.close();
 if (problems.length) {
   console.log(`\n${problems.length} problem(s):\n  ${problems.join("\n  ")}`);
+  // (on GitHub, as annotations: readable on the run's page and through the API)
+  if (process.env.GITHUB_ACTIONS) for (const p of problems) console.log(`::error title=zip smoke::${p.replace(/\r?\n/g, " ")}`);
   process.exit(1);
 }
 console.log("\nzip smoke OK");

@@ -45,6 +45,8 @@ jobs:
           GROOVY_NO_BROWSER: "1"
         run: |
           $ErrorActionPreference = 'Stop'
+          # (a failure is also reported as an annotation, readable without the full log)
+          trap { Write-Output "::error title=launcher check::$($_.Exception.Message)"; break }
           $pkg = Join-Path $PWD 'release/Groovy-Windows'
           $ps = Join-Path $pkg 'launcher/start-windows.ps1'
           $p = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$ps) -PassThru -WindowStyle Hidden
