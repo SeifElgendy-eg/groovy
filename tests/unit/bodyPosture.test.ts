@@ -89,6 +89,20 @@ describe("posture check", () => {
     expect(checkPosture(aside, ...L, false).ok).toBe(true);
   });
 
+  it("tells hands on the hips from arms hanging with the wrist points a little high", () => {
+    // straight arms, wrist points a little above the hip points (a laptop camera, BodyPix)
+    expect(checkPosture(person(...L, { wristUp: 0.06 }), ...L, true).issue).not.toBe("armsDown");
+    // hands on the hips: the wrists just above the hips, the elbows bent out to the sides
+    const J = person(...L, { wristUp: 0.06 });
+    const H = 0.8 * L[1];
+    for (const [S, E, W] of [[2, 3, 4], [5, 6, 7]]) {
+      const out = Math.sign(J[W * 3] - J[S * 3]);
+      J[E * 3] = J[S * 3] + out * 0.2 * H;
+      J[E * 3 + 1] = (J[S * 3 + 1] + J[W * 3 + 1]) / 2;
+    }
+    expect(checkPosture(J, ...L, true).issue).toBe("armsDown");
+  });
+
   it("lets the photo be taken with only a tip left, not with something that spoils the slimming", () => {
     for (const o of [{ armDeg: 2 }, { armDeg: 40 }, { feet: 0.2 }, { feet: 2 }]) {
       const r = checkPosture(person(...L, o), ...L, true);

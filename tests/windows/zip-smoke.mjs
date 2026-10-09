@@ -6,7 +6,7 @@
 // Fails on any file the page asks for that the launcher does not serve, on page errors, and when
 // a model does not load: the face models (the start button), BodyPix (the body worker) or MediaPipe
 // Pose (its frame). Then a photo goes through body shaping, which must finish (applied, or "no
-// full body found" for this face photo) rather than stay processing.
+// full body found" for this face photo), and the processing indicator must be gone.
 import { chromium } from "playwright";
 import path from "node:path";
 
@@ -71,9 +71,9 @@ await step("a photo goes through body shaping to the end", async () => {
     el.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await page.waitForFunction(() => globalThis.groovyBody && !globalThis.groovyBody.busy && (globalThis.groovyBody.ready || globalThis.groovyBody.failed), null, { timeout: 180000, polling: 250 });
-  const shown = await page.evaluate(() => document.querySelector(".body-progress")?.textContent ?? "");
-  console.log(`     shown: ${shown}`);
-  if (!/Done|not applied/.test(shown)) throw new Error(`the indicator shows "${shown}"`);
+  const shown = await page.evaluate(() => ({ status: document.getElementById("bodyStatus").textContent.trim(), indicator: !document.querySelector(".body-progress")?.hidden }));
+  console.log(`     status: ${shown.status}`);
+  if (shown.indicator) throw new Error("the processing indicator is still shown");
 });
 
 await browser.close();

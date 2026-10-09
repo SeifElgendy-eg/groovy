@@ -25,7 +25,9 @@ const LIMITS = { swell: 0.03, squash: 0.03, bend: 15, hand: 0.25, folds: 0 };
 const MARGIN = { swell: 0.02, squash: 0.02, bend: 3, hand: 0.08, folds: 10, whr: 0.03 };
 
 function measure(d) {
-  const { w, h, build } = d.meta;
+  const { w, h } = d.meta;
+  // the strength the app uses at 100%: the build, and the photo's cap (when the run has one)
+  const build = d.meta.build * (d.meta.cap ?? 1);
   const n = w * h;
   const J = d.joints;
   const k = [field.FULL.arms * build, field.FULL.torso * build, d.meta.legs === false ? 0 : field.FULL.legs * build];

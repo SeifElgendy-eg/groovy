@@ -32,10 +32,20 @@ import {
 import { state } from "./state";
 
 // A user edit of any control leaves "Before" mode and redraws.
+let renderQueued = 0;
+/**
+ * A control changed: redraw on the next frame, once, with the latest values. A slider sends many
+ * input events per frame while dragged; drawing on each one (a full-size photo every time) kept
+ * the page busy and the slider stuck behind the pointer.
+ */
 function userChanged(): void {
   state.showBefore = false;
   syncBefore();
-  renderAll();
+  if (renderQueued) return;
+  renderQueued = requestAnimationFrame(() => {
+    renderQueued = 0;
+    renderAll();
+  });
 }
 
 /** Slider -> label + optional extra sync, then redraw. */
