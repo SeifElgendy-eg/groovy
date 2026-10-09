@@ -192,6 +192,13 @@ export function runsOf(m: Uint8Array, w: number, y: number, gap: number): [numbe
   return out.filter((r) => r[1] - r[0] > 2);
 }
 
+/**
+ * Gaps narrower than this (pixels) are bridged when finding the body's runs in a row: a small
+ * fraction of the shoulder width (a fraction of the frame would bridge the gap between an arm and
+ * the body when the person is small in a wide frame).
+ */
+const runGap = (sw: number) => Math.max(1, 0.03 * sw);
+
 function percentile(values: Float32Array, p: number): number {
   const s = Float32Array.from(values).sort();
   return s[Math.min(s.length - 1, Math.max(0, Math.round((p / 100) * (s.length - 1))))];
@@ -260,17 +267,25 @@ export function anklesSeen(J: ArrayLike<number>, w: number, h: number): boolean 
 
 // ---------------------------------------------------------------- build
 
-/** Waist width relative to body height: ~0.25 slim, ~0.35 average, 0.45+ heavy. */
+/** Waist width (without the arms) relative to body height: ~0.2 slim, ~0.28 average, 0.36+ heavy. */
 export function waistRatio(m: Uint8Array, F: Frame): number {
   const tl = F.hip[1] - F.neck[1];
   const ws: number[] = [];
   for (let i = 0; i < 12; i++) {
     const y = Math.round(F.neck[1] + 0.55 * tl + ((0.1 * tl + 0.45 * tl) * i) / 11);
     if (y < 0 || y >= F.h) continue;
-    const rs = runsOf(m, F.w, y, 0.01 * F.w);
+    const rs = runsOf(m, F.w, y, runGap(F.sw));
     if (!rs.length) continue;
-    const r = mainRun(rs, centreX(F, y));
-    ws.push(r[1] - r[0]);
+    // the body's extent near the centre line (a hand or forearm on the hip splits the row; the
+    // pieces beside it are still waist)
+    const xc = centreX(F, y);
+    let a = Infinity, b = -Infinity;
+    for (const r of rs)
+      if (r[1] > xc - 0.9 * F.sw && r[0] < xc + 0.9 * F.sw) {
+        a = Math.min(a, r[0]);
+        b = Math.max(b, r[1]);
+      }
+    if (isFinite(a)) ws.push(b - a);
   }
   const H = noseToAnkles(F.J);
   if (!ws.length || H <= 0) return 0.35;
@@ -292,7 +307,7 @@ export function waistY(m: Uint8Array, F: Frame): number {
   const y0 = Math.max(0, Math.round(F.neck[1] + 0.3 * tl)), y1 = Math.min(F.h - 1, Math.round(F.neck[1] + 0.75 * tl));
   const ws: number[] = [];
   for (let y = y0; y <= y1; y++) {
-    const rs = runsOf(m, F.w, y, 0.01 * F.w);
+    const rs = runsOf(m, F.w, y, runGap(F.sw));
     if (!rs.length) {
       ws.push(Infinity);
       continue;
@@ -389,7 +404,7 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     return e + c * (target - e);
   };
   for (let y = Math.max(0, Math.floor(F.neck[1])); y < h; y++) {
-    const rs = runsOf(m, w, y, 0.01 * w);
+    const rs = runsOf(m, w, y, runGap(sw));
     if (!rs.length) continue;
     const xc = centreX(F, y);
     const beta = sstep(crotch, crotch + 0.5 * thigh, y);
@@ -466,7 +481,7 @@ function bodyField(m: Uint8Array, F: Frame, legs: boolean, buildK: number, rest?
     const runs = rowsOf[y];
     if (!runs) continue;
     row.fill(0);
-    const rs = runsOf(m, w, y, 0.01 * w);
+    const rs = runsOf(m, w, y, runGap(sw));
     const nom = legs ? nomL : nomT;
     runs.forEach((r, i) => {
       const e0L = r.g * (r.a - r.c), e0R = r.g * (r.b - r.c);
@@ -1020,7 +1035,6 @@ export function bodyFields(input: BodyInput): BodyFields {
   const P = input.person;
   const m = new Uint8Array(n);
   for (let i = 0; i < n; i++) m[i] = P[i] > 0.5 ? 1 : 0;
-  const buildK = 0.3 + 0.7 * sstep(0.24, 0.42, waistRatio(m, F));
 
   // an arm mostly hidden behind the body (a small visible slice) just moves with the body
   const labels = Uint8Array.from(input.labels);
@@ -1049,6 +1063,8 @@ export function bodyFields(input: BodyInput): BodyFields {
     body[i] = 1;
     armHard[i] = 0;
   }
+  // build: from the body without the arms (arms beside the waist are not waist)
+  const buildK = 0.3 + 0.7 * sstep(0.21, 0.36, waistRatio(body, F));
   const torso0 = bodyField(body, F, false, buildK);
   const legs0 = bodyField(body, F, true, buildK);
   const arm = armField(input, labels, F, body);

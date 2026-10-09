@@ -42,13 +42,6 @@ void main() {
   // the slimmed person is here (generous: the person mask can miss a few pixels of an edge, and
   // those must still show the moved body, not the photo or the backdrop)
   float now = texture(uCover, s / uSize).g;
-  // ...but in that margin, what matches the backdrop there is background, not the person: it is not
-  // moved along with the body (it would show as bent, stretched background beside the body)
-  float core = texture(uCover, s / uSize).r;
-  vec3 bgThere = texture(uPlate, s / uSize).rgb * texture(uGain, s / uSize).rgb;
-  vec3 diff = abs(warped - bgThere);
-  float person = smoothstep(0.03, 0.08, max(diff.r, max(diff.g, diff.b)));
-  now = max(core, now * person);
   vec3 base = mix(texture(uFrame, uv).rgb, warped, max(was, now));
   vec3 plate = texture(uPlate, uv).rgb * texture(uGain, uv).rgb;
   outColor = vec4(mix(base, plate, clamp(was - now, 0.0, 1.0)), 1.0);
@@ -273,13 +266,6 @@ export class BodyWarp {
         if (bd && plate) {
           was = sampleMap(bd.cover, x / W, y / H);
           now = sampleMap(bd.keep, sx / W, sy / H);
-          // as in the shader: in the margin, what matches the backdrop is background
-          const core = sampleMap(bd.cover, sx / W, sy / H);
-          const so = (Math.round(sy) * W + Math.round(sx)) * 4;
-          let diff = 0;
-          for (let c = 0; c < 3; c++) diff = Math.max(diff, Math.abs(wv[c] - plate[so + c] * sampleGain(bd.gain, sx / W, sy / H, c)) / 255);
-          const t = Math.min(1, Math.max(0, (diff - 0.03) / 0.05));
-          now = Math.max(core, now * t * t * (3 - 2 * t));
         }
         for (let c = 0; c < 3; c++) {
           const warped = wv[c];

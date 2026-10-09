@@ -2,7 +2,7 @@
 // movement fields, so the page stays responsive.
 import { expose, transfer } from "comlink";
 import * as ort from "onnxruntime-web/wasm";
-import { decodeJoints, decodeParts, resizeMask, resizeRGB, toInput, type Grid } from "./bodypix";
+import { decodeJoints, decodeParts, resizeMask, toInput, type Crop, type Grid } from "./bodypix";
 import { bodyFields, type BodyFields } from "./field";
 
 export interface BodyJob {
@@ -19,6 +19,10 @@ export interface BodyJob {
   person: Float32Array;
   pw: number;
   ph: number;
+  /** Where the model input sits in the working-resolution image (around the person). */
+  crop: Crop;
+  /** The photo's colours at the working resolution (RGBA). */
+  rgba: Uint8ClampedArray;
 }
 
 export interface BodyResult extends BodyFields {
@@ -73,10 +77,11 @@ const api = {
     const g: Grid = { gw: heat.dims[2], gh: heat.dims[1], W: job.W, H: job.H };
     const t1 = performance.now();
     const person = resizeMask(job.person, job.pw, job.ph, job.ww, job.wh);
-    const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh);
-    const labels = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, person);
+    const joints = decodeJoints(heat.data as Float32Array, offs.data as Float32Array, g, job.ww, job.wh, job.crop);
+    const labels = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, person, job.crop);
     for (const t of Object.values(out)) t.dispose();
-    const rgb = resizeRGB(job.input, job.W, job.H, job.ww, job.wh);
+    const rgb = new Uint8ClampedArray(job.ww * job.wh * 3);
+    for (let i = 0; i < job.ww * job.wh; i++) rgb.set(job.rgba.subarray(i * 4, i * 4 + 3), i * 3);
     const f = bodyFields({ w: job.ww, h: job.wh, person, labels, joints, rgb });
     const r: BodyResult = { ...f, joints, ms: { model: t1 - t0, fields: performance.now() - t1 } };
     return transfer(r, [r.arms.buffer, r.torso.buffer, r.legs.buffer]);

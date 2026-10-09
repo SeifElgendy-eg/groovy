@@ -1,7 +1,7 @@
 // Body slimming (weight-loss preview) on a photo: BodyPix + the movement fields are worked out once
 // per photo in a worker; the sliders then only re-weight three fields on the GPU (instant).
 import { wrap, type Remote } from "comlink";
-import { BODYPIX_LONG_SIDE, inputSide } from "./bodypix";
+import { BODYPIX_LONG_SIDE, inputSide, personBox } from "./bodypix";
 import { FULL } from "./field";
 import { checkPosture, legsVisible, type PostureResult } from "./posture";
 import { backdropGain, MAX_MISMATCH, personCover } from "./backdrop";
@@ -11,8 +11,12 @@ import type { BodyResult, BodyWorkerApi } from "./worker";
 /** Longest side of the image for the live posture check (body points only: small and quick). */
 const POSE_LONG_SIDE = 384;
 
-/** Longest side of the movement fields (they are smooth; the GPU applies them to the full photo). */
+/**
+ * Longest side of the person's box in the movement fields (they are smooth; the GPU applies them to
+ * the full photo), and a cap on the fields' size (pixels), for a wide frame with a small person.
+ */
 const FIELD_LONG_SIDE = 800;
+const FIELD_MAX_PIXELS = 650_000;
 
 /** The person mask from the app's segmenter (0..1, its own resolution). */
 export interface PersonMask {
@@ -119,20 +123,34 @@ export class BodyEffect {
     this.warp.clear();
     try {
       const { width: w, height: h } = frame;
-      const k = BODYPIX_LONG_SIDE / Math.max(w, h);
-      const W = inputSide(Math.round(w * k)), H = inputSide(Math.round(h * k));
+      // BodyPix and the fields work on the person, not the whole frame: a small person in a wide
+      // (landscape) frame would otherwise get too few pixels for the arms and hands. The box around
+      // the person (from the segmenter's mask) is what BodyPix sees, and the fields are as detailed
+      // as the person's size needs (up to FIELD_LONG_SIDE for the box, and a cap on the whole).
+      const pb = personBox(person.data, person.w, person.h, 0.08);
+      const bx = pb ? (pb.x * w) / person.w : 0, by = pb ? (pb.y * h) / person.h : 0;
+      const bw = pb ? (pb.w * w) / person.w : w, bh = pb ? (pb.h * h) / person.h : h;
+      const k = BODYPIX_LONG_SIDE / Math.max(bw, bh);
+      const W = inputSide(Math.round(bw * k)), H = inputSide(Math.round(bh * k));
       const c = document.createElement("canvas");
       c.width = W;
       c.height = H;
       const cx = c.getContext("2d", { willReadFrequently: true })!;
-      cx.drawImage(frame, 0, 0, W, H);
+      cx.drawImage(frame, bx, by, bw, bh, 0, 0, W, H);
       const input = cx.getImageData(0, 0, W, H).data;
-      const f = Math.min(1, FIELD_LONG_SIDE / Math.max(w, h));
+      const f = Math.min(1, FIELD_LONG_SIDE / Math.max(bw, bh), Math.sqrt(FIELD_MAX_PIXELS / (w * h)));
       const ww = Math.max(16, Math.round(w * f)), wh = Math.max(16, Math.round(h * f));
+      const crop = { x: (bx * ww) / w, y: (by * wh) / h, w: (bw * ww) / w, h: (bh * wh) / h };
+      const fc = document.createElement("canvas");
+      fc.width = ww;
+      fc.height = wh;
+      const fcx = fc.getContext("2d", { willReadFrequently: true })!;
+      fcx.drawImage(frame, 0, 0, ww, wh);
+      const rgba = fcx.getImageData(0, 0, ww, wh).data;
       const api = this.start();
       const cancelled = new Promise<never>((_, reject) => (this.stop = reject));
       const r = await Promise.race([
-        api.analyse({ base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h }),
+        api.analyse({ base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba }),
         cancelled,
       ]);
       this.lastMs = r.ms;
@@ -172,7 +190,8 @@ export class BodyEffect {
     const long = Math.max(person.w, person.h);
     const mask = { data: person.data, w: person.w, h: person.h };
     const cover = personCover(mask, 0.003 * long, 0.002 * long);
-    const keep = personCover(mask, 0.012 * long, 0.004 * long);
+    // a margin for edges the mask misses; narrow, as background in it moves with the body
+    const keep = personCover(mask, 0.007 * long, 0.003 * long);
     // colour gain and the match, on small copies, away from the person (and its shadow)
     const k = Math.min(1, 192 / Math.max(frame.width, frame.height));
     const w = Math.max(8, Math.round(frame.width * k)), h = Math.max(8, Math.round(frame.height * k));
