@@ -1,7 +1,7 @@
 // Body slimming (weight-loss preview) on a photo: BodyPix + the movement fields are worked out once
 // per photo in a worker; the sliders then only re-weight three fields on the GPU (instant).
 import { wrap, type Remote } from "comlink";
-import { BODYPIX_LONG_SIDE, inputSide, personBox } from "./bodypix";
+import { BODYPIX_LONG_SIDE, inputSide, maskUnsure, personBox } from "./bodypix";
 import { FULL } from "./field";
 import { checkPosture, legsVisible, type PostureResult } from "./posture";
 import { backdropGain, MAX_MISMATCH, personCover } from "./backdrop";
@@ -56,6 +56,14 @@ export class BodyEffect {
   plate: HTMLCanvasElement | null = null;
   /** The backdrop for the last photo: used, not matching the photo, or not available. */
   backdropState: "used" | "mismatch" | "none" = "none";
+  /** What the running analysis is doing (shown while it works), or null. */
+  step: string | null = null;
+  /** Called when `step` changes. */
+  onStep: (() => void) | null = null;
+  /** Whose body points the last analysis used: "both" (BodyPix and MediaPipe), "bodypix". */
+  pointsFrom: "both" | "bodypix" = "bodypix";
+  /** Whose outline of the person the last analysis used. */
+  outline: "segmenter" | "bodypix" = "segmenter";
   private posing = false;
   private poseCanvas: HTMLCanvasElement | null = null;
   private result: BodyResult | null = null;
@@ -133,13 +141,21 @@ export class BodyEffect {
     this.legs = true;
     this.backdropState = "none";
     this.warp.clear();
+    const setStep = (t: string | null) => {
+      this.step = t;
+      this.onStep?.();
+    };
+    setStep("Finding the body: body points and outline");
     try {
       const { width: w, height: h } = frame;
       // BodyPix and the fields work on the person, not the whole frame: a small person in a wide
       // (landscape) frame would otherwise get too few pixels for the arms and hands. The box around
       // the person (from the segmenter's mask) is what BodyPix sees, and the fields are as detailed
       // as the person's size needs (up to FIELD_LONG_SIDE for the box, and a cap on the whole).
-      const pb = personBox(person.data, person.w, person.h, 0.08);
+      // (a segmenter unsure of the person: BodyPix looks at the whole photo and its outline is used)
+      const unsure = maskUnsure(person.data);
+      this.outline = unsure ? "bodypix" : "segmenter";
+      const pb = unsure ? null : personBox(person.data, person.w, person.h, 0.08);
       const bx = pb ? (pb.x * w) / person.w : 0, by = pb ? (pb.y * h) / person.h : 0;
       const bw = pb ? (pb.w * w) / person.w : w, bh = pb ? (pb.h * h) / person.h : h;
       const k = BODYPIX_LONG_SIDE / Math.max(bw, bh);
@@ -166,9 +182,11 @@ export class BodyEffect {
       const tp = performance.now();
       let poseMs = 0;
       const landmarks = findPose(document.baseURI, frame, w, h).then((lm) => ((poseMs = performance.now() - tp), lm));
-      const job = { base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, debug: BODY_DEBUG };
+      const job = { base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, unsure, debug: BODY_DEBUG };
       const [, lm] = await Promise.race([Promise.all([api.analyse(job), landmarks]), cancelled]);
+      setStep("Working out the slimming");
       const r = await Promise.race([api.fields(lm), cancelled]);
+      this.pointsFrom = r.limbs.length ? "both" : "bodypix";
       this.lastMs = { ...r.ms, pose: poseMs };
       // No body found (BodyPix's shoulders unsure or on top of each other): nothing to slim.
       const conf = Math.min(r.joints[2 * 3 + 2], r.joints[5 * 3 + 2]);
@@ -195,6 +213,7 @@ export class BodyEffect {
     } finally {
       this.busy = false;
       this.stop = null;
+      this.step = null;
     }
   }
 

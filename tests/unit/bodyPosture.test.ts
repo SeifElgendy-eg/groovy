@@ -81,12 +81,23 @@ describe("posture check", () => {
   });
 
   it("checks distance and centring only on the live camera", () => {
-    const far = person(...L, { height: 0.5 });
+    const far = person(...L, { height: 0.4 });
     expect(checkPosture(far, ...L, true).issue).toBe("closer");
     expect(checkPosture(far, ...L, false).ok).toBe(true);
-    const aside = person(...L, { cx: 0.65 * L[0] });
+    const aside = person(...L, { cx: 0.7 * L[0] });
     expect(checkPosture(aside, ...L, true).issue).toBe("centre");
     expect(checkPosture(aside, ...L, false).ok).toBe(true);
+  });
+
+  it("lets the photo be taken with only a tip left, not with something that spoils the slimming", () => {
+    for (const o of [{ armDeg: 2 }, { armDeg: 40 }, { feet: 0.2 }, { feet: 2 }]) {
+      const r = checkPosture(person(...L, o), ...L, true);
+      expect(r.ok).toBe(false);
+      expect(r.ready).toBe(true);
+    }
+    for (const o of [{ armDeg: 75 }, { armDeg: 20, wristUp: 0.12 }, { turn: 0.45 }, { height: 1.0 }]) expect(checkPosture(person(...L, o), ...L, true).ready).toBe(false);
+    // hands on the hips is reported before the feet
+    expect(checkPosture(person(...L, { armDeg: 20, wristUp: 0.12, feet: 0.2 }), ...L, true).issue).toBe("armsDown");
   });
 
   it("needs the body points to be seen", () => {
