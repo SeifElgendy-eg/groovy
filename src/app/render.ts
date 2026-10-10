@@ -171,7 +171,7 @@ function logAnalysis(): void {
   console.info(
     `body shaping ready in ${(analysisMs / 1000).toFixed(1)} s: ${body.legs ? "arms, waist & legs" : "arms & waist (legs not in view)"}; ` +
       `body points ${body.pointsFrom === "both" ? "BodyPix + MediaPipe" : "BodyPix"}; outline ${body.outline}; backdrop ${body.backdropState}; ` +
-      `strength cap ${body.cap.toFixed(2)}`,
+      `strength ${body.strength.toFixed(2)} (cap ${body.cap.all.toFixed(2)}, arms ${body.cap.arms.toFixed(2)})`,
   );
 }
 

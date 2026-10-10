@@ -102,7 +102,7 @@ for (const photo of photos) {
         in_bodypix: r.inputs.bodypix, in_mediapipe: r.inputs.mediapipe,
       });
     return {
-      meta: { w: r.w, h: r.h, build: r.build, ms: { ...r.ms, ...globalThis.groovyBody.lastMs }, limbs: r.limbs, outline: r.outline, cap: globalThis.groovyBody.cap, legs: globalThis.groovyBody.legs },
+      meta: { w: r.w, h: r.h, build: r.build, ms: { ...r.ms, ...globalThis.groovyBody.lastMs }, limbs: r.limbs, outline: r.outline, cap: globalThis.groovyBody.cap.all, capArms: globalThis.groovyBody.cap.arms, legs: globalThis.groovyBody.legs },
       arrays: Object.fromEntries(Object.entries(arrays).map(([k, a]) => [k, [a.constructor.name, b64(a)]])),
       status: document.getElementById("bodyStatus").textContent.trim(),
     };

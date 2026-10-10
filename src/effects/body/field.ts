@@ -94,15 +94,18 @@ export const TUNING = {
    * 0.29+ H. 100% brings the
    * waist to `waist` H, and no narrower than `shoulders` x the shoulder points' distance (broad
    * shoulders go with a broader waist: a fit man's waist is ~0.8-0.85 of it, the booth photos'
-   * 0.96-1.04), never by more than `maxCut`; a body already there is only toned (`minCut`). The
+   * 0.96-1.04), and the hips to `hips` H, whichever needs more, never by more than `maxCut`; a body
+   * already there is still visibly toned (`minCut`). The
    * waist, hips and thighs come in by the same fraction (the body keeps its shape), the arms and
    * legs by the same share of their own maximum.
    */
   proportion: {
     waist: 0.19,
     shoulders: 0.8,
-    maxCut: 0.16,
-    minCut: 0.04,
+    /** The hips (the widest part around the hip points, without the arms): ~0.22-0.28 H on a slim build, 0.31-0.34 on the booth photos. */
+    hips: 0.28,
+    maxCut: 0.22,
+    minCut: 0.08,
   },
   torso: {
     /** Strength over the chest and the bust (same over the whole bust: no pointed bust). */
@@ -173,8 +176,8 @@ export interface BodyFields {
   build: number;
   /** Body parts as the fields used them (arms by side, whole hands): for checks and the debug view. */
   labels: Uint8Array;
-  /** How much of the 100% strength this photo can take before the body looks deformed (strengthCaps). */
-  cap: number;
+  /** How much of the 100% strength this photo can take before the body looks deformed (strengthCaps): all of the movement, and the arms' on top. */
+  cap: { all: number; arms: number };
 }
 
 // ---------------------------------------------------------------- small helpers
@@ -1440,8 +1443,26 @@ export function proportionStrength(torso: Float32Array, body: Uint8Array, F: Fra
   const now = [...widths].sort((p, q) => p - q)[Math.floor(0.25 * (widths.length - 1))], atFull = median(cuts);
   if (!(atFull > 0.01)) return null;
   const target = Math.max(Pt.waist * H, Pt.shoulders * F.sw);
-  const want = Math.min(Pt.maxCut, Math.max(Pt.minCut, 1 - target / now));
-  if (debug) Object.assign(debug, { waistH: now / H, waistSw: now / F.sw, target: target / H, want, atFull });
+  // the hips: the widest rows from just above the hip points to the top of the thighs (a body with a
+  // narrow waist and wide hips needs slimming too)
+  let hips = 0;
+  const kneeY = (F.jy(JOINT.rKnee) + F.jy(JOINT.lKnee)) / 2;
+  const thigh = Math.max(kneeY - F.hip[1], 0.3 * tl);
+  for (let y = Math.max(0, Math.round(F.hip[1] - 0.1 * tl)); y <= Math.min(h - 1, Math.round(F.hip[1] + 0.25 * thigh)); y++) {
+    const rs = runsOf(body, w, y, runGap(F.sw));
+    if (!rs.length) continue;
+    // (both legs' runs near the hips: the hips' outer extent)
+    let a = Infinity, b = -Infinity;
+    for (const r of rs)
+      if (r[1] > F.hip[0] - 1.2 * F.sw && r[0] < F.hip[0] + 1.2 * F.sw) {
+        a = Math.min(a, r[0]);
+        b = Math.max(b, r[1]);
+      }
+    if (isFinite(a)) hips = Math.max(hips, b - a);
+  }
+  const waistCut = 1 - target / now, hipCut = hips > 0 ? 1 - (Pt.hips * H) / hips : 0;
+  const want = Math.min(Pt.maxCut, Math.max(Pt.minCut, waistCut, hipCut));
+  if (debug) Object.assign(debug, { waistH: now / H, waistSw: now / F.sw, hipsH: hips / H, target: target / H, waistCut, hipCut, want, atFull });
   return Math.min(1, Math.max(0.1, want / atFull));
 }
 
@@ -1460,14 +1481,19 @@ export const CAP = {
   squeeze: 1.6,
   /** The cap never goes below this (a little slimming rather than none). */
   min: 0.4,
+  /** The arms' own movement is lowered to this at the least before the whole movement is. */
+  minArms: 0.25,
 } as const;
 
 /**
- * How much of the 100% strength the body can take before it looks deformed: the largest scale
- * (1 = as is) of the summed movement `k` x unit fields at which no more than CAP.share of the
- * body's pixels, and of the arms' (a small part of the body, where it shows first), are sheared or
- * stretched past the CAP limits. The movement is linear in the strength, so the warp's local shape
- * at scale s is I + s G, with G the movement's gradient. `m`: the person (1); `labels`: body parts.
+ * How much of the 100% strength the picture can take before the body looks deformed. `all`: the
+ * largest scale (1 = as is) of the whole movement (`k` x unit fields) at which no more than
+ * CAP.share of the body's pixels are sheared or stretched past the CAP limits. `arms`: on top of
+ * that, the scale of the arms' own movement at which the arms pass too (the arms are where it shows
+ * first, and slimming them less keeps the waist and hips visibly slimmer than lowering everything);
+ * only when even a quarter of the arms' movement fails is the whole movement lowered further. The
+ * movement is linear in the strength, so the warp's local shape is I + G with G the sum of the
+ * scaled fields' gradients. `m`: the person (1); `labels`: body parts.
  */
 export function strengthCaps(
   f: { arms: Float32Array; torso: Float32Array; legs: Float32Array },
@@ -1477,40 +1503,44 @@ export function strengthCaps(
   w: number,
   h: number,
   sw: number,
-): number {
+): { all: number; arms: number } {
   const n = w * h;
-  const dx = new Float32Array(n), dy = new Float32Array(n);
-  ([f.arms, f.torso, f.legs] as const).forEach((u, j) => {
-    if (!k[j]) return;
-    for (let i = 0; i < n; i++) {
-      dx[i] += k[j] * u[2 * i];
-      dy[i] += k[j] * u[2 * i + 1];
-    }
-  });
-  // gradients on every other pixel of the body (the fields are smooth), the arms on their own, away
-  // from the outline (where the arm meets the moving background the picture is meant to stretch)
+  // the arms' movement and the rest's, apart
+  const ax = new Float32Array(n), ay = new Float32Array(n), rx = new Float32Array(n), ry = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    ax[i] = k[0] * f.arms[2 * i];
+    ay[i] = k[0] * f.arms[2 * i + 1];
+    rx[i] = k[1] * f.torso[2 * i] + k[2] * f.legs[2 * i];
+    ry[i] = k[1] * f.torso[2 * i + 1] + k[2] * f.legs[2 * i + 1];
+  }
+  // gradients on every other pixel of the body (the fields are smooth), away from the outline
+  // (where the body meets the moving background the picture is meant to stretch); 8 per pixel: the
+  // arms' movement's, then the rest's
   const inside = distanceTransform(m, w, h);
   const rim = Math.max(1.5, 0.04 * sw);
   const body: number[] = [], arms: number[] = [];
+  const grad = (X: Float32Array, Y: Float32Array, i: number) => [(X[i + 1] - X[i - 1]) / 2, (X[i + w] - X[i - w]) / 2, (Y[i + 1] - Y[i - 1]) / 2, (Y[i + w] - Y[i - w]) / 2];
   for (let y = 1; y < h - 1; y += 2)
     for (let x = 1; x < w - 1; x += 2) {
       const i = y * w + x;
       if (!m[i] || inside[i] <= rim) continue;
-      (isArmPart(labels[i]) ? arms : body).push((dx[i + 1] - dx[i - 1]) / 2, (dx[i + w] - dx[i - w]) / 2, (dy[i + 1] - dy[i - 1]) / 2, (dy[i + w] - dy[i - w]) / 2);
+      (isArmPart(labels[i]) ? arms : body).push(...grad(ax, ay, i), ...grad(rx, ry, i));
     }
-  const bad = (G: number[], s: number) => {
+  /** Share of the pixels past a limit with the whole movement at `s` and the arms' at `a` on top. */
+  const bad = (G: number[], s: number, a: number) => {
     let c = 0;
-    for (let j = 0; j < G.length; j += 4) {
-      const a = 1 + s * G[j], b = s * G[j + 1], cc = s * G[j + 2], e = 1 + s * G[j + 3];
-      const shear = (Math.abs(Math.atan2(cc, a) - Math.atan2(-b, e)) * 180) / Math.PI;
-      const det = a * e - b * cc;
+    for (let j = 0; j < G.length; j += 8) {
+      const g = (q: number) => s * (a * G[j + q] + G[j + 4 + q]);
+      const A = 1 + g(0), B = g(1), C = g(2), E = 1 + g(3);
+      const shear = (Math.abs(Math.atan2(C, A) - Math.atan2(-B, E)) * 180) / Math.PI;
+      const det = A * E - B * C;
       if (shear > CAP.shear || det < CAP.magnify || det > CAP.squeeze) c++;
     }
-    return c / Math.max(1, G.length / 4);
+    return c / Math.max(1, G.length / 8);
   };
-  const largest = (ok: (s: number) => boolean, min: number) => {
-    if (ok(1)) return 1;
-    let lo = min, hi = 1;
+  const largest = (ok: (v: number) => boolean, min: number, max = 1) => {
+    if (ok(max)) return max;
+    let lo = min, hi = max;
     for (let it = 0; it < 8; it++) {
       const mid = (lo + hi) / 2;
       if (ok(mid)) lo = mid;
@@ -1518,7 +1548,12 @@ export function strengthCaps(
     }
     return lo;
   };
-  return largest((s) => bad(body, s) <= CAP.share && bad(arms, s) <= CAP.share, CAP.min);
+  let all = largest((v) => bad(body, v, 1) <= CAP.share, CAP.min);
+  const ok = (s: number, a: number) => bad(arms, s, a) <= CAP.share;
+  if (ok(all, 1)) return { all, arms: 1 };
+  if (ok(all, CAP.minArms)) return { all, arms: largest((a) => ok(all, a), CAP.minArms) };
+  all = largest((v) => ok(v, CAP.minArms), CAP.min, all);
+  return { all, arms: CAP.minArms };
 }
 
 /**

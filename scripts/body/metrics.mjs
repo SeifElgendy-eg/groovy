@@ -30,7 +30,7 @@ function measure(d) {
   const build = d.meta.build * (d.meta.cap ?? 1);
   const n = w * h;
   const J = d.joints;
-  const k = [field.FULL.arms * build, field.FULL.torso * build, d.meta.legs === false ? 0 : field.FULL.legs * build];
+  const k = [field.FULL.arms * build * (d.meta.capArms ?? 1), field.FULL.torso * build, d.meta.legs === false ? 0 : field.FULL.legs * build];
   const dx = new Float32Array(n), dy = new Float32Array(n);
   [d.arms, d.torso, d.legs].forEach((f, j) => {
     for (let i = 0; i < n; i++) {
