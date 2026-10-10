@@ -136,6 +136,13 @@ describe("movement fields on a drawn figure", () => {
     expect(Math.abs(dx(f.torso, 59, 140))).toBeLessThan(0.3);
   });
 
+  it("the shoulders come in toward the neck with the arms area, the neck stays", () => {
+    // backward map: the left shoulder (image left) reads from further left, the right from further right
+    expect(dx(f.arms, 72, 64)).toBeLessThan(-0.3);
+    expect(dx(f.arms, 127, 64)).toBeGreaterThan(0.3);
+    expect(Math.abs(dx(f.arms, 100, 64))).toBeLessThan(0.05);
+  });
+
   it("nothing moves far from the person, the build factor is in range", () => {
     for (const field of [f.arms, f.torso, f.legs]) expect(Math.abs(dx(field, 5, 295))).toBeLessThan(1e-3);
     expect(f.build).toBeGreaterThanOrEqual(0.3);

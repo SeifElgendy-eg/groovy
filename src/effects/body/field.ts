@@ -144,6 +144,19 @@ export const TUNING = {
     upperFullFrom: 0.35,
     forearm: 0.5,
   },
+  /**
+   * Narrower shoulders (with the Arms area): each shoulder, and the arm hanging from it, moves in
+   * toward the neck by `shift` x the shoulder points' distance at the full arms strength. Nothing
+   * moves near the neck (`from`); it is full from the shoulder point outward, from just above the
+   * shoulder line down, easing out down the arm to nothing at the wrist (the hand stays put).
+   */
+  shoulders: {
+    shift: 0.045,
+    from: [0.12, 0.45],
+    above: 0.3,
+    /** Below the shoulder points by this (sw): only the arm, not the side of the body. */
+    armpit: 0.3,
+  },
   hands: {
     /** A hand rests on the body when this share of the ring around it is body, */
     touch: [0.1, 0.3],
@@ -1336,6 +1349,7 @@ export function bodyFields(input: BodyInput): BodyFields {
     torso: unit(null, null, torso, swingT),
     legs: unit(null, null, legs, swingL),
   };
+  shoulderShift(units.arms.dx, m, labels, F);
   // Hands move as a whole (no part of a hand is narrowed, stretched or bent), blending into the wrist.
   const hands = handShapes(labels, m, w, h, sw, F.J, body);
   rigidHands(units.arms, hands, w, h, sw, FULL.arms * buildK, null);
@@ -1406,6 +1420,38 @@ export function bodyFields(input: BodyInput): BodyFields {
   unfold(out, [kA, kT, kL], w, h, sw);
   const cap = strengthCaps(out, [kA, kT, pointsSeen(F.J, w, h, [JOINT.rKnee, JOINT.lKnee]) ? kL : 0], m, labels, w, h, sw);
   return { w, h, ...out, build: k, labels, cap };
+}
+
+/**
+ * Narrower shoulders (TUNING.shoulders), added to the arms' unit field `dx` inside the person `m`
+ * (`labels`: body parts):
+ * each side's shoulder and arm move in toward the neck. (A backward map: the left side reads from
+ * further left, dx < 0, so it shows what was further out.)
+ */
+export function shoulderShift(dx: Float32Array, m: Uint8Array, labels: Uint8Array, F: Frame): void {
+  const T = TUNING.shoulders, { w, h, sw } = F;
+  const neckX = F.neck[0];
+  // (unit field: at the full arms strength this is `shift` x sw)
+  const amount = (T.shift * sw) / FULL.arms;
+  for (const [S, W] of [[JOINT.rShoulder, JOINT.rWrist], [JOINT.lShoulder, JOINT.lWrist]] as const) {
+    if (F.J[S * 3 + 2] < 0.3) continue;
+    const sx = F.jx(S), sy = F.jy(S);
+    const wy = F.J[W * 3 + 2] >= 0.3 ? Math.max(F.jy(W), sy + 0.5 * sw) : sy + 1.2 * sw;
+    const out = Math.sign(sx - neckX) || 1; // the side's outward direction
+    const top = sy - T.above * sw;
+    const armpit = sy + T.armpit * sw;
+    for (let y = Math.max(0, Math.floor(top)); y < Math.min(h, Math.ceil(wy)); y++) {
+      const v = y < sy ? sstep(top, sy, y) : 1 - sstep(sy, wy, y);
+      if (v <= 0) continue;
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        // below the armpits only the arm moves (the waist beside it has its own slimming)
+        if (!m[i] || Math.sign(x - neckX) !== out || (y > armpit && !isArmPart(labels[i]))) continue;
+        const g = sstep(T.from[0] * sw, T.from[1] * sw, Math.abs(x - neckX));
+        if (g > 0) dx[i] += out * amount * g * v;
+      }
+    }
+  }
 }
 
 /**
