@@ -104,6 +104,8 @@ export const TUNING = {
     shoulders: 0.8,
     /** The hips (the widest part around the hip points, without the arms): ~0.22-0.28 H on a slim build, 0.31-0.34 on the booth photos. */
     hips: 0.28,
+    /** A measured waist under this (x H, x the shoulder points' distance) is not a waist: arms in front of it. */
+    measurable: [0.13, 0.6],
     maxCut: 0.22,
     minCut: 0.08,
   },
@@ -148,14 +150,16 @@ export const TUNING = {
    * Narrower shoulders (with the Arms area): each shoulder, and the arm hanging from it, moves in
    * toward the neck by `shift` x the shoulder points' distance at the full arms strength. Nothing
    * moves near the neck (`from`); it is full from the shoulder point outward, from just above the
-   * shoulder line down, easing out down the arm to nothing at the wrist (the hand stays put).
+   * shoulder line down, easing out down the arm to nothing at the wrist (the hand stays put), and
+ * down the side of the chest to nothing at the bottom of the chest.
    */
   shoulders: {
     shift: 0.045,
     from: [0.12, 0.45],
     above: 0.3,
-    /** Below the shoulder points by this (sw): only the arm, not the side of the body. */
-    armpit: 0.3,
+    /** The side of the chest moves with the shoulder down to `armpit` (sw below the shoulder points), easing out to none at `chestEnd`. */
+    armpit: 0.25,
+    chestEnd: 1.0,
   },
   hands: {
     /** A hand rests on the body when this share of the ring around it is body, */
@@ -1349,7 +1353,7 @@ export function bodyFields(input: BodyInput): BodyFields {
     torso: unit(null, null, torso, swingT),
     legs: unit(null, null, legs, swingL),
   };
-  shoulderShift(units.arms.dx, m, labels, F);
+  shoulderShift(units.arms.dx, m, wa, F);
   // Hands move as a whole (no part of a hand is narrowed, stretched or bent), blending into the wrist.
   const hands = handShapes(labels, m, w, h, sw, F.J, body);
   rigidHands(units.arms, hands, w, h, sw, FULL.arms * buildK, null);
@@ -1424,11 +1428,11 @@ export function bodyFields(input: BodyInput): BodyFields {
 
 /**
  * Narrower shoulders (TUNING.shoulders), added to the arms' unit field `dx` inside the person `m`
- * (`labels`: body parts):
+ * (`armW`: how much each pixel is arm, 0..1, soft at the arm's edge):
  * each side's shoulder and arm move in toward the neck. (A backward map: the left side reads from
  * further left, dx < 0, so it shows what was further out.)
  */
-export function shoulderShift(dx: Float32Array, m: Uint8Array, labels: Uint8Array, F: Frame): void {
+export function shoulderShift(dx: Float32Array, m: Uint8Array, armW: Float32Array, F: Frame): void {
   const T = TUNING.shoulders, { w, h, sw } = F;
   const neckX = F.neck[0];
   // (unit field: at the full arms strength this is `shift` x sw)
@@ -1439,16 +1443,20 @@ export function shoulderShift(dx: Float32Array, m: Uint8Array, labels: Uint8Arra
     const wy = F.J[W * 3 + 2] >= 0.3 ? Math.max(F.jy(W), sy + 0.5 * sw) : sy + 1.2 * sw;
     const out = Math.sign(sx - neckX) || 1; // the side's outward direction
     const top = sy - T.above * sw;
-    const armpit = sy + T.armpit * sw;
+    const armpit = sy + T.armpit * sw, chestEnd = sy + T.chestEnd * sw;
     for (let y = Math.max(0, Math.floor(top)); y < Math.min(h, Math.ceil(wy)); y++) {
       const v = y < sy ? sstep(top, sy, y) : 1 - sstep(sy, wy, y);
       if (v <= 0) continue;
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
-        // below the armpits only the arm moves (the waist beside it has its own slimming)
-        if (!m[i] || Math.sign(x - neckX) !== out || (y > armpit && !isArmPart(labels[i]))) continue;
+        if (!m[i] || Math.sign(x - neckX) !== out) continue;
+        // The side of the chest comes in with the shoulder and arm, easing out down to the bottom of
+        // the chest (the waist has its own slimming); a cut at the armpits would leave the chest
+        // under the arm sticking out past the narrower shoulders, with a crease where the cut is.
+        // (blended softly across the arm's edge by `armW`, the arm's weight: no seam where it meets the body)
+        const side = armW[i] + (1 - armW[i]) * (1 - sstep(armpit, chestEnd, y));
         const g = sstep(T.from[0] * sw, T.from[1] * sw, Math.abs(x - neckX));
-        if (g > 0) dx[i] += out * amount * g * v;
+        if (g > 0 && side > 0) dx[i] += out * amount * g * v * side;
       }
     }
   }
@@ -1488,6 +1496,9 @@ export function proportionStrength(torso: Float32Array, body: Uint8Array, F: Fra
   // the waist: the narrower rows of the band (a quarter of the way up its widths), not the hips below
   const now = [...widths].sort((p, q) => p - q)[Math.floor(0.25 * (widths.length - 1))], atFull = median(cuts);
   if (!(atFull > 0.01)) return null;
+  // A waist no real body has (hands or forearms across it hide most of it from the outline): not
+  // measured; the build's strength is used instead.
+  if (now < Pt.measurable[0] * H || now < Pt.measurable[1] * F.sw) return null;
   const target = Math.max(Pt.waist * H, Pt.shoulders * F.sw);
   // the hips: the widest rows from just above the hip points to the top of the thighs (a body with a
   // narrow waist and wide hips needs slimming too)
@@ -1521,7 +1532,7 @@ export const CAP = {
   /** At most this share of the body's pixels may go past a limit. */
   share: 0.02,
   /** Shear of the picture on the body, degrees. */
-  shear: 22,
+  shear: 25,
   /** Magnification (area) at most 1 / magnify, squeezing at most `squeeze`. */
   magnify: 0.55,
   squeeze: 1.6,
