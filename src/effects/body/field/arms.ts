@@ -117,9 +117,14 @@ export function armField(input: BodyInput, labels: Uint8Array, F: Frame, body: U
         const r = clamp(sample(dtm, w, h, mx + tc * ux, my + tc * uy), 2, 0.3 * sw);
         let a = (tc - t0) / len;
         if (flip) a = 1 - a;
+        const A = TUNING.arms;
+        // The strength is continuous along the arm: the upper arm (half at the shoulder cap, full
+        // down it) eases to the forearm's strength at the elbow, and the forearm eases out to none
+        // well before the wrist (a wrist holds no fat; narrowing it next to a hand moved as one
+        // piece pinches it). A step at the elbow bent the arm's outline there.
         const g = part.upper
-          ? (0.5 + 0.5 * sstep(0, TUNING.arms.upperFullFrom, a)) * (1 - 0.3 * sstep(0.7, 1, a)) // shoulder cap at half strength
-          : TUNING.arms.forearm * (1 - sstep(0.4, 0.95, a)); // forearm, none at the hand
+          ? (0.5 + 0.5 * sstep(0, A.upperFullFrom, a)) * (1 - (1 - A.forearm) * sstep(A.elbowEase, 1, a))
+          : A.forearm * (1 - sstep(A.forearmEase[0], A.forearmEase[1], a));
         const av = Math.abs(v);
         const across = av <= r ? v : Math.sign(v) * r * clamp(1 - (av - r) / (0.6 * r), 0, 1);
         const ex = mx + tc * ux + Math.sign(v) * (r + 0.04 * sw) * nx, ey = my + tc * uy + Math.sign(v) * (r + 0.04 * sw) * ny;
