@@ -20,7 +20,7 @@ import { mountBackdrop } from "./backdrop";
 import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
-import { renderAll } from "./render";
+import { renderAll, setupBodyBrush } from "./render";
 import {
   handlePhoto,
   loadSamplePhoto,
@@ -225,6 +225,7 @@ function bindControls(): void {
 export function start(): void {
   mountFaceGuide();
   mountBackdrop();
+  setupBodyBrush();
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();

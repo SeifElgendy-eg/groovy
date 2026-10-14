@@ -18,8 +18,12 @@ export const body = new BodyEffect();
 // Debug and regression tools (scripts/body/) read the body analysis from here with ?debug=body.
 if (new URLSearchParams(location.search).get("debug") === "body") (globalThis as { groovyBody?: BodyEffect }).groovyBody = body;
 
-/** Person mask of the current photo for body slimming (from the multiclass segmenter), or null. */
-export const bodyPerson: { mask: PersonMask | null } = { mask: null };
+/**
+ * Person mask of the current photo for body slimming: `mask` from the multiclass segmenter, or null;
+ * `manual` drawn by hand with the Body Brush (used instead when set); `photo` counts the photos (a
+ * new one drops the hand-drawn outline).
+ */
+export const bodyPerson: { mask: PersonMask | null; manual: PersonMask | null; photo: number } = { mask: null, manual: null, photo: 0 };
 
 /** Raw skin segmentation (alpha = skin), in the model's orientation. */
 export const segMask = scratch();

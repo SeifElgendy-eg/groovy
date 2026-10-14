@@ -26,6 +26,8 @@ export interface BodyJob {
   rgba: Uint8ClampedArray;
   /** The segmenter's mask is unsure (see maskUnsure): BodyPix's own outline is used instead. */
   unsure?: boolean;
+  /** The mask was drawn by hand (Body Brush): used as it is, no arms added from BodyPix. */
+  manual?: boolean;
   /** Also return the fields' inputs (debug and regression tools: scripts/body/). */
   debug?: boolean;
 }
@@ -126,7 +128,7 @@ const api = {
     for (let i = 0; i < n; i++) either[i] = Math.max(person[i], bp[i]);
     const parts0 = decodeParts(parts.data as Float32Array, g, job.ww, job.wh, either, job.crop);
     const within = (mask: Float32Array) => parts0.map((p, i) => (mask[i] > 0.3 ? p : 255));
-    addArms(person, bp, within(bp));
+    if (!job.manual) addArms(person, bp, within(bp));
     const labels = within(person);
     for (const t of Object.values(out)) t.dispose();
     const rgb = new Uint8ClampedArray(n * 3);

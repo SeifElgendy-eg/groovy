@@ -160,6 +160,29 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   const takenOk = taken.still && !taken.counting;
   console.log(takenOk ? "ok  " : "FAIL", "the countdown ends by taking the photo", JSON.stringify(taken));
   if (!takenOk) bad++;
+
+  // Body Brush: open the outline editor on the photo, paint, apply: the hand-drawn outline is used.
+  await body.click('.body-brush [data-action="start"]');
+  await body.waitForTimeout(300);
+  const box = await body.evaluate(() => {
+    const o = document.querySelector(".body-brush-overlay");
+    const r = o.getBoundingClientRect();
+    return { shown: getComputedStyle(o).display !== "none", x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+  await body.mouse.move(box.x + box.w * 0.4, box.y + box.h * 0.3);
+  await body.mouse.down();
+  await body.mouse.move(box.x + box.w * 0.6, box.y + box.h * 0.7, { steps: 15 });
+  await body.mouse.up();
+  await body.click('.body-brush [data-action="apply"]');
+  await body.waitForTimeout(300);
+  const brush = await body.evaluate(() => ({
+    status: document.querySelector(".body-brush-status").textContent,
+    useAutomatic: !document.querySelector('.body-brush [data-action="auto"]').hidden,
+    overlayGone: getComputedStyle(document.querySelector(".body-brush-overlay")).display === "none",
+  }));
+  const brushOk = box.shown && brush.useAutomatic && brush.overlayGone && /outline is used/.test(brush.status);
+  console.log(brushOk ? "ok  " : "FAIL", "the Body Brush edits and applies a hand-drawn outline", JSON.stringify(brush));
+  if (!brushOk) bad++;
   await body.close();
 }
 // Camera failures must be visible to the user (they used to be swallowed silently).

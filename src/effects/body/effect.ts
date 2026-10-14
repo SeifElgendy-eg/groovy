@@ -72,7 +72,7 @@ export class BodyEffect {
     return this.result?.build ?? 1;
   }
   /** Whose outline of the person the last analysis used. */
-  outline: "segmenter" | "bodypix" = "segmenter";
+  outline: "segmenter" | "bodypix" | "manual" = "segmenter";
   private posing = false;
   private poseCanvas: HTMLCanvasElement | null = null;
   private result: BodyResult | null = null;
@@ -139,8 +139,11 @@ export class BodyEffect {
     }
   }
 
-  /** Analyse the photo (`frame`, photo size) with its person mask. Resolves true when ready. */
-  async prepare(frame: HTMLCanvasElement, person: PersonMask): Promise<boolean> {
+  /**
+   * Analyse the photo (`frame`, photo size) with its person mask (`manual`: drawn by hand, used as
+   * it is). Resolves true when ready.
+   */
+  async prepare(frame: HTMLCanvasElement, person: PersonMask, manual = false): Promise<boolean> {
     this.dirty = false;
     this.busy = true;
     this.ready = false;
@@ -163,8 +166,9 @@ export class BodyEffect {
       // the person (from the segmenter's mask) is what BodyPix sees, and the fields are as detailed
       // as the person's size needs (up to FIELD_LONG_SIDE for the box, and a cap on the whole).
       // (a segmenter unsure of the person: BodyPix looks at the whole photo and its outline is used)
-      const unsure = maskUnsure(person.data);
-      this.outline = unsure ? "bodypix" : "segmenter";
+      // (an outline drawn by hand with the Body Brush is used as it is)
+      const unsure = !manual && maskUnsure(person.data);
+      this.outline = manual ? "manual" : unsure ? "bodypix" : "segmenter";
       const pb = unsure ? null : personBox(person.data, person.w, person.h, 0.08);
       const bx = pb ? (pb.x * w) / person.w : 0, by = pb ? (pb.y * h) / person.h : 0;
       const bw = pb ? (pb.w * w) / person.w : w, bh = pb ? (pb.h * h) / person.h : h;
@@ -192,7 +196,7 @@ export class BodyEffect {
       const tp = performance.now();
       let poseMs = 0;
       const landmarks = findPose(document.baseURI, frame, w, h).then((lm) => ((poseMs = performance.now() - tp), lm));
-      const job = { base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, unsure, debug: BODY_DEBUG };
+      const job = { base: document.baseURI, input, W, H, ww, wh, person: Float32Array.from(person.data), pw: person.w, ph: person.h, crop, rgba, unsure, manual, debug: BODY_DEBUG };
       const [, lm] = await Promise.race([Promise.all([api.analyse(job), landmarks]), cancelled]);
       setStep("Working out the slimming");
       const r = await Promise.race([api.fields(lm), cancelled]);

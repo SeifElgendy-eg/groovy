@@ -1288,3 +1288,75 @@ body:not(.home-screen) .stage-wrap {
 .body-progress[hidden] {
   display: none;
 }
+
+/* Body Brush (ui/bodyBrush.ts): the outline editor's tools in the body panel, the outline over the photo. */
+.body-brush {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.body-brush[hidden],
+.body-brush [hidden] {
+  display: none !important;
+}
+.body-brush-tools {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+}
+.body-brush-tools p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.body-brush-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.body-brush-row button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.body-brush-row button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #201526;
+  border-color: var(--accent);
+}
+.body-brush-row button.primary {
+  background: var(--accent);
+  color: #201526;
+  font-weight: 700;
+}
+.body-brush-size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.body-brush-size input {
+  margin-top: 0;
+}
+.body-brush-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.body-brush-overlay {
+  position: absolute;
+  z-index: 7;
+  display: none;
+  touch-action: none;
+  cursor: crosshair;
+}

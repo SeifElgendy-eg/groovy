@@ -111,6 +111,8 @@ function resetForNewPhoto(kind: typeof state.photoKind): void {
   cancelCountdown();
   state.skinMaskReady = false;
   bodyPerson.mask = null;
+  bodyPerson.manual = null;
+  bodyPerson.photo++;
   state.photoKind = kind;
   clearFace();
   markEffectsDirty();
