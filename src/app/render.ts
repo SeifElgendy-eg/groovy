@@ -7,6 +7,7 @@ import { readBodySettings, readBotoxDoses, readLipParams } from "../ui/controls"
 import { dom } from "../ui/dom";
 import { hidePhotoProcessingCue, showPhotoProcessingCue } from "../ui/faceGuide";
 import { setBodyProgress } from "../ui/bodyProgress";
+import { bodyBrushEditing, mountBodyBrush, syncBodyBrush } from "../ui/bodyBrush";
 import { acne, body, bodyPerson, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
@@ -183,7 +184,8 @@ function renderBody(w: number, h: number): void {
       : "Stand in the outline as shown, then Take photo.";
     return;
   }
-  const person = bodyPerson.mask;
+  // (an outline drawn by hand with the Body Brush replaces the automatic one)
+  const person = bodyPerson.manual ?? bodyPerson.mask;
   const settings = readBodySettings();
   if (!person) {
     status.textContent = state.modelReady ? "Analysing the photo…" : "Loading models…";
@@ -203,7 +205,7 @@ function renderBody(w: number, h: number): void {
     const start = performance.now();
     analysisStart = start;
     void body
-      .prepare(sourceCanvas, person)
+      .prepare(sourceCanvas, person, person === bodyPerson.manual)
       .then((ok) => {
         analysisMs = performance.now() - start;
         if (ok) noteWork("body analysis", analysisMs);
@@ -310,15 +312,44 @@ export function renderAll(): void {
   tracked.sync("drawing the effect", drawStage);
 }
 
+let brushPhoto = -1;
+
+/** The Body Brush (ui/bodyBrush.ts): its outline in, the hand-made one out. */
+export function setupBodyBrush(): void {
+  const usedOutline = () => {
+    const r = body.analysis;
+    return r && body.ready ? { data: r.person, w: r.w, h: r.h } : null;
+  };
+  mountBodyBrush(
+    {
+      size: () => getSourceDims(),
+      outline: () => usedOutline() ?? bodyPerson.manual ?? bodyPerson.mask,
+      automatic: () => bodyPerson.mask,
+      manual: () => bodyPerson.manual !== null,
+      apply: (mask) => {
+        bodyPerson.manual = mask;
+        body.dirty = true;
+        renderAll();
+      },
+      redraw: () => renderAll(),
+    },
+    dom.bodySection,
+    dom.bodyStatus,
+  );
+}
+
 function drawStage(): void {
   const { w, h } = getSourceDims();
   if (!w || !h) return;
   if (state.module !== "body" || state.sourceMode !== "photo") setBodyProgress(null);
+  syncBodyBrush(state.module === "body" && state.sourceMode === "photo", brushPhoto !== bodyPerson.photo);
+  brushPhoto = bodyPerson.photo;
   ctx.clearRect(0, 0, w, h);
   if (state.sourceMode === "camera" && (!cameraNeedsEffect() || !state.faceAligned)) return;
   // Composite the effect over the exact captured frame used by the models.
   if (state.sourceMode === "camera") drawForDisplay(ctx, w, h);
-  if (state.showBefore) return;
+  // (the Body Brush is used on the photo as it is)
+  if (state.showBefore || bodyBrushEditing()) return;
   if (metaOf(state.module).paintsBaseFrame && state.lipData)
     drawForDisplay(ctx, w, h);
   effectRender[state.module]?.(w, h);
