@@ -56,7 +56,7 @@ export async function initModels(): Promise<void> {
     // service was in use).
     setStatus("Preparing the live camera…");
     await liveModel();
-    setStatus("Preparing body shaping…");
+    setStatus("Preparing the treatments…");
     await tracked("preparing the services", prepareServices);
     state.modelReady = true;
     dom.startBtn.disabled = false;

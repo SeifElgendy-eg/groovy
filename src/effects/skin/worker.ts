@@ -8,6 +8,10 @@ import { linesComputeParallel } from "../wrinkles/parallel";
 import { helperCount, runStage } from "./pool";
 
 const api = {
+  /** Answers once the worker has loaded (started at app start, so the first photo does not wait for it). */
+  ready() {
+    return true;
+  },
   acne(job: AcneJob) {
     const r = acneCompute(job);
     return transfer(r, [r.corrected.buffer, r.faded.buffer]);

@@ -83,6 +83,22 @@ function worker(lane: Lane): Handle | null {
   }
 }
 
+/** Start both lanes' workers and wait until they have loaded (app start: never on a first photo). */
+export async function warmUpWorkers(): Promise<void> {
+  await Promise.all(
+    (["botox", "acne"] as Lane[]).map(async (lane) => {
+      const h = worker(lane);
+      if (!h) return;
+      try {
+        await Promise.race([h.api.ready(), h.failed]);
+        h.answered = true;
+      } catch {
+        // (a lane that cannot start falls back to the main thread on its first job, as before)
+      }
+    }),
+  );
+}
+
 /**
  * Stop the lane's running jobs (they reject with Cancelled) and drop its worker, with whatever it
  * cached (the botox layers): the next job starts a fresh worker. Does nothing when the lane is idle.
