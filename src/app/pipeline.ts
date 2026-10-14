@@ -27,7 +27,7 @@ import { state } from "./state";
 
 /** IMAGE-mode models for photos (landmarks + skin segmentation). */
 let models: Models | null = null;
-/** VIDEO-mode landmarker for the live camera, created in the background after `models`. */
+/** VIDEO-mode landmarker for the live camera, created (and run once) at start, after `models`. */
 let videoLandmarker: Promise<FaceLandmarker> | null = null;
 let liveLandmarker: FaceLandmarker | null = null;
 let processing = false;
@@ -50,12 +50,15 @@ export async function initModels(): Promise<void> {
       closeSegmentation(m.segmenter.segment(warm));
       lipRenderer.warmUp();
     });
+    // Everything else is loaded and run once now, while "Loading" shows: the live-camera face
+    // model and the services' large models (body shaping). The price is paid once, when the app
+    // opens, never while a customer uses it (a background load held the page while the first
+    // service was in use).
+    setStatus("Preparing the live camera…");
+    await liveModel();
+    setStatus("Preparing body shaping…");
+    await tracked("preparing the services", prepareServices);
     state.modelReady = true;
-    // The live-camera face model is built in the background once a service that tracks the face
-    // is chosen (not at all for body shaping), so the first camera start does not wait for it.
-    prepareLiveModel();
-    // Large service models (body shaping) get ready in the background meanwhile.
-    prepareServices();
     dom.startBtn.disabled = false;
     setStatus("Models ready", "ready");
     if (state.running) {
@@ -66,14 +69,6 @@ export async function initModels(): Promise<void> {
     console.error(err);
     setStatus("Model loading failed", "error");
   }
-}
-
-/**
- * Build the live-camera face model in the background if the chosen service tracks the face on the
- * camera (called when a service is chosen, and when the models are ready).
- */
-export function prepareLiveModel(): void {
-  if (state.modelReady && metaOf(state.module).needs.live === "track") setTimeout(() => void liveModel(), 0);
 }
 
 function liveModel(): Promise<FaceLandmarker> {

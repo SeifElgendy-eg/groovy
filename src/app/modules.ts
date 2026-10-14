@@ -5,7 +5,7 @@ import { syncBefore } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { markEffectsDirty, services } from "./services";
-import { prepareLiveModel, processCurrentSource } from "./pipeline";
+import { processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { cancelCountdown, loadSamplePhoto } from "./source";
 import { resetAlignment, state } from "./state";
@@ -45,7 +45,6 @@ export function setModule(moduleName: ModuleId): void | Promise<void> {
     for (const el of service.sections) showEl(el, moduleName === service.id);
 
   if (!isHome) services[moduleName].chosen?.();
-  prepareLiveModel();
   dom.moduleEyebrow.textContent = meta.eyebrow;
   dom.moduleTitle.textContent = meta.title;
   dom.sampleBtn.textContent = meta.sampleButtonLabel;

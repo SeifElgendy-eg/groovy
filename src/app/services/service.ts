@@ -39,10 +39,7 @@ export interface Service {
   readonly debugMaskMirrored?: boolean;
   /** The service was just chosen: start loading what it needs, set its starting controls. */
   chosen?(): void;
-  /**
-   * Get large models ready in the background while the app is idle on the home screen (it may
-   * hold the page for a moment, so not while a customer is using the screen).
-   */
+  /** Load and run its large models once, at start (while "Loading" shows, never mid-use). */
   prepare?(): Promise<void>;
 }
 
