@@ -33,6 +33,10 @@
             </label>
             <button id="sampleBtn" class="ghost-btn">Test Photo</button>
             <button id="backHomeBtn" class="ghost-btn small-back">Back</button>
+            <ol class="body-steps" aria-label="Steps">
+              <li data-step="camera">Take your photo</li>
+              <li data-step="photo">See your result</li>
+            </ol>
           </div>
 
           <div id="stageWrap" class="stage-wrap">
@@ -239,50 +243,73 @@
 
             <section
               id="bodySection"
-              class="section module-section hidden-section"
+              class="section module-section body-panel hidden-section"
+              data-step="camera"
             >
-              <div class="eyebrow">BODY</div>
-              <h3>Weight loss (body shaping)</h3>
-              <div class="control">
-                <div class="row">
-                  <strong>Weight loss</strong
-                  ><span id="bodyValue" class="value">0%</span>
+              <div class="body-step body-step-camera">
+                <h3 class="body-title">Stand in the outline</h3>
+                <ul class="body-tips">
+                  <li><b>Face the camera</b> with your shoulders level.</li>
+                  <li><b>Arms a little out,</b> a hand's width from your hips.</li>
+                  <li><b>Feet hip-width apart,</b> head to feet inside the outline.</li>
+                </ul>
+                <p class="body-fit">Close-fitting clothes give the truest result.</p>
+              </div>
+              <div class="body-step body-step-photo">
+                <h3 class="body-title">Your result</h3>
+                <div class="body-amount">
+                  <label for="bodySlider">Weight loss</label>
+                  <span id="bodyValue" class="body-amount-value">0%</span>
                 </div>
-                <input id="bodySlider" aria-label="Weight loss" type="range" min="0" max="100" step="5" value="0" />
-              </div>
-              <div class="eyebrow">AREAS</div>
-              <div class="control">
-                <div class="row">
-                  <strong>Arms</strong><span id="bodyArmsValue" class="value">100%</span>
+                <input id="bodySlider" class="body-amount-slider" aria-label="Weight loss" type="range" min="0" max="100" step="5" value="0" />
+                <div class="body-amount-ends" aria-hidden="true"><span>As you are</span><span>Full result</span></div>
+                <div class="body-compare" role="group" aria-label="Show the photo">
+                  <button type="button" data-compare="before" aria-pressed="false">Before</button>
+                  <button type="button" data-compare="after" aria-pressed="true">After</button>
                 </div>
-                <input id="bodyArmsSlider" aria-label="Arms" type="range" min="0" max="100" step="5" value="100" />
-              </div>
-              <div class="control">
-                <div class="row">
-                  <strong>Waist &amp; hips</strong><span id="bodyWaistValue" class="value">100%</span>
+                <details class="body-more">
+                  <summary>Adjust areas</summary>
+                  <div class="body-areas">
+                    <label class="body-area" for="bodyArmsSlider">
+                      <span>Arms</span><span id="bodyArmsValue" class="body-area-value">100%</span>
+                      <input id="bodyArmsSlider" aria-label="Arms" type="range" min="0" max="100" step="5" value="100" />
+                    </label>
+                    <label class="body-area" for="bodyWaistSlider">
+                      <span>Waist &amp; hips</span><span id="bodyWaistValue" class="body-area-value">100%</span>
+                      <input id="bodyWaistSlider" aria-label="Waist and hips" type="range" min="0" max="100" step="5" value="100" />
+                    </label>
+                    <label class="body-area" for="bodyLegsSlider">
+                      <span>Legs</span><span id="bodyLegsValue" class="body-area-value">100%</span>
+                      <input id="bodyLegsSlider" aria-label="Legs" type="range" min="0" max="100" step="5" value="100" />
+                    </label>
+                    <small>Each area's share of the weight loss.</small>
+                  </div>
+                </details>
+                <div class="body-actions">
+                  <button type="button" class="ghost-btn" data-body-action="retake">Retake photo</button>
                 </div>
-                <input id="bodyWaistSlider" aria-label="Waist and hips" type="range" min="0" max="100" step="5" value="100" />
               </div>
-              <div class="control">
-                <div class="row">
-                  <strong>Legs</strong><span id="bodyLegsValue" class="value">100%</span>
+              <div id="bodyStatus" class="body-status" role="status">
+                Hold still in the outline and the photo takes itself.
+              </div>
+              <div class="body-step-camera body-alt">
+                <label class="ghost-btn body-upload" for="fileInput">Use a photo instead</label>
+              </div>
+              <details class="body-more body-setup">
+                <summary>Booth setup and fixes</summary>
+                <label class="check-row" for="bodyHandsFree">
+                  <span>Take the photo when the pose is held</span>
+                  <input id="bodyHandsFree" type="checkbox" checked />
+                </label>
+                <div class="backdrop-setup">
+                  <div>
+                    <strong>Empty backdrop</strong>
+                    <span id="bodyBackdropStatus" class="small-note"></span>
+                  </div>
+                  <button id="bodyBackdropBtn" class="ghost-btn" type="button">Capture backdrop</button>
                 </div>
-                <input id="bodyLegsSlider" aria-label="Legs" type="range" min="0" max="100" step="5" value="100" />
-              </div>
-              <label class="check-row" for="bodyHandsFree">
-                <input id="bodyHandsFree" type="checkbox" checked />
-                Hands-free photo: taken when you hold the pose
-              </label>
-              <div class="backdrop-setup">
-                <div>
-                  <strong>Empty backdrop</strong>
-                  <span id="bodyBackdropStatus" class="small-note"></span>
-                </div>
-                <button id="bodyBackdropBtn" class="ghost-btn" type="button">Capture backdrop</button>
-              </div>
-              <div id="bodyStatus" class="small-note">
-                Stand in the outline as shown and hold still: the photo is taken for you.
-              </div>
+                <div id="bodyBrushSlot"></div>
+              </details>
             </section>
 
             <section

@@ -1360,3 +1360,597 @@ body:not(.home-screen) .stage-wrap {
   touch-action: none;
   cursor: crosshair;
 }
+
+/* ───────── Body shaping layout (body.body-mode, set in app/modules.ts) ─────────
+   One job per screen: the stage shows the person, the panel shows only the step they are on
+   (ui/bodyPanel.ts). Status badges, the on-stage "how to stand" card and the face services'
+   chrome are hidden; area sliders and the booth's setup are folded away. */
+.body-steps {
+  display: none;
+}
+body.body-mode .app {
+  width: min(1760px, 96vw);
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 0;
+}
+body.body-mode .topbar {
+  margin-bottom: 12px;
+  justify-content: flex-start;
+}
+body.body-mode .brand-heading {
+  flex: none;
+  text-align: left;
+}
+body.body-mode .brand-logo {
+  width: 132px;
+  height: 46px;
+  margin: 0;
+  object-position: left center;
+}
+body.body-mode .brand-heading h1,
+body.body-mode #moduleHeader,
+body.body-mode #compareSection,
+body.body-mode #resetSection,
+body.body-mode .hud,
+body.body-mode .body-guide-tips,
+body.body-mode .body-guide-hint,
+body.body-mode #cameraBtn,
+body.body-mode .source-bar .upload-btn,
+body.body-mode #sampleBtn {
+  display: none !important;
+}
+body.body-mode .layout {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+body.body-mode .viewer-card {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+body.body-mode .stage-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+body.body-mode .sidebar {
+  min-height: 0;
+  overflow: auto;
+}
+body.body-mode .sidebar-scroll {
+  max-height: none;
+  padding: 28px 28px 24px;
+}
+body.body-mode .body-coach,
+body.body-mode .body-progress {
+  top: 18px;
+}
+
+/* The source bar becomes the way back plus where the person is in the two steps. */
+body.body-mode .source-bar {
+  align-items: center;
+  padding: 10px 14px;
+}
+body.body-mode #backHomeBtn {
+  font-size: 15px;
+  padding: 10px 16px;
+}
+body.body-mode .body-steps {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 36px;
+  margin: 0 120px 0 0; /* optically centred against the back button */
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: 15px;
+  color: var(--muted);
+}
+.body-steps li {
+  counter-increment: step;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.body-steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+}
+body[data-body-step="camera"] .body-steps [data-step="camera"],
+body[data-body-step="photo"] .body-steps [data-step="photo"] {
+  color: var(--text);
+  font-weight: 650;
+}
+body[data-body-step="camera"] .body-steps [data-step="camera"]::before,
+body[data-body-step="photo"] .body-steps [data-step="photo"]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #24152f;
+}
+body[data-body-step="photo"] .body-steps [data-step="camera"]::before {
+  content: "✓";
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The panel */
+.body-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.body-panel.hidden-section {
+  display: none;
+}
+.body-panel[data-step="camera"] .body-step-photo,
+.body-panel[data-step="photo"] .body-step-camera {
+  display: none;
+}
+.body-step {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.body-panel .body-title {
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.body-tips {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.body-tips li {
+  position: relative;
+  padding-left: 22px;
+}
+.body-tips li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.body-tips b {
+  color: var(--text);
+  font-weight: 650;
+}
+.body-fit {
+  font-size: 14px;
+  color: var(--muted);
+}
+.body-status {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #ffffff0d;
+}
+.body-status:empty {
+  display: none;
+}
+.body-alt {
+  display: flex;
+}
+.body-panel[data-step="photo"] .body-alt {
+  display: none;
+}
+.body-upload {
+  flex: 1;
+  text-align: center;
+  font-weight: 650;
+}
+
+/* Weight loss: the one big control. The number reads from a step back. */
+.body-amount {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: -10px;
+}
+.body-amount label {
+  font-size: 17px;
+  font-weight: 650;
+}
+.body-amount-value {
+  font-size: 64px;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.body-panel input[type="range"] {
+  --fill: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.body-panel input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill), #ffffff24 var(--fill));
+}
+.body-panel input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill), #ffffff24 var(--fill));
+}
+.body-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  margin-top: -12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid var(--accent);
+  box-shadow: 0 2px 10px #0006;
+}
+.body-panel input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid var(--accent);
+}
+.body-panel .body-amount-slider {
+  height: 44px;
+}
+.body-panel .body-amount-slider::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 5px;
+}
+.body-panel .body-amount-slider::-webkit-slider-thumb {
+  width: 38px;
+  height: 38px;
+  margin-top: -14px;
+}
+.body-amount-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Before | After: a two-way switch instead of a toggle button that names its other state. */
+.body-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  border-radius: 16px;
+  background: #00000033;
+  border: 1px solid var(--line);
+}
+.body-compare button {
+  min-height: 52px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.body-compare button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #24152f;
+}
+
+/* Folded sections: areas, booth setup */
+.body-more {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.body-more summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.body-more summary::-webkit-details-marker {
+  display: none;
+}
+.body-more summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.body-more[open] summary::after {
+  transform: translateY(2px) rotate(-135deg);
+}
+.body-more summary:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.body-areas {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+.body-area {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  font-size: 15px;
+}
+.body-area input {
+  grid-column: 1 / -1;
+}
+.body-area-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.body-areas small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.body-actions {
+  display: flex;
+  gap: 10px;
+}
+.body-actions > * {
+  flex: 1;
+  text-align: center;
+  font-weight: 650;
+}
+.body-setup {
+  margin-top: auto;
+  font-size: 14px;
+}
+.body-setup summary {
+  font-size: 14px;
+  color: var(--muted);
+}
+.body-setup .check-row {
+  margin-top: 4px;
+}
+.body-setup .backdrop-setup {
+  margin-top: 14px;
+}
+/* While the outline is fixed by hand, the panel shows only the Body Brush. */
+body.body-brush-editing .body-setup {
+  border-top: 0;
+}
+body.body-brush-editing .body-step-photo,
+body.body-brush-editing .body-status,
+body.body-brush-editing .body-setup > :not(.body-brush):not(summary) {
+  display: none !important;
+}
+
+/* Portrait kiosk: the main way the booth runs, on a 65" 4K touch panel turned upright (designed
+   at Windows' 200% scaling: 1080 x 1920 CSS px, about 0.74 mm each). The person reads the stage
+   from 2-2.5 m while standing in the outline, so the live advice is large; the panel is a short
+   dock under the stage, touched at arm's length, its main controls at its top. */
+@media (orientation: portrait) {
+  body.body-mode .app {
+    width: 95vw;
+    padding: 12px 0 16px;
+  }
+  body.body-mode .topbar {
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  body.body-mode .brand-logo {
+    width: 120px;
+    height: 40px;
+    object-position: center;
+  }
+  body.body-mode .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  body.body-mode .viewer-card {
+    position: relative;
+  }
+  body.body-mode .sidebar {
+    max-height: 44svh;
+    overflow: auto;
+  }
+  body.body-mode .sidebar-scroll {
+    padding: 22px 26px;
+  }
+  body.body-mode .body-steps {
+    margin-right: 0;
+    gap: 28px;
+    font-size: 17px;
+  }
+  body.body-mode #backHomeBtn {
+    min-height: 52px;
+    font-size: 17px;
+  }
+  body.body-mode .body-panel {
+    gap: 18px;
+  }
+
+  /* Camera step: the three tips side by side, readable from where the person stands. */
+  body.body-mode .body-panel .body-title {
+    font-size: 30px;
+  }
+  body.body-mode .body-tips {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    font-size: 19px;
+  }
+  body.body-mode .body-tips li {
+    padding: 12px 0 0;
+    border-top: 3px solid var(--accent);
+  }
+  body.body-mode .body-tips li::before {
+    display: none;
+  }
+  body.body-mode .body-tips b {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 21px;
+  }
+  body.body-mode .body-fit {
+    display: none;
+  }
+  body.body-mode .body-panel[data-step="camera"] {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    column-gap: 16px;
+    row-gap: 18px;
+  }
+  body.body-mode .body-panel[data-step="camera"] > * {
+    grid-column: 1 / -1;
+  }
+  body.body-mode .body-panel[data-step="camera"] > .body-status {
+    grid-column: 1;
+    font-size: 17px;
+  }
+  body.body-mode .body-panel[data-step="camera"] > .body-alt {
+    grid-column: 2;
+  }
+  body.body-mode .body-upload {
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    font-size: 17px;
+  }
+
+  /* Result step: weight loss across the width, then Before | After beside Retake. */
+  body.body-mode .body-step-photo {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 18px;
+  }
+  body.body-mode .body-panel[data-step="camera"] .body-step-photo {
+    display: none;
+  }
+  body.body-mode .body-step-photo > * {
+    grid-column: 1 / -1;
+  }
+  body.body-mode .body-step-photo > .body-title {
+    display: none; /* "See your result" above the stage already says it */
+  }
+  body.body-mode .body-amount label {
+    font-size: 21px;
+  }
+  body.body-mode .body-amount-value {
+    font-size: 76px;
+  }
+  body.body-mode .body-amount-ends {
+    font-size: 15px;
+  }
+  body.body-mode .body-panel .body-amount-slider {
+    height: 56px;
+  }
+  body.body-mode .body-panel .body-amount-slider::-webkit-slider-thumb {
+    width: 48px;
+    height: 48px;
+    margin-top: -19px;
+  }
+  body.body-mode .body-step-photo > .body-compare {
+    grid-column: 1;
+  }
+  body.body-mode .body-step-photo > .body-actions {
+    grid-column: 2;
+  }
+  body.body-mode .body-step-photo > .body-more {
+    order: 1; /* after Before | After and Retake, which share a row */
+  }
+  body.body-mode .body-compare button {
+    min-height: 62px;
+    font-size: 20px;
+  }
+  body.body-mode .body-actions > * {
+    min-height: 72px;
+    font-size: 18px;
+  }
+  body.body-mode .body-more summary {
+    min-height: 56px;
+    font-size: 18px;
+  }
+  body.body-mode .body-setup summary {
+    font-size: 16px;
+  }
+  body.body-mode .body-area {
+    font-size: 17px;
+  }
+
+  /* The start screen, read before the person steps back. */
+  body.body-mode .start-box {
+    width: min(760px, 88%);
+  }
+  body.body-mode .start-box h2 {
+    font-size: 40px;
+  }
+  body.body-mode .start-box p {
+    font-size: 21px;
+  }
+  body.body-mode .overlay-actions > * {
+    min-height: 64px;
+    padding: 0 26px;
+    font-size: 19px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Live advice on the stage is read from 2-2.5 m: large, near the camera at the top. */
+  body.body-mode .body-coach,
+  body.body-mode .body-progress strong {
+    font-size: 30px;
+  }
+  body.body-mode .body-coach {
+    max-width: 94%;
+    padding: 14px 30px;
+    border-radius: 36px;
+  }
+  body.body-mode .body-progress div span {
+    font-size: 18px;
+  }
+  body.body-mode .capture-countdown-caption {
+    font-size: 26px;
+    padding: 8px 22px;
+  }
+  body.body-mode .capture-photo {
+    min-height: 68px;
+    font-size: 20px;
+    padding: 0 28px;
+  }
+}
