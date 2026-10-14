@@ -8,6 +8,7 @@ import { dom } from "../ui/dom";
 import { hidePhotoProcessingCue, showPhotoProcessingCue } from "../ui/faceGuide";
 import { setBodyProgress } from "../ui/bodyProgress";
 import { bodyBrushEditing, mountBodyBrush, syncBodyBrush } from "../ui/bodyBrush";
+import { syncBodyPanel } from "../ui/bodyPanel";
 import { acne, body, bodyPerson, lipRenderer, segMask, skinBrightness, skinEffectMask, wrinkles } from "./effects";
 import { drawForDisplay, getSourceDims, sourceCtx, sourceCanvas, stageCtx as ctx } from "./frames";
 import { state } from "./state";
@@ -180,8 +181,8 @@ function renderBody(w: number, h: number): void {
   const status = dom.bodyStatus;
   if (state.sourceMode !== "photo") {
     status.textContent = dom.bodyHandsFree.checked
-      ? "Stand in the outline as shown and hold still: the photo is taken for you."
-      : "Stand in the outline as shown, then Take photo.";
+      ? "Hold still in the outline and the photo takes itself."
+      : "When you are in the outline, press Take photo.";
     return;
   }
   // (an outline drawn by hand with the Body Brush replaces the automatic one)
@@ -193,7 +194,7 @@ function renderBody(w: number, h: number): void {
     return;
   }
   if (settings.overall <= 0) {
-    status.textContent = "Move the Weight loss slider to preview the result.";
+    status.textContent = "Move the Weight loss slider to see the result.";
     setBodyProgress(progressOf());
     if (!body.dirty || body.busy) return;
   }
@@ -224,10 +225,10 @@ function renderBody(w: number, h: number): void {
     status.textContent = "No full body found. Use a photo of the whole body, facing the camera.";
     return;
   }
-  const notes = ["Compare Before and After to preview the weight loss."];
+  const notes: string[] = [];
   if (!body.legs) notes.push("The knees are not in the photo, so the legs are left as they are.");
   if (body.backdropState === "mismatch" && state.capturedPhoto)
-    notes.push("The empty backdrop no longer matches the camera view: capture it again for the cleanest background.");
+    notes.push("The empty backdrop no longer matches the camera view: capture it again in Booth setup.");
   if (body.posture && !body.posture.ok) notes.push(`For a better result next time: ${body.posture.message}`);
   status.textContent = notes.join(" ");
   body.draw(ctx, w, h, settings);
@@ -333,8 +334,9 @@ export function setupBodyBrush(): void {
       },
       redraw: () => renderAll(),
     },
-    dom.bodySection,
-    dom.bodyStatus,
+    // (in "Booth setup and fixes")
+    document.getElementById("bodyBrushSlot")!.parentElement!,
+    document.getElementById("bodyBrushSlot"),
   );
 }
 
@@ -344,6 +346,7 @@ function drawStage(): void {
   if (state.module !== "body" || state.sourceMode !== "photo") setBodyProgress(null);
   syncBodyBrush(state.module === "body" && state.sourceMode === "photo", brushPhoto !== bodyPerson.photo);
   brushPhoto = bodyPerson.photo;
+  if (state.module === "body") syncBodyPanel();
   ctx.clearRect(0, 0, w, h);
   if (state.sourceMode === "camera" && (!cameraNeedsEffect() || !state.faceAligned)) return;
   // Composite the effect over the exact captured frame used by the models.

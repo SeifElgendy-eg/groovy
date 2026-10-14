@@ -18,6 +18,12 @@ const serviceSections: Record<ServiceId, HTMLElement[]> = {
   body: [dom.bodySection],
 };
 
+/** The start screen's words: the face services' own, or the body's (stand back, the whole body). */
+const startTitle = dom.overlay.querySelector("h2")!;
+const startText = dom.overlay.querySelector("p")!;
+const faceStart = [startTitle.textContent, startText.textContent];
+const bodyStart = ["See your new shape", "Stand back so your whole body is in view. Hold still in the outline and the photo takes itself."];
+
 function showEl(el: HTMLElement, show: boolean): void {
   el.classList.toggle("hidden-section", !show);
 }
@@ -29,6 +35,11 @@ export function setModule(moduleName: ModuleId): void | Promise<void> {
   updateFaceGuide(null);
   const isHome = moduleName === "home";
   document.body.classList.toggle("home-screen", isHome);
+  // Body shaping has its own, quieter layout (styles.css "body-mode").
+  const isBody = moduleName === "body";
+  document.body.classList.toggle("body-mode", isBody);
+  dom.backHomeBtn.textContent = isBody ? "All services" : "Back";
+  [startTitle.textContent, startText.textContent] = isBody ? bodyStart : faceStart;
 
   showEl(dom.moduleHome, isHome);
   showEl(dom.moduleHeader, !isHome);

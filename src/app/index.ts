@@ -21,6 +21,7 @@ import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
 import { renderAll, setupBodyBrush } from "./render";
+import { mountBodyPanel } from "../ui/bodyPanel";
 import {
   handlePhoto,
   loadSamplePhoto,
@@ -226,6 +227,7 @@ export function start(): void {
   mountFaceGuide();
   mountBackdrop();
   setupBodyBrush();
+  mountBodyPanel();
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();

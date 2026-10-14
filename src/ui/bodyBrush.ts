@@ -275,6 +275,7 @@ panel.addEventListener("click", (e) => {
 function layout(): void {
   const on = !!host && document.body.classList.contains("body-brush-on");
   tools.hidden = !editing;
+  document.body.classList.toggle("body-brush-editing", on && editing);
   startBtn.hidden = editing;
   autoBtn.hidden = editing || !host?.manual();
   overlay.style.display = on && editing ? "block" : "none";

@@ -161,7 +161,24 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   console.log(takenOk ? "ok  " : "FAIL", "the countdown ends by taking the photo", JSON.stringify(taken));
   if (!takenOk) bad++;
 
-  // Body Brush: open the outline editor on the photo, paint, apply: the hand-drawn outline is used.
+  // The body panel follows the step: the result controls once the photo is taken; the switch
+  // drives Before/After; the face services' badges stay off the stage.
+  await body.click('[data-compare="before"]');
+  const panel = await body.evaluate(() => ({
+    step: document.getElementById("bodySection").dataset.step,
+    result: getComputedStyle(document.querySelector(".body-step-photo")).display !== "none",
+    tips: getComputedStyle(document.querySelector(".body-tips")).display === "none" || !document.querySelector(".body-tips").offsetParent,
+    before: document.getElementById("beforeBtn").classList.contains("active"),
+    badges: getComputedStyle(document.querySelector(".hud")).display === "none",
+  }));
+  await body.click('[data-compare="after"]');
+  const after = await body.evaluate(() => !document.getElementById("beforeBtn").classList.contains("active"));
+  const panelOk = panel.step === "photo" && panel.result && panel.tips && panel.before && after && panel.badges;
+  console.log(panelOk ? "ok  " : "FAIL", "the body panel shows the result step and its Before | After switch", JSON.stringify({ ...panel, after }));
+  if (!panelOk) bad++;
+
+  // Body Brush (in Booth setup and fixes): open the outline editor on the photo, paint, apply: the hand-drawn outline is used.
+  await body.click(".body-setup summary");
   await body.click('.body-brush [data-action="start"]');
   await body.waitForTimeout(300);
   const box = await body.evaluate(() => {
