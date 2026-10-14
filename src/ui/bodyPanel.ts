@@ -13,7 +13,19 @@ function showBefore(on: boolean): void {
   if (state.showBefore !== on) dom.beforeBtn.click();
 }
 
+/** Fade the panel's bottom edge while more of it is below (it scrolls inside a short window). */
+function markMoreBelow(): void {
+  const panel = dom.bodySection.closest<HTMLElement>(".sidebar");
+  if (!panel) return;
+  const more = panel.scrollHeight - panel.scrollTop - panel.clientHeight > 4;
+  panel.classList.toggle("more-below", document.body.classList.contains("body-mode") && more);
+}
+
 export function mountBodyPanel(): void {
+  const panel = dom.bodySection.closest<HTMLElement>(".sidebar");
+  panel?.addEventListener("scroll", markMoreBelow, { passive: true });
+  if (panel) new ResizeObserver(markMoreBelow).observe(panel);
+  for (const d of dom.bodySection.querySelectorAll("details")) d.addEventListener("toggle", markMoreBelow);
   for (const b of compare) b.addEventListener("click", () => showBefore(b.dataset.compare === "before"));
   dom.bodySection.querySelector('[data-body-action="retake"]')?.addEventListener("click", () => dom.cameraBtn.click());
   // moving a slider asks to see its effect: back to After
@@ -35,6 +47,7 @@ export function syncBodyPanel(): void {
   const step = state.sourceMode === "photo" ? "photo" : "camera";
   if (document.body.dataset.bodyStep !== step) dom.bodySection.dataset.step = document.body.dataset.bodyStep = step;
   sliders.forEach(fill);
+  markMoreBelow();
   for (const b of compare) {
     const on = String((b.dataset.compare === "before") === state.showBefore);
     if (b.getAttribute("aria-pressed") !== on) b.setAttribute("aria-pressed", on);
