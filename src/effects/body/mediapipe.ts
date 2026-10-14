@@ -54,7 +54,15 @@ function load(base: string): Promise<PoseFrame> {
 
 /** Load ahead of the first photo. */
 export function warmUpPose(base: string): void {
-  void load(base).catch(() => {});
+  // Loading is not enough: the first run compiles the model's GPU programs (seconds; on a slow
+  // machine near TIMEOUT_MS, which would drop MediaPipe for the customer's first photo). Run it once
+  // on a blank picture now, behind the camera step, so the first photo gets the warm speed.
+  const blank = document.createElement("canvas");
+  blank.width = 256;
+  blank.height = 512;
+  void load(base)
+    .then(() => findPose(base, blank, blank.width, blank.height))
+    .catch(() => {});
 }
 
 /** The body's landmarks in this photo (w x h), or null (none found, or MediaPipe unavailable). */
