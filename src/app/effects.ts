@@ -29,10 +29,3 @@ export const bodyPerson: { mask: PersonMask | null; manual: PersonMask | null; p
 export const segMask = scratch();
 /** Same mask, edge-faded, used by the skin-brightness effect and its debug overlay. */
 export const skinEffectMask = scratch();
-
-/** The face, mask or source changed: effects must re-analyse before their next draw. */
-export function markEffectsDirty(): void {
-  acne.dirty = true;
-  wrinkles.dirty = true;
-  body.dirty = true;
-}

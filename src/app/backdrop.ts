@@ -2,6 +2,7 @@
 // after moving the camera or changing the lights). Slimming then shows the real background where
 // the body used to be, instead of stretching the background beside it (effects/body/backdrop.ts).
 // Kept in IndexedDB so it survives a restart of the kiosk.
+import { backdropButton, backdropStatus } from "./statusMessages";
 import { startCountdown, type Countdown } from "../core/countdown";
 import { flashCapture, showCountdown } from "../ui/countdown";
 import { dom } from "../ui/dom";
@@ -22,10 +23,8 @@ export const backdropCapturing = (): boolean => countdown !== null;
 
 function showState(): void {
   const { bodyBackdropStatus, bodyBackdropBtn } = dom;
-  bodyBackdropBtn.textContent = countdown ? "Cancel" : body.plate ? "Capture again" : "Capture backdrop";
-  bodyBackdropStatus.textContent = body.plate
-    ? `Captured${capturedAt ? ` at ${capturedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}. Capture again after moving the camera or changing the lights.`
-    : "Not captured yet. With nobody in view, capture the empty booth once for the cleanest background around the body.";
+  bodyBackdropBtn.textContent = backdropButton(countdown !== null, !!body.plate);
+  bodyBackdropStatus.textContent = backdropStatus(!!body.plate, capturedAt);
 }
 
 function openDb(): Promise<IDBDatabase> {
