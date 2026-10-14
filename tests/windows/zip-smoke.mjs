@@ -46,7 +46,7 @@ const step = async (name, fn) => {
 
 await step("the app loads its models", async () => {
   await page.goto(`${base}/?debug=body`);
-  await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 180000 });
+  await page.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
 });
 await step("body shaping opens", () => page.evaluate(() => document.getElementById("chooseBodyBtn").click()));
 await step("MediaPipe Pose loads in its frame", () =>

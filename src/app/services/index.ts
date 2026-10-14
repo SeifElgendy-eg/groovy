@@ -24,5 +24,20 @@ export function markEffectsDirty(): void {
 
 export const anyBusy = (): boolean => allServices.some((s) => s.busy());
 
+/**
+ * Let every service get its large models ready while the app is idle on the home screen.
+ * `body[data-warming]` is set meanwhile (tests wait for it).
+ */
+export function prepareServices(): void {
+  document.body.dataset.warming = "1";
+  const run = () => {
+    void Promise.all(allServices.map((s) => s.prepare?.()))
+      .catch(() => {})
+      .finally(() => delete document.body.dataset.warming);
+  };
+  if ("requestIdleCallback" in window) requestIdleCallback(run, { timeout: 2000 });
+  else setTimeout(run, 500);
+}
+
 export { setupBodyBrush } from "./body";
 export type { Service, Stage } from "./service";

@@ -49,7 +49,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 await page.goto(url);
-await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 180000 });
+await page.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
 await page.evaluate(() => document.getElementById("chooseBodyBtn").click());
 await page.waitForTimeout(3000);
 

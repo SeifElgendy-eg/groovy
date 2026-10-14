@@ -1,12 +1,14 @@
 // The live-camera frame loop: process each new video frame, redraw, and update the perf badge.
 import { dom } from "../ui/dom";
 import { ensureSizes, getSourceDims } from "./frames";
-import { perf, clearFace, processCurrentSource } from "./pipeline";
+import { perf, clearFace, forgetAnalysis, liveFaceWanted, processCurrentSource } from "./pipeline";
 import { cameraNeedsEffect, renderAll } from "./render";
 import { state } from "./state";
 import { cameraTuning } from "./cameraTuning";
 import { sourceCanvas } from "./frames";
 import { bodyCoachTick } from "./bodyCoach";
+import { metaOf } from "../effects/registry";
+import { updateFaceGuide } from "../ui/faceGuide";
 
 /**
  * Live analysis rate. The live view only drives the capture guide (and the exposure meter); effects
@@ -15,6 +17,17 @@ import { bodyCoachTick } from "./bodyCoach";
  * every one of 30 frames.
  */
 const LIVE_ANALYSIS_FPS = 12;
+/**
+ * A service that tracks the face only for the camera's exposure (body shaping: the posture coach
+ * runs its own body check) analyses it this often, leaving the computer to the coach.
+ */
+const EXPOSURE_ANALYSIS_FPS = 3;
+
+/** Live analyses a second for the chosen service. */
+function liveRate(): number {
+  const tracking = metaOf(state.module).needs.live === "track" || cameraTuning.calibrating;
+  return tracking ? LIVE_ANALYSIS_FPS : EXPOSURE_ANALYSIS_FPS;
+}
 
 let frameRequest = 0;
 let lastCameraTime = -1;
@@ -28,6 +41,7 @@ export function startCameraLoop(): void {
   lastCameraTime = -1;
   lastAnalysisAt = -Infinity;
   clearFace();
+  forgetAnalysis();
   const { w, h } = getSourceDims();
   ensureSizes(w, h);
   frameRequest = requestAnimationFrame(tick);
@@ -44,17 +58,20 @@ async function tick(now: number): Promise<void> {
   if (
     video.readyState >= 2 &&
     video.currentTime !== lastCameraTime &&
-    now - lastAnalysisAt >= 1000 / LIVE_ANALYSIS_FPS
+    now - lastAnalysisAt >= 1000 / liveRate()
   ) {
     lastCameraTime = video.currentTime;
     lastAnalysisAt = now;
-    if (state.module !== "home") {
+    if (state.module !== "home" && liveFaceWanted()) {
       const t0 = performance.now();
       await processCurrentSource();
       const { w, h } = getSourceDims();
       cameraTuning.observe(sourceCanvas, w, h, state.facePoints);
       windowMs += performance.now() - t0;
       windowCount++;
+    } else if (state.module !== "home") {
+      // No face analysis wanted (body shaping): keep the capture guide and button up to date.
+      updateFaceGuide(null);
     }
     if (!state.running || state.sourceMode !== "camera") return;
     renderAll();

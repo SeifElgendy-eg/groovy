@@ -1,19 +1,19 @@
 // Model inference: runs face landmarks + skin segmentation on the current source and publishes
 // the results into `state` and the shared masks.
 import { buildLipData } from "../effects/lips/geometry";
-import { metaOf } from "../effects/registry";
+import { metaOf, type PhotoNeed } from "../effects/registry";
 import { headPose } from "../face/alignment";
 import { CROP_SIZE, FRAME_MAX, faceCropRect, marginFromScores, skinAlpha, type CropRect, type MarginMap } from "../face/segmentation";
 import type { NormalizedLandmark } from "../effects/skin/input";
 import { insetSkinMask } from "../imaging/maskOps";
-import type { FaceLandmarker, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
+import type { FaceLandmarker, FaceLandmarkerResult, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
 import { loadModels, loadVideoLandmarker, type Models } from "../ml/models";
 import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
 import { body, bodyPerson, lipRenderer, segMask, skinEffectMask } from "./effects";
-import { markEffectsDirty } from "./services";
+import { markEffectsDirty, prepareServices } from "./services";
 import {
   analysisSource,
   getSourceDims,
@@ -21,7 +21,8 @@ import {
   sourceCanvas,
   sourceCtx,
 } from "./frames";
-import { cameraNeedsEffect, renderAll } from "./render";
+import { renderAll } from "./render";
+import { cameraTuning } from "./cameraTuning";
 import { state } from "./state";
 
 /** IMAGE-mode models for photos (landmarks + skin segmentation). */
@@ -50,9 +51,11 @@ export async function initModels(): Promise<void> {
       lipRenderer.warmUp();
     });
     state.modelReady = true;
-    // The live-camera model is built right after, in the background, so the first camera start
-    // does not wait for it and a photo capture never has to rebuild a model.
-    setTimeout(() => void liveModel(), 0);
+    // The live-camera face model is built in the background once a service that tracks the face
+    // is chosen (not at all for body shaping), so the first camera start does not wait for it.
+    prepareLiveModel();
+    // Large service models (body shaping) get ready in the background meanwhile.
+    prepareServices();
     dom.startBtn.disabled = false;
     setStatus("Models ready", "ready");
     if (state.running) {
@@ -63,6 +66,14 @@ export async function initModels(): Promise<void> {
     console.error(err);
     setStatus("Model loading failed", "error");
   }
+}
+
+/**
+ * Build the live-camera face model in the background if the chosen service tracks the face on the
+ * camera (called when a service is chosen, and when the models are ready).
+ */
+export function prepareLiveModel(): void {
+  if (state.modelReady && metaOf(state.module).needs.live === "track") setTimeout(() => void liveModel(), 0);
 }
 
 function liveModel(): Promise<FaceLandmarker> {
@@ -186,6 +197,27 @@ function publishSkinMask(full: MarginMap, crop: { map: MarginMap; rect: CropRect
   markEffectsDirty();
 }
 
+/**
+ * Which of the current photo's analyses are done (PhotoNeed), for the photo numbered `photo`
+ * (state.photo): switching service on the same photo only runs what the new service adds.
+ */
+let analysed = { photo: -1, done: new Set<PhotoNeed>() };
+
+/** Forget what was analysed (the camera is back: its frames replace the photo's results). */
+export function forgetAnalysis(): void {
+  analysed = { photo: -1, done: new Set() };
+}
+
+/** The live camera analyses the face now (see LiveNeed and loop.ts). */
+export function liveFaceWanted(): boolean {
+  const live = metaOf(state.module).needs.live;
+  return live === "track" || (live === "exposure" && (cameraTuning.wantsFrames || cameraTuning.calibrating));
+}
+
+/**
+ * Analyse the current source for what the chosen service needs (effects/registry.ts): on a photo,
+ * its PhotoNeeds not yet done for this photo; on the live camera, the face (when wanted).
+ */
 export async function processCurrentSource(): Promise<void> {
   if (!state.modelReady || !models) return;
   if (processing) {
@@ -194,8 +226,9 @@ export async function processCurrentSource(): Promise<void> {
   }
   processing = true;
   try {
-    const { faceLandmarker, segmenter } = models;
     const camera = state.sourceMode === "camera";
+    const needs = camera ? (liveFaceWanted() ? (["face"] as PhotoNeed[]) : []) : photoNeedsLeft();
+    if (!needs.length) return;
     const live = camera ? (liveLandmarker ?? (await liveModel())) : null;
     const timestamp = performance.now();
     const { w, h } = getSourceDims();
@@ -205,36 +238,22 @@ export async function processCurrentSource(): Promise<void> {
     sourceCtx.clearRect(0, 0, w, h);
     sourceCtx.drawImage(analysisSource(), 0, 0, w, h);
 
-    const wantsMask =
-      (state.sourceMode === "photo" || cameraNeedsEffect()) &&
-      metaOf(state.module).usesSkinMask;
-    // (Live camera frames never need the skin mask: effects run on the captured photo.)
-    const faceRes = live
-      ? tracked.sync("live face tracking", () => live.detectForVideo(sourceCanvas, timestamp))
-      : tracked.sync("photo face detection", () => faceLandmarker.detect(sourceCanvas));
-    if (wantsMask)
-      tracked.sync("skin segmentation", () => segmentSkin(segmenter, sourceCanvas, faceRes.faceLandmarks?.[0] ?? null));
-    // Body slimming works on photos (taken, uploaded or test): the person's outline.
-    if (state.module === "body" && !camera)
-      tracked.sync("person segmentation", () => segmentPerson(segmenter, sourceCanvas));
-    if (faceRes.faceLandmarks?.length) {
-      const landmarks = faceRes.faceLandmarks[0];
-      state.facePoints = landmarks;
-      markEffectsDirty();
-      const matrix = faceRes.facialTransformationMatrixes?.[0]?.data;
-      updateFaceGuide(landmarks, matrix ? headPose(matrix) : null);
-      state.lipData = buildLipData(landmarks, w, h, camera);
-      dom.faceBadge.textContent = "Face detected";
-      dom.faceBadge.classList.add("detected");
-    } else {
-      clearFace();
-      updateFaceGuide(null);
-      dom.faceBadge.textContent = "No face — try a clearer front-facing photo";
-      dom.faceBadge.classList.remove("detected");
+    if (needs.includes("face")) {
+      const faceRes = live
+        ? tracked.sync("live face tracking", () => live.detectForVideo(sourceCanvas, timestamp))
+        : tracked.sync("photo face detection", () => models!.faceLandmarker.detect(sourceCanvas));
+      publishFace(faceRes, w, h, camera);
     }
+    // (Live camera frames never need the masks: effects run on the captured photo.)
+    if (needs.includes("skinMask"))
+      tracked.sync("skin segmentation", () => segmentSkin(models!.segmenter, sourceCanvas, state.facePoints));
+    // Body slimming: the person's outline.
+    if (needs.includes("person")) tracked.sync("person segmentation", () => segmentPerson(models!.segmenter, sourceCanvas));
+    if (!camera) for (const n of needs) analysed.done.add(n);
     perf.frames++;
   } catch (err) {
     console.warn(err);
+    analysed = { photo: -1, done: new Set() };
     state.skinMaskReady = false;
     state.facePoints = null;
     state.lipData = null;
@@ -249,6 +268,36 @@ export async function processCurrentSource(): Promise<void> {
       await processCurrentSource();
       renderAll();
     }
+  }
+}
+
+/** The chosen service's photo needs not yet done for the current photo, in the order they run. */
+function photoNeedsLeft(): PhotoNeed[] {
+  if (analysed.photo !== state.photo) analysed = { photo: state.photo, done: new Set() };
+  const wanted = metaOf(state.module).needs.photo;
+  // the skin mask is cut around the face: it needs the face first
+  const order: PhotoNeed[] = ["face", "skinMask", "person"];
+  const left = order.filter((n) => wanted.includes(n) && !analysed.done.has(n));
+  if (left.includes("skinMask") && !analysed.done.has("face") && !left.includes("face")) left.unshift("face");
+  return left;
+}
+
+/** The face found (or not) in this frame: landmarks, lip shape, capture guide, badge. */
+function publishFace(faceRes: FaceLandmarkerResult, w: number, h: number, camera: boolean): void {
+  if (faceRes.faceLandmarks?.length) {
+    const landmarks = faceRes.faceLandmarks[0];
+    state.facePoints = landmarks;
+    markEffectsDirty();
+    const matrix = faceRes.facialTransformationMatrixes?.[0]?.data;
+    updateFaceGuide(landmarks, matrix ? headPose(matrix) : null);
+    state.lipData = buildLipData(landmarks, w, h, camera);
+    dom.faceBadge.textContent = "Face detected";
+    dom.faceBadge.classList.add("detected");
+  } else {
+    clearFace();
+    updateFaceGuide(null);
+    dom.faceBadge.textContent = "No face — try a clearer front-facing photo";
+    dom.faceBadge.classList.remove("detected");
   }
 }
 

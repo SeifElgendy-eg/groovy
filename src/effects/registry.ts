@@ -6,6 +6,26 @@ export type ServiceId = "lips" | "wrinkles" | "acne" | "skin" | "body";
 export type ModuleId = "home" | ServiceId;
 export type SampleKind = "sample" | "sample-acne" | "sample-wrinkles";
 
+/**
+ * What a photo is analysed for before the service draws (app/pipeline.ts runs exactly these, once
+ * per photo): the face's landmarks, the skin mask (needs the face), the person's outline.
+ */
+export type PhotoNeed = "face" | "skinMask" | "person";
+/**
+ * What the live camera analyses: "track" the face for the capture guide (every live analysis),
+ * the face only for the camera's "exposure" (when the staff camera panel or the face-exposure
+ * option uses it, a few times a second), or "none".
+ */
+export type LiveNeed = "track" | "exposure" | "none";
+
+export interface ServiceNeeds {
+  photo: readonly PhotoNeed[];
+  live: LiveNeed;
+}
+
+const FACE_PHOTO: ServiceNeeds = { photo: ["face"], live: "track" };
+const SKIN_PHOTO: ServiceNeeds = { photo: ["face", "skinMask"], live: "track" };
+
 export interface ModuleMeta {
   id: ModuleId;
   /** Small label above the title in the sidebar header. */
@@ -14,8 +34,8 @@ export interface ModuleMeta {
   /** Which bundled test photo the "Test Photo" button loads. */
   sampleKind: SampleKind;
   sampleButtonLabel: string;
-  /** Needs the skin segmentation mask (and offers the "show face mask" debug view). */
-  usesSkinMask: boolean;
+  /** What the photo and the live camera are analysed for (see ServiceNeeds). */
+  needs: ServiceNeeds;
   /** "Reset All" leaves the view on the Before image. */
   resetShowsBefore: boolean;
   /**
@@ -31,7 +51,7 @@ export const HOME_META: ModuleMeta = {
   title: "Choose a service",
   sampleKind: "sample",
   sampleButtonLabel: "Test Photo",
-  usesSkinMask: false,
+  needs: { photo: [], live: "none" },
   resetShowsBefore: false,
   captureDelaySeconds: 0,
 };
@@ -43,7 +63,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     title: "Filler (lips)",
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
-    usesSkinMask: false,
+    needs: FACE_PHOTO,
     resetShowsBefore: false,
     captureDelaySeconds: 0,
   },
@@ -53,7 +73,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     title: "Botox (wrinkles)",
     sampleKind: "sample-wrinkles",
     sampleButtonLabel: "Test Photo · Wrinkles",
-    usesSkinMask: true,
+    needs: SKIN_PHOTO,
     resetShowsBefore: true,
     captureDelaySeconds: 0,
   },
@@ -63,7 +83,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     title: "Acne Treatment",
     sampleKind: "sample-acne",
     sampleButtonLabel: "Test Photo · Acne",
-    usesSkinMask: true,
+    needs: SKIN_PHOTO,
     resetShowsBefore: false,
     captureDelaySeconds: 0,
   },
@@ -74,7 +94,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     // No full-body test photo is bundled yet: the button loads the face test photo.
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
-    usesSkinMask: false,
+    needs: { photo: ["person"], live: "exposure" },
     resetShowsBefore: false,
   captureDelaySeconds: 5,
   },
@@ -84,7 +104,7 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     title: "Skin Brightness",
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
-    usesSkinMask: true,
+    needs: SKIN_PHOTO,
     resetShowsBefore: false,
     captureDelaySeconds: 0,
   },
@@ -92,3 +112,6 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
 
 export const metaOf = (id: ModuleId): ModuleMeta =>
   id === "home" ? HOME_META : SERVICES[id];
+
+/** The service uses the skin mask (and offers the staff "show face mask" view). */
+export const usesSkinMask = (id: ModuleId): boolean => metaOf(id).needs.photo.includes("skinMask");

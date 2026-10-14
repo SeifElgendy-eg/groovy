@@ -94,12 +94,17 @@ export class BodyEffect {
   }
 
   /** Load the model in the background (first photo then does not wait for it). */
-  warmUp(): void {
-    warmUpPose(document.baseURI);
-    void this.start()
-      .warmUp(document.baseURI)
-      .catch((err) => console.warn("body model failed to load", err));
+  /** Load (and run once) the body models ahead of the first photo; resolves when done. */
+  warmUp(): Promise<void> {
+    this.warming ??= Promise.all([
+      warmUpPose(document.baseURI),
+      this.start()
+        .warmUp(document.baseURI)
+        .catch((err) => console.warn("body model failed to load", err)),
+    ]).then(() => {});
+    return this.warming;
   }
+  private warming: Promise<void> | null = null;
 
   /** Stop a running analysis (its photo was replaced). The next one starts a fresh worker. */
   cancel(): void {

@@ -52,17 +52,26 @@ function load(base: string): Promise<PoseFrame> {
   return ready;
 }
 
-/** Load ahead of the first photo. */
-export function warmUpPose(base: string): void {
-  // Loading is not enough: the first run compiles the model's GPU programs (seconds; on a slow
-  // machine near TIMEOUT_MS, which would drop MediaPipe for the customer's first photo). Run it once
-  // on a blank picture now, behind the camera step, so the first photo gets the warm speed.
-  const blank = document.createElement("canvas");
-  blank.width = 256;
-  blank.height = 512;
-  void load(base)
-    .then(() => findPose(base, blank, blank.width, blank.height))
+let warmed: Promise<void> | null = null;
+
+/**
+ * Load ahead of the first photo, once. Loading is not enough: the first run compiles the model's
+ * GPU programs (seconds; on a slow machine near TIMEOUT_MS, which would drop MediaPipe for the
+ * customer's first photo). It is run once on a blank picture. That run holds the page while it
+ * lasts, so the app does it while it is idle (app/services: prepare), not when body shaping is
+ * chosen and the customer is about to use the screen.
+ */
+export function warmUpPose(base: string): Promise<void> {
+  warmed ??= load(base)
+    .then(() => {
+      const blank = document.createElement("canvas");
+      blank.width = 256;
+      blank.height = 512;
+      return findPose(base, blank, blank.width, blank.height);
+    })
+    .then(() => {})
     .catch(() => {});
+  return warmed;
 }
 
 /** The body's landmarks in this photo (w x h), or null (none found, or MediaPipe unavailable). */

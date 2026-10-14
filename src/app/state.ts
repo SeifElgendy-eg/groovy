@@ -24,6 +24,8 @@ export const state = {
   /** Camera capture guide. */
   faceAligned: false,
   alignment: { ...INITIAL_ALIGNMENT } as AlignmentState,
+  /** Counts the photos: a new one (taken, uploaded, test) gets the next number. */
+  photo: 0,
   /** The current photo came from the camera's "Take photo" button. */
   capturedPhoto: false,
   /** Whole seconds left of a running capture countdown (see core/countdown.ts), or null. */
