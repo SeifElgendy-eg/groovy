@@ -20,7 +20,8 @@ import { mountBackdrop } from "./backdrop";
 import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
-import { renderAll, setupBodyBrush } from "./render";
+import { renderAll } from "./render";
+import { setupBodyBrush } from "./services";
 import { mountBodyPanel } from "../ui/bodyPanel";
 import {
   handlePhoto,

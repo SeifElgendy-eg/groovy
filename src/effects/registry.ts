@@ -16,8 +16,6 @@ export interface ModuleMeta {
   sampleButtonLabel: string;
   /** Needs the skin segmentation mask (and offers the "show face mask" debug view). */
   usesSkinMask: boolean;
-  /** Draws the whole photo itself before its effect (otherwise it overlays the <img>). */
-  paintsBaseFrame: boolean;
   /** "Reset All" leaves the view on the Before image. */
   resetShowsBefore: boolean;
   /**
@@ -34,7 +32,6 @@ export const HOME_META: ModuleMeta = {
   sampleKind: "sample",
   sampleButtonLabel: "Test Photo",
   usesSkinMask: false,
-  paintsBaseFrame: false,
   resetShowsBefore: false,
   captureDelaySeconds: 0,
 };
@@ -47,9 +44,8 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
     usesSkinMask: false,
-    paintsBaseFrame: true,
     resetShowsBefore: false,
-  captureDelaySeconds: 0,
+    captureDelaySeconds: 0,
   },
   wrinkles: {
     id: "wrinkles",
@@ -58,9 +54,8 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample-wrinkles",
     sampleButtonLabel: "Test Photo · Wrinkles",
     usesSkinMask: true,
-    paintsBaseFrame: false,
     resetShowsBefore: true,
-  captureDelaySeconds: 0,
+    captureDelaySeconds: 0,
   },
   acne: {
     id: "acne",
@@ -69,9 +64,8 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample-acne",
     sampleButtonLabel: "Test Photo · Acne",
     usesSkinMask: true,
-    paintsBaseFrame: false,
     resetShowsBefore: false,
-  captureDelaySeconds: 0,
+    captureDelaySeconds: 0,
   },
   body: {
     id: "body",
@@ -81,7 +75,6 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
     usesSkinMask: false,
-    paintsBaseFrame: false,
     resetShowsBefore: false,
   captureDelaySeconds: 5,
   },
@@ -92,9 +85,8 @@ export const SERVICES: Record<ServiceId, ModuleMeta> = {
     sampleKind: "sample",
     sampleButtonLabel: "Test Photo",
     usesSkinMask: true,
-    paintsBaseFrame: false,
     resetShowsBefore: false,
-  captureDelaySeconds: 0,
+    captureDelaySeconds: 0,
   },
 };
 

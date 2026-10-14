@@ -1,22 +1,15 @@
 // Switching between the home screen and the services: shows the right control sections and
 // header, and re-runs the pipeline when a retained photo needs data the last service skipped.
-import { metaOf, type ModuleId, type ServiceId } from "../effects/registry";
-import { syncBefore, syncWrinklesPreset } from "../ui/controls";
+import { metaOf, type ModuleId } from "../effects/registry";
+import { syncBefore } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { updateFaceGuide } from "../ui/faceGuide";
-import { body, markEffectsDirty } from "./effects";
+import { markEffectsDirty, services } from "./services";
 import { processCurrentSource } from "./pipeline";
 import { renderAll } from "./render";
 import { cancelCountdown, loadSamplePhoto } from "./source";
 import { resetAlignment, state } from "./state";
 
-const serviceSections: Record<ServiceId, HTMLElement[]> = {
-  lips: [dom.lipsSection, dom.colorSection],
-  wrinkles: [dom.wrinklesSection],
-  acne: [dom.acneSection],
-  skin: [dom.skinSection],
-  body: [dom.bodySection],
-};
 
 /** The start screen's words: the face services' own, or the body's (stand back, the whole body). */
 const startTitle = dom.overlay.querySelector("h2")!;
@@ -48,15 +41,10 @@ export function setModule(moduleName: ModuleId): void | Promise<void> {
   showEl(dom.resetSection, !isHome);
   const meta = metaOf(moduleName);
   showEl(dom.skinDebugSection, meta.usesSkinMask);
-  for (const [id, els] of Object.entries(serviceSections))
-    for (const el of els) showEl(el, moduleName === id);
+  for (const service of Object.values(services))
+    for (const el of service.sections) showEl(el, moduleName === service.id);
 
-  // Body slimming's model is large: load it when the service is first chosen.
-  if (moduleName === "body") body.warmUp();
-  if (moduleName === "wrinkles") {
-    dom.wrinklesSlider.value = "100";
-    syncWrinklesPreset();
-  }
+  if (!isHome) services[moduleName].chosen?.();
   dom.moduleEyebrow.textContent = meta.eyebrow;
   dom.moduleTitle.textContent = meta.title;
   dom.sampleBtn.textContent = meta.sampleButtonLabel;

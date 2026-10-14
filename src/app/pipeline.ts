@@ -12,7 +12,8 @@ import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
-import { body, bodyPerson, lipRenderer, markEffectsDirty, segMask, skinEffectMask } from "./effects";
+import { body, bodyPerson, lipRenderer, segMask, skinEffectMask } from "./effects";
+import { markEffectsDirty } from "./services";
 import {
   analysisSource,
   getSourceDims,
