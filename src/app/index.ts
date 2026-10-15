@@ -21,6 +21,8 @@ import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
 import { renderAll } from "./render";
+import { loadKioskConfig } from "./kioskConfig";
+import { lipStyle } from "../ui/lipTuning";
 import { setupBodyBrush } from "./services";
 import { mountBodyPanel } from "../ui/bodyPanel";
 import {
@@ -125,7 +127,10 @@ function bindControls(): void {
   dom.cameraBtn.addEventListener("click", () => useCameraAgain());
   dom.startBtn.addEventListener("click", startCamera);
   for (const input of [dom.fileInput, dom.fileInputOverlay])
-    input.addEventListener("change", () => handlePhoto(input.files?.[0]));
+    input.addEventListener("change", () => {
+      void handlePhoto(input.files?.[0]);
+      input.value = ""; // the same file can be chosen again (a re-upload after a wrong pick)
+    });
   for (const btn of [
     dom.sampleBtn,
     dom.sampleBtnOverlay,
@@ -232,7 +237,7 @@ export function start(): void {
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();
-  mountLipTuning();
+  mountLipTuning(renderAll);
   bindControls();
   setStatus("Loading models…");
   dom.stageWrap.classList.add("camera-mode");
@@ -242,5 +247,11 @@ export function start(): void {
   syncAcnePreset();
   syncWrinklesPreset();
   setModule("home");
-  void initModels();
+  // kiosk.json first (it is tiny), then the models
+  void loadKioskConfig().finally(() => {
+    const classic = document.getElementById("lipClassic") as HTMLInputElement | null;
+    if (classic) classic.checked = lipStyle() === "classic";
+    renderAll();
+    void initModels();
+  });
 }

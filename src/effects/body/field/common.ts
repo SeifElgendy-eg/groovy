@@ -120,6 +120,10 @@ export const TUNING = {
     /** Upper arm: half at the shoulder, full from this far down it; the forearm: this much. */
     upperFullFrom: 0.35,
     forearm: 0.5,
+    /** The upper arm eases to the forearm's strength from this far down it to the elbow, */
+    elbowEase: 0.6,
+    /** and the forearm eases out between these (0 elbow, 1 hand). */
+    forearmEase: [0.2, 0.8] as [number, number],
   },
   /**
    * Narrower shoulders (with the Arms area): each shoulder, and the arm hanging from it, moves in

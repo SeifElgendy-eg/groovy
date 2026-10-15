@@ -61,7 +61,7 @@ if (/https?:\/\//.test(html.replace(/<meta[^>]*Content-Security-Policy[^>]*>/s, 
 fs.rmSync(path.join(root, "release"), { recursive: true, force: true });
 fs.mkdirSync(path.join(out, "launcher"), { recursive: true });
 fs.cpSync(dist, path.join(out, "app"), { recursive: true });
-for (const f of ["Start Groovy.vbs", "Create Desktop Shortcut.vbs", "WINDOWS_OFFLINE_README.txt", "WINDOWS_OFFLINE_AR.txt"])
+for (const f of ["Start Groovy.vbs", "Create Desktop Shortcut.vbs", "WINDOWS_OFFLINE_README.txt", "WINDOWS_OFFLINE_AR.txt", "kiosk.json"])
   fs.copyFileSync(path.join(root, f), path.join(out, f));
 fs.copyFileSync(path.join(root, "launcher", "start-windows.ps1"), path.join(out, "launcher", "start-windows.ps1"));
 

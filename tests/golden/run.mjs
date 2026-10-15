@@ -73,7 +73,7 @@ for (const s of scenarios) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on("pageerror", (e) => console.log("  pageerror:", e.message));
   await page.goto(URL_);
-  await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await page.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
   // The skin service has no visible entry button (hidden in index.html), so click it by script.
   if (s.hiddenEntry) await page.evaluate((sel) => document.querySelector(sel).click(), s.module);
   else await page.click(s.module);

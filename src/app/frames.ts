@@ -1,7 +1,7 @@
 // The stage canvas and the frame buffers: which source is visible, how big it is, and how to
 // draw it for display (mirrored for the camera).
 import { dom } from "../ui/dom";
-import { lipRenderer, skinBrightness } from "./effects";
+import { classicLipRenderer, lipRenderer, skinBrightness } from "./effects";
 import { state } from "./state";
 
 export const stageCtx = dom.stage.getContext("2d")!;
@@ -55,6 +55,7 @@ export function ensureSizes(w: number, h: number): void {
     c.height = h;
   }
   lipRenderer.resize(w, h);
+  classicLipRenderer.resize(w, h);
 }
 
 /** Copy the current camera frame into the snapshot (camera mode only). */

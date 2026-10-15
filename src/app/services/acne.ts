@@ -1,6 +1,7 @@
 // Acne treatment: spots, scars, pores and redness, analysed once per face in a worker.
 import { dom } from "../../ui/dom";
 import { acne } from "../effects";
+import { warmUpWorkers } from "../../effects/skin/client";
 import { drawForDisplay } from "../frames";
 import { state } from "../state";
 import { acneStatus } from "../statusMessages";
@@ -32,4 +33,6 @@ export const acneService: Service = {
     if (ready) acne.draw(ctx, w, h, amount, scars, pores, redness);
   },
   debugMask: () => (acne.ready ? acne.maskCanvas : null),
+  prepare: () => warmUpWorkers(), // its analysis worker starts with the app
+
 };

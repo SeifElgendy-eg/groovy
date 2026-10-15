@@ -1954,3 +1954,21 @@ body.body-brush-editing .body-setup > :not(.body-brush):not(summary) {
     padding: 0 28px;
   }
 }
+
+/* The body panel scrolls inside itself when the window is short (a laptop): show that it does,
+   with a visible scrollbar and the last lines fading out while more is below. */
+body.body-mode .sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+body.body-mode .sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+body.body-mode .sidebar::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 4px;
+}
+body.body-mode .sidebar.more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+}

@@ -1,7 +1,7 @@
 // Draws the stage: the chosen service's effect over the photo or camera frame, and the staff debug
 // mask overlay. Every service is reached through the Service interface (app/services); declarative
 // facts about them live in effects/registry.ts.
-import { metaOf } from "../effects/registry";
+import { usesSkinMask } from "../effects/registry";
 import { dom } from "../ui/dom";
 import { drawForDisplay, getSourceDims, stageCtx as ctx } from "./frames";
 import { allServices, anyBusy, services } from "./services";
@@ -19,7 +19,7 @@ export function cameraNeedsEffect(): boolean {
   if (state.sourceMode === "camera") return false;
   const service = current();
   if (state.showBefore || !service) return false;
-  if (dom.skinDebug.checked && metaOf(state.module).usesSkinMask) return true;
+  if (dom.skinDebug.checked && usesSkinMask(state.module)) return true;
   return service.active();
 }
 
@@ -29,7 +29,7 @@ const debugCtx = debugCanvas.getContext("2d")!;
 /** Staff view ("Show face mask"): the effect's area tinted green over the stage. */
 function renderSkinDebug(w: number, h: number): void {
   const service = current();
-  if (!service || !dom.skinDebug.checked || !metaOf(state.module).usesSkinMask || !state.facePoints) return;
+  if (!service || !dom.skinDebug.checked || !usesSkinMask(state.module) || !state.facePoints) return;
   const actual = service.debugMask?.();
   if (!actual) return;
   const mw = actual.width,

@@ -39,6 +39,8 @@ export interface Service {
   readonly debugMaskMirrored?: boolean;
   /** The service was just chosen: start loading what it needs, set its starting controls. */
   chosen?(): void;
+  /** Load and run its large models once, at start (while "Loading" shows, never mid-use). */
+  prepare?(): Promise<void>;
 }
 
 /** What the services need from the stage without depending on it (set by app/render.ts). */

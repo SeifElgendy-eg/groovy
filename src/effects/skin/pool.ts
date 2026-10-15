@@ -63,6 +63,11 @@ function next(): void {
   }
 }
 
+/** Start the helpers ahead of the first botox photo (app start). */
+export function warmUpHelpers(): void {
+  start();
+}
+
 /** Run a stage on the next free helper. */
 export const runStage: RunStage = (name, args) =>
   new Promise((resolve, reject) => {

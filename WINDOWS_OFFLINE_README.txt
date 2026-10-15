@@ -26,6 +26,13 @@ HDMI alone does not connect the screen's camera to the laptop.
 All processing uses the local browser. Models, scripts, and test images are bundled.
 External page requests are blocked by the application's Content Security Policy.
 
+KIOSK SETTINGS (staff): kiosk.json, next to "Start Groovy.vbs". Open it with Notepad,
+change a value, save, then close the browser window and start Groovy again.
+  "lipsLook": "classic"  = the lips filter from before 3 Oct (the clinic's choice)
+              "current"  = the newer lips filter
+Keep the quotes and commas as they are; if the file has a mistake, the app says so and
+uses its defaults.
+
 CAMERA SETTINGS (staff): press Ctrl+Alt+C in the app (or add ?camera to the address).
 It shows the real camera resolution (should be 3840x2160 for the EMEET S600) and the
 camera's exposure/focus controls. "Face-metered auto exposure" keeps the face evenly lit.

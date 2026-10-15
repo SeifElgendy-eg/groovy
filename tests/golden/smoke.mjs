@@ -11,7 +11,7 @@ const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 await page.goto(server.resolvedUrls.local[0]);
-await page.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+await page.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
 const expected = { "#chooseLipsBtn": ["LIPS", "Filler (lips)", "Test Photo"], "#chooseWrinklesBtn": ["WRINKLES", "Botox (wrinkles)", "Test Photo · Wrinkles"], "#chooseAcneBtn": ["ACNE", "Acne Treatment", "Test Photo · Acne"], "#chooseBodyBtn": ["BODY", "Weight loss (body shaping)", "Test Photo"] };
 let bad = 0;
 for (const [sel, [eyebrow, title, label]] of Object.entries(expected)) {
@@ -62,7 +62,7 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   const cam = await browser.newPage();
   cam.on("pageerror", (e) => errors.push(e.message));
   await cam.goto(server.resolvedUrls.local[0]);
-  await cam.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await cam.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
   await cam.click("#chooseLipsBtn"); // the viewer is hidden on the home screen
   await cam.click("#startBtn");
   await cam.waitForFunction(() => document.getElementById("overlay").classList.contains("hidden"), null, { timeout: 30000 });
@@ -121,7 +121,7 @@ for (const [choose, sample] of [["#chooseAcneBtn", "#acneSampleBtn"], ["#chooseW
   const body = await browser.newPage();
   body.on("pageerror", (e) => errors.push(e.message));
   await body.goto(server.resolvedUrls.local[0]);
-  await body.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await body.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
   await body.click("#chooseBodyBtn");
   await body.click("#startBtn");
   await body.waitForFunction(() => document.getElementById("overlay").classList.contains("hidden"), null, { timeout: 30000 });
@@ -214,7 +214,7 @@ for (const [errName, expectedText] of [
     navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("x", name));
   }, errName);
   await bad_.goto(server.resolvedUrls.local[0]);
-  await bad_.waitForFunction(() => !document.getElementById("startBtn").disabled, null, { timeout: 120000 });
+  await bad_.waitForFunction(() => !document.getElementById("startBtn").disabled && !document.body.dataset.warming, null, { timeout: 240000 });
   await bad_.click("#chooseLipsBtn");
   await bad_.click("#startBtn");
   await bad_.waitForTimeout(500);

@@ -24,5 +24,17 @@ export function markEffectsDirty(): void {
 
 export const anyBusy = (): boolean => allServices.some((s) => s.busy());
 
+/**
+ * Every service's large models, loaded and run once (at start: app/pipeline.ts initModels).
+ * `body[data-warming]` is set until then (tests wait for it).
+ */
+export function prepareServices(): Promise<void> {
+  document.body.dataset.warming = "1";
+  return Promise.all(allServices.map((s) => s.prepare?.()))
+    .then(() => {})
+    .catch(() => {})
+    .finally(() => delete document.body.dataset.warming);
+}
+
 export { setupBodyBrush } from "./body";
 export type { Service, Stage } from "./service";

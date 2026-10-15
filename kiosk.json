@@ -1,0 +1,4 @@
+{
+  "_help": "Groovy kiosk settings. Edit with Notepad, save, then close and restart Groovy. lipsLook: \"classic\" = the lips filter from before 3 Oct (the clinic's choice), \"current\" = the newer filter.",
+  "lipsLook": "classic"
+}

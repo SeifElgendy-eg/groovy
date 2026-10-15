@@ -2,6 +2,8 @@
 import { readBotoxDoses, syncWrinklesPreset } from "../../ui/controls";
 import { dom } from "../../ui/dom";
 import { wrinkles } from "../effects";
+import { warmUpWorkers } from "../../effects/skin/client";
+import { warmUpHelpers } from "../../effects/skin/pool";
 import { drawForDisplay } from "../frames";
 import { state } from "../state";
 import { wrinklesStatus } from "../statusMessages";
@@ -38,4 +40,9 @@ export const wrinklesService: Service = {
     if (ready) wrinkles.draw(ctx, doses);
   },
   debugMask: () => (wrinkles.ready ? wrinkles.maskCanvas : null),
+  // its workers (the analysis lane and the helpers that share it) start with the app
+  prepare: async () => {
+    warmUpHelpers();
+    await warmUpWorkers();
+  },
 };

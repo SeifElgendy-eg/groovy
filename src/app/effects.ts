@@ -2,6 +2,7 @@
 import { AcneEffect } from "../effects/acne/effect";
 import { BodyEffect, type PersonMask } from "../effects/body/effect";
 import { LipRenderer } from "../effects/lips/renderer";
+import { LipRenderer as ClassicLipRenderer } from "../effects/lips/classic/renderer";
 import { SkinBrightness } from "../effects/skin/brightness";
 import { WrinklesEffect } from "../effects/wrinkles/effect";
 
@@ -13,6 +14,8 @@ function scratch(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }
 export const acne = new AcneEffect();
 export const wrinkles = new WrinklesEffect();
 export const lipRenderer = new LipRenderer();
+/** The classic filler look (effects/lips/classic), for clinics that prefer it (staff lip tuning). */
+export const classicLipRenderer = new ClassicLipRenderer();
 export const skinBrightness = new SkinBrightness();
 export const body = new BodyEffect();
 // Debug and regression tools (scripts/body/) read the body analysis from here with ?debug=body.

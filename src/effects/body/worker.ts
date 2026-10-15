@@ -87,9 +87,12 @@ function load(base: string): Promise<ort.InferenceSession> {
 }
 
 const api = {
-  /** Load the model ahead of the first photo. */
+  /** Load the model ahead of the first photo, and run it once (its first run is the slow one). */
   async warmUp(base: string): Promise<void> {
-    await load(base);
+    const s = await load(base);
+    const W = 257, H = 257;
+    const out = await s.run({ input: new ort.Tensor("float32", new Float32Array(W * H * 3), [1, H, W, 3]) }, ["heatmaps", "short_offsets"]);
+    for (const t of Object.values(out)) t.dispose();
   },
   /**
    * Body points only (the live posture check): RGBA pixels at W x H (16k + 1 sides) -> 18 x

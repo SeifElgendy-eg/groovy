@@ -60,7 +60,9 @@ export const bodyService: Service = {
   active: () => Number(dom.bodySlider.value) > 0,
   invalidate: () => void (body.dirty = true),
   busy: () => body.busy,
-  chosen: () => body.warmUp(), // the body model is large: loaded when first needed
+  // the body models are large: ready in the background (prepare), or at the latest when chosen
+  chosen: () => void body.warmUp(),
+  prepare: () => body.warmUp(),
   holdsOriginal: bodyBrushEditing,
 
   sync(shown) {

@@ -1,6 +1,6 @@
 // Switching between the home screen and the services: shows the right control sections and
 // header, and re-runs the pipeline when a retained photo needs data the last service skipped.
-import { metaOf, type ModuleId } from "../effects/registry";
+import { metaOf, usesSkinMask, type ModuleId } from "../effects/registry";
 import { syncBefore } from "../ui/controls";
 import { dom } from "../ui/dom";
 import { updateFaceGuide } from "../ui/faceGuide";
@@ -40,7 +40,7 @@ export function setModule(moduleName: ModuleId): void | Promise<void> {
   showEl(dom.compareSection, !isHome);
   showEl(dom.resetSection, !isHome);
   const meta = metaOf(moduleName);
-  showEl(dom.skinDebugSection, meta.usesSkinMask);
+  showEl(dom.skinDebugSection, usesSkinMask(moduleName));
   for (const service of Object.values(services))
     for (const el of service.sections) showEl(el, moduleName === service.id);
 
