@@ -1349,6 +1349,28 @@ body:not(.home-screen) .stage-wrap {
 .body-brush-size input {
   margin-top: 0;
 }
+/* The brush's size beside its slider: a dot that grows inside a box of fixed size, so the panel
+   (and the photo above it) never changes size. The ring over the photo shows the real size. */
+.body-brush-dot {
+  --k: 0.4;
+  flex: none;
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+.body-brush-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: calc(40px * var(--k));
+  height: calc(40px * var(--k));
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(20, 8, 30, 0.75);
+  background: rgba(60, 230, 170, 0.35);
+  box-sizing: border-box;
+}
 .body-brush-status {
   color: var(--muted);
   font-size: 12px;
@@ -1929,6 +1951,21 @@ body.body-brush-editing .body-setup > :not(.body-brush):not(summary) {
     font-size: 19px;
     display: inline-flex;
     align-items: center;
+  }
+
+  /* The Body Brush is used by finger on the kiosk: big targets. */
+  body.body-mode .body-brush-tools p,
+  body.body-mode .body-brush-size,
+  body.body-mode .body-brush-status {
+    font-size: 16px;
+  }
+  body.body-mode .body-brush-row button {
+    min-height: 54px;
+    font-size: 17px;
+  }
+  body.body-mode .body-brush > .ghost-btn {
+    min-height: 56px;
+    font-size: 17px;
   }
 
   /* Live advice on the stage is read from 2-2.5 m: large, near the camera at the top. */
