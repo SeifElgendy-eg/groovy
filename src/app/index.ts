@@ -235,7 +235,7 @@ export function start(): void {
   mountStatusToast();
   mountCaptureButton();
   mountCameraPanel();
-  mountLipTuning();
+  mountLipTuning(renderAll);
   bindControls();
   setStatus("Loading models…");
   dom.stageWrap.classList.add("camera-mode");

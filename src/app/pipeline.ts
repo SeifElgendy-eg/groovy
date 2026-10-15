@@ -12,7 +12,7 @@ import { tracked } from "./activity";
 import { setStatus } from "../ui/status";
 import { updateFaceGuide } from "../ui/faceGuide";
 import { dom } from "../ui/dom";
-import { body, bodyPerson, lipRenderer, segMask, skinEffectMask } from "./effects";
+import { body, bodyPerson, classicLipRenderer, lipRenderer, segMask, skinEffectMask } from "./effects";
 import { markEffectsDirty, prepareServices } from "./services";
 import {
   analysisSource,
@@ -49,6 +49,7 @@ export async function initModels(): Promise<void> {
       m.faceLandmarker.detect(warm);
       closeSegmentation(m.segmenter.segment(warm));
       lipRenderer.warmUp();
+      classicLipRenderer.warmUp();
     });
     // Everything else is loaded and run once now, while "Loading" shows: the live-camera face
     // model and the services' large models (body shaping). The price is paid once, when the app
