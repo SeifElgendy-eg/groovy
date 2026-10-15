@@ -113,6 +113,7 @@ function resetForNewPhoto(kind: typeof state.photoKind): void {
   state.skinMaskReady = false;
   bodyPerson.mask = null;
   bodyPerson.manual = null;
+  bodyPerson.green = null;
   bodyPerson.photo++;
   state.photo++;
   state.photoKind = kind;

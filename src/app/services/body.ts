@@ -10,6 +10,7 @@ import { noteWork } from "../activity";
 import { body, bodyPerson } from "../effects";
 import { getSourceDims, sourceCanvas } from "../frames";
 import { state } from "../state";
+import { loadBackground } from "../greenScreen";
 import { bodyFindingStep, bodyStatus, type BodyFacts } from "../statusMessages";
 import { redraw, settled, working, type Service } from "./service";
 
@@ -45,7 +46,7 @@ function analyse(person: NonNullable<typeof bodyPerson.mask>): void {
   working();
   const start = (analysisStart = performance.now());
   void body
-    .prepare(sourceCanvas, person, person === bodyPerson.manual)
+    .prepare(sourceCanvas, person, person === bodyPerson.manual, bodyPerson.green)
     .then((ok) => {
       analysisMs = performance.now() - start;
       if (ok) noteWork("body analysis", analysisMs);
@@ -62,7 +63,12 @@ export const bodyService: Service = {
   busy: () => body.busy,
   // the body models are large: ready in the background (prepare), or at the latest when chosen
   chosen: () => void body.warmUp(),
-  prepare: () => body.warmUp(),
+  prepare: () => Promise.all([body.warmUp(), loadBackground()]).then(() => {}),
+  // Before: on a green screen, the person as they are on the branded background (only the body
+  // changes between Before and After)
+  drawBefore({ ctx, w, h }) {
+    if (state.sourceMode === "photo" && bodyPerson.green) ctx.drawImage(bodyPerson.green.composite, 0, 0, w, h);
+  },
   holdsOriginal: bodyBrushEditing,
 
   sync(shown) {
@@ -75,6 +81,9 @@ export const bodyService: Service = {
 
   draw({ ctx, w, h }) {
     if (state.sourceMode !== "photo") return void say({ stage: "camera", handsFree: dom.bodyHandsFree.checked });
+    // on a green screen the photo is shown on the branded background from the start (the slimmed
+    // picture is drawn over it once ready)
+    if (bodyPerson.green) ctx.drawImage(bodyPerson.green.composite, 0, 0, w, h);
     // (an outline drawn by hand with the Body Brush replaces the automatic one)
     const person = bodyPerson.manual ?? bodyPerson.mask;
     const settings = readBodySettings();

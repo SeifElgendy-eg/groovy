@@ -1,4 +1,6 @@
 {
-  "_help": "Groovy kiosk settings. Edit with Notepad, save, then close and restart Groovy. lipsLook: \"classic\" = the lips filter from before 3 Oct (the clinic's choice), \"current\" = the newer filter.",
-  "lipsLook": "classic"
+  "_help": "Groovy kiosk settings. Edit with Notepad, save, then close and restart Groovy. lipsLook: \"classic\" = the lips filter from before 3 Oct (the clinic's choice), \"current\" = the newer filter. greenScreen: \"auto\" = body shaping puts the person on the branded background whenever there is a green screen behind them, \"off\" = never. background: the branded background picture (replace booth\\background.jpg with your own, upright 2160 x 3840).",
+  "lipsLook": "classic",
+  "greenScreen": "auto",
+  "background": "booth/background.jpg"
 }

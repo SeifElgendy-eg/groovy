@@ -26,6 +26,12 @@ const FIELD_MAX_PIXELS = 650_000;
 const BODY_DEBUG = typeof location !== "undefined" && new URLSearchParams(location.search).get("debug") === "body";
 
 /** The person mask from the app's segmenter (0..1, its own resolution). */
+/** A green-screen photo: the person on the branded background, and the background alone (photo size). */
+export interface GreenBackground {
+  composite: HTMLCanvasElement;
+  background: HTMLCanvasElement;
+}
+
 export interface PersonMask {
   data: Float32Array;
   w: number;
@@ -55,7 +61,7 @@ export class BodyEffect {
   /** The empty backdrop of the booth (camera frame size), set by the app; null: none captured. */
   plate: HTMLCanvasElement | null = null;
   /** The backdrop for the last photo: used, not matching the photo, or not available. */
-  backdropState: "used" | "mismatch" | "none" = "none";
+  backdropState: "used" | "mismatch" | "none" | "green" = "none";
   /** What the running analysis is doing (shown while it works), or null. */
   step: string | null = null;
   /** Called when `step` changes. */
@@ -148,7 +154,9 @@ export class BodyEffect {
    * Analyse the photo (`frame`, photo size) with its person mask (`manual`: drawn by hand, used as
    * it is). Resolves true when ready.
    */
-  async prepare(frame: HTMLCanvasElement, person: PersonMask, manual = false): Promise<boolean> {
+  async prepare(frame: HTMLCanvasElement, person: PersonMask, manual = false, green: GreenBackground | null = null): Promise<boolean> {
+    // On a green screen the person, put on the branded background, is the picture slimmed
+    if (green) frame = green.composite;
     this.dirty = false;
     this.busy = true;
     this.ready = false;
@@ -220,7 +228,7 @@ export class BodyEffect {
       this.warp.set(frame, r);
       // the backdrop's cover from the mask with the arms filled in (an arm the segmenter missed
       // would be painted over with the wall)
-      this.backdropState = this.useBackdrop(frame, { data: r.person, w: ww, h: wh });
+      this.backdropState = green ? this.useGreen(green.background, { data: r.person, w: ww, h: wh }) : this.useBackdrop(frame, { data: r.person, w: ww, h: wh });
       this.cap = r.cap;
       this.ready = true;
       return true;
@@ -235,6 +243,20 @@ export class BodyEffect {
       this.stop = null;
       this.step = null;
     }
+  }
+
+  /**
+   * The branded background (green screen) fills in wherever the slimmed body no longer covers the
+   * old one, as the empty backdrop does, exactly aligned and in its own colours.
+   */
+  private useGreen(background: HTMLCanvasElement, person: PersonMask): "green" {
+    const long = Math.max(person.w, person.h);
+    const mask = { data: person.data, w: person.w, h: person.h };
+    const cover = personCover(mask, 0.003 * long, 0.002 * long);
+    const keep = personCover(mask, 0.007 * long, 0.003 * long);
+    const gain = { data: new Float32Array(2 * 2 * 3).fill(1), w: 2, h: 2, mismatch: 0 };
+    this.warp.setBackdrop({ plate: background, cover, keep, gain });
+    return "green";
   }
 
   /**

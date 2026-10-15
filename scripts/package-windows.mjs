@@ -64,6 +64,8 @@ fs.cpSync(dist, path.join(out, "app"), { recursive: true });
 for (const f of ["Start Groovy.vbs", "Create Desktop Shortcut.vbs", "WINDOWS_OFFLINE_README.txt", "WINDOWS_OFFLINE_AR.txt", "kiosk.json"])
   fs.copyFileSync(path.join(root, f), path.join(out, f));
 fs.copyFileSync(path.join(root, "launcher", "start-windows.ps1"), path.join(out, "launcher", "start-windows.ps1"));
+// the booth's own pictures (the branded background), which staff may replace
+fs.cpSync(path.join(root, "booth"), path.join(out, "booth"), { recursive: true });
 
 // The commit the package is built from. CI sets GROOVY_COMMIT: on a pull request the checkout is
 // GitHub's temporary merge commit, whose hash is on no branch; the pull request's own head is.
