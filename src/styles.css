@@ -1349,6 +1349,18 @@ body:not(.home-screen) .stage-wrap {
 .body-brush-size input {
   margin-top: 0;
 }
+/* The brush's real size on screen, beside its slider (white, as the ring over the photo). */
+.body-brush-dot {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  max-width: 120px;
+  max-height: 120px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(20, 8, 30, 0.75);
+  background: rgba(60, 230, 170, 0.35);
+}
 .body-brush-status {
   color: var(--muted);
   font-size: 12px;
@@ -1929,6 +1941,21 @@ body.body-brush-editing .body-setup > :not(.body-brush):not(summary) {
     font-size: 19px;
     display: inline-flex;
     align-items: center;
+  }
+
+  /* The Body Brush is used by finger on the kiosk: big targets. */
+  body.body-mode .body-brush-tools p,
+  body.body-mode .body-brush-size,
+  body.body-mode .body-brush-status {
+    font-size: 16px;
+  }
+  body.body-mode .body-brush-row button {
+    min-height: 54px;
+    font-size: 17px;
+  }
+  body.body-mode .body-brush > .ghost-btn {
+    min-height: 56px;
+    font-size: 17px;
   }
 
   /* Live advice on the stage is read from 2-2.5 m: large, near the camera at the top. */

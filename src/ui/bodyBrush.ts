@@ -50,7 +50,7 @@ panel.innerHTML = `
       <button type="button" data-tool="erase" aria-pressed="false">Erase</button>
       <button type="button" data-tool="trace" aria-pressed="false">Trace &amp; fill</button>
     </div>
-    <label class="body-brush-size">Brush <input type="range" min="6" max="120" value="36" aria-label="Brush size" /></label>
+    <label class="body-brush-size">Brush <input type="range" min="6" max="120" value="36" aria-label="Brush size" /><span class="body-brush-dot" aria-hidden="true"></span></label>
     <div class="body-brush-row">
       <button type="button" data-action="undo">Undo</button>
       <button type="button" data-action="reset">Start again</button>
@@ -66,6 +66,7 @@ const status = panel.querySelector<HTMLElement>(".body-brush-status")!;
 const sizeInput = panel.querySelector<HTMLInputElement>('input[type="range"]')!;
 const startBtn = panel.querySelector<HTMLButtonElement>('[data-action="start"]')!;
 const autoBtn = panel.querySelector<HTMLButtonElement>('[data-action="auto"]')!;
+sizeInput.addEventListener("input", previewSize);
 
 let host: BodyBrushHost | null = null;
 let editing = false;
@@ -74,6 +75,12 @@ let pointer: number | null = null;
 let last: [number, number] = [0, 0];
 let trace: [number, number][] = [];
 let undo: ImageData[] = [];
+/** Where the brush ring is drawn (selection pixels): the pointer over the photo, or null. */
+let cursor: [number, number] | null = null;
+/** The pointer is over the photo (a mouse or pen hovering): the ring follows it. */
+let hovering = false;
+let previewTimer = 0;
+const dot = panel.querySelector<HTMLElement>(".body-brush-dot")!;
 
 /** The editor is open (the stage then shows the photo as it is). */
 export function bodyBrushEditing(): boolean {
@@ -105,6 +112,12 @@ export function readMask(ctx: CanvasRenderingContext2D, w: number, h: number): P
   return { data, w, h };
 }
 
+/** The brush's diameter in selection pixels (the brush size is in screen pixels). */
+function brushSize(): number {
+  const r = overlay.getBoundingClientRect();
+  return (Number(sizeInput.value) * sel.width) / Math.max(1, r.width);
+}
+
 function show(): void {
   view.clearRect(0, 0, overlay.width, overlay.height);
   view.globalCompositeOperation = "source-over";
@@ -121,6 +134,40 @@ function show(): void {
     view.lineWidth = Math.max(2, overlay.width / 400);
     view.stroke();
   }
+  // The brush ring: exactly what a stroke here would cover (white to add, red to erase), with a
+  // dark edge so it shows on light and dark photos alike.
+  if (cursor && tool !== "trace") {
+    const lw = Math.max(1.5, overlay.width / 600);
+    view.beginPath();
+    view.arc(cursor[0], cursor[1], brushSize() / 2, 0, Math.PI * 2);
+    view.lineWidth = 3 * lw;
+    view.strokeStyle = "rgba(20, 8, 30, 0.75)";
+    view.stroke();
+    view.lineWidth = lw;
+    view.strokeStyle = tool === "erase" ? "#ff8585" : "#fff";
+    view.stroke();
+  }
+}
+
+/** The size dot beside the slider: the brush's real size on screen. */
+function showDot(): void {
+  const d = `${sizeInput.value}px`;
+  dot.style.width = dot.style.height = d;
+}
+
+/** Show the ring while the size is changed (at the pointer, or the photo's centre on a touch screen). */
+function previewSize(): void {
+  showDot();
+  if (!editing) return;
+  cursor ??= [sel.width / 2, sel.height / 2];
+  show();
+  clearTimeout(previewTimer);
+  previewTimer = window.setTimeout(() => {
+    if (!hovering && pointer === null) {
+      cursor = null;
+      show();
+    }
+  }, 1500);
 }
 
 function snapshot(): void {
@@ -136,8 +183,7 @@ function at(e: PointerEvent): [number, number] {
 
 /** A brush segment to `p` (the brush size is in screen pixels: the same feel at any photo size). */
 function stroke(p: [number, number]): void {
-  const r = overlay.getBoundingClientRect();
-  const size = (Number(sizeInput.value) * sel.width) / Math.max(1, r.width);
+  const size = brushSize();
   selCtx.globalCompositeOperation = tool === "erase" ? "destination-out" : "source-over";
   selCtx.strokeStyle = selCtx.fillStyle = "#fff";
   selCtx.lineWidth = size;
@@ -151,11 +197,14 @@ function stroke(p: [number, number]): void {
   selCtx.fill();
   selCtx.globalCompositeOperation = "source-over";
   last = p;
+  cursor = p;
   show();
 }
 
 function setTool(t: Tool): void {
   tool = t;
+  overlay.style.cursor = t === "trace" ? "crosshair" : "none"; // the ring is the cursor
+  show();
   for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-tool]")) b.setAttribute("aria-pressed", String(b.dataset.tool === t));
 }
 
@@ -171,6 +220,7 @@ function open(): void {
   else selCtx.clearRect(0, 0, sel.width, sel.height);
   undo = [];
   trace = [];
+  showDot();
   editing = true;
   setTool("add");
   status.textContent = start ? "Correct the green outline, then Apply." : "The automatic outline is still loading: you can paint it now.";
@@ -182,6 +232,7 @@ function open(): void {
 function close(): void {
   editing = false;
   pointer = null;
+  cursor = null;
   trace = [];
   undo = [];
   layout();
@@ -201,7 +252,15 @@ overlay.addEventListener("pointerdown", (e) => {
   } else stroke(last);
 });
 overlay.addEventListener("pointermove", (e) => {
-  if (e.pointerId !== pointer) return;
+  if (e.pointerType !== "touch") hovering = true;
+  if (e.pointerId !== pointer) {
+    // hovering (mouse or pen): the ring follows
+    if (editing && e.pointerType !== "touch") {
+      cursor = at(e);
+      show();
+    }
+    return;
+  }
   e.preventDefault();
   const p = at(e);
   if (tool === "trace") {
@@ -223,8 +282,16 @@ const end = (e: PointerEvent) => {
   }
   pointer = null;
   trace = [];
+  if (!hovering) cursor = null; // a finger lifted: no ring left behind
   show();
 };
+overlay.addEventListener("pointerleave", () => {
+  hovering = false;
+  if (pointer === null) {
+    cursor = null;
+    show();
+  }
+});
 overlay.addEventListener("pointerup", end);
 overlay.addEventListener("pointercancel", end);
 
