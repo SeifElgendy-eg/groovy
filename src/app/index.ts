@@ -125,7 +125,10 @@ function bindControls(): void {
   dom.cameraBtn.addEventListener("click", () => useCameraAgain());
   dom.startBtn.addEventListener("click", startCamera);
   for (const input of [dom.fileInput, dom.fileInputOverlay])
-    input.addEventListener("change", () => handlePhoto(input.files?.[0]));
+    input.addEventListener("change", () => {
+      void handlePhoto(input.files?.[0]);
+      input.value = ""; // the same file can be chosen again (a re-upload after a wrong pick)
+    });
   for (const btn of [
     dom.sampleBtn,
     dom.sampleBtnOverlay,
