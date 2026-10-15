@@ -21,6 +21,8 @@ import { stopCameraLoop } from "./loop";
 import { setModule } from "./modules";
 import { closeModels, initModels } from "./pipeline";
 import { renderAll } from "./render";
+import { loadKioskConfig } from "./kioskConfig";
+import { lipStyle } from "../ui/lipTuning";
 import { setupBodyBrush } from "./services";
 import { mountBodyPanel } from "../ui/bodyPanel";
 import {
@@ -245,5 +247,11 @@ export function start(): void {
   syncAcnePreset();
   syncWrinklesPreset();
   setModule("home");
-  void initModels();
+  // kiosk.json first (it is tiny), then the models
+  void loadKioskConfig().finally(() => {
+    const classic = document.getElementById("lipClassic") as HTMLInputElement | null;
+    if (classic) classic.checked = lipStyle() === "classic";
+    renderAll();
+    void initModels();
+  });
 }

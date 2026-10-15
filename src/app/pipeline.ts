@@ -22,6 +22,7 @@ import {
   sourceCtx,
 } from "./frames";
 import { renderAll } from "./render";
+import { kioskConfigProblem } from "./kioskConfig";
 import { cameraTuning } from "./cameraTuning";
 import { state } from "./state";
 
@@ -61,7 +62,9 @@ export async function initModels(): Promise<void> {
     await tracked("preparing the services", prepareServices);
     state.modelReady = true;
     dom.startBtn.disabled = false;
-    setStatus("Models ready", "ready");
+    const configProblem = kioskConfigProblem();
+    if (configProblem) setStatus(configProblem, "error");
+    else setStatus("Models ready", "ready");
     if (state.running) {
       await processCurrentSource();
       renderAll();

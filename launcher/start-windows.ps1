@@ -59,6 +59,12 @@ try {
             $reader.Dispose()
             if ($method -notin @('GET','HEAD')) { Send-Response $stream 405 'text/plain' ([Text.Encoding]::UTF8.GetBytes('GET or HEAD only')); continue }
             $headOnly = $method -eq 'HEAD'
+            if ((($target -split '\?',2)[0]) -eq '/kiosk.json') {
+                # The kiosk's settings live next to "Start Groovy.vbs" (staff edit them), not in app\
+                $kiosk = Join-Path $root 'kiosk.json'
+                if ([IO.File]::Exists($kiosk)) { Send-Response $stream 200 'application/json' ([IO.File]::ReadAllBytes($kiosk)) $headOnly } else { Send-Response $stream 404 'text/plain' ([byte[]]@()) $headOnly }
+                continue
+            }
             if ($target -eq '/__groovy_health') { Send-Response $stream 200 'text/plain' ([Text.Encoding]::UTF8.GetBytes($identity)) $headOnly; continue }
             $relative = [Uri]::UnescapeDataString(($target -split '\?',2)[0]).TrimStart('/')
             if (-not $relative) { $relative='index.html' }
