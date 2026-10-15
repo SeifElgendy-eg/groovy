@@ -149,10 +149,14 @@ function show(): void {
   }
 }
 
-/** The size dot beside the slider: the brush's real size on screen. */
+/**
+ * The size dot beside the slider: the brush's size relative to the slider's range, inside a box of
+ * fixed size (a dot as big as the brush would make the panel taller and the photo smaller).
+ */
 function showDot(): void {
-  const d = `${sizeInput.value}px`;
-  dot.style.width = dot.style.height = d;
+  const min = Number(sizeInput.min), max = Number(sizeInput.max);
+  const k = (Number(sizeInput.value) - min) / Math.max(1, max - min);
+  dot.style.setProperty("--k", String(0.2 + 0.8 * k));
 }
 
 /** Show the ring while the size is changed (at the pointer, or the photo's centre on a touch screen). */

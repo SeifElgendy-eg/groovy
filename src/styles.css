@@ -1349,17 +1349,27 @@ body:not(.home-screen) .stage-wrap {
 .body-brush-size input {
   margin-top: 0;
 }
-/* The brush's real size on screen, beside its slider (white, as the ring over the photo). */
+/* The brush's size beside its slider: a dot that grows inside a box of fixed size, so the panel
+   (and the photo above it) never changes size. The ring over the photo shows the real size. */
 .body-brush-dot {
+  --k: 0.4;
   flex: none;
-  width: 36px;
-  height: 36px;
-  max-width: 120px;
-  max-height: 120px;
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+.body-brush-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: calc(40px * var(--k));
+  height: calc(40px * var(--k));
   border-radius: 50%;
   border: 2px solid #fff;
-  box-shadow: 0 0 0 2px rgba(20, 8, 30, 0.75);
+  box-shadow: 0 0 0 1px rgba(20, 8, 30, 0.75);
   background: rgba(60, 230, 170, 0.35);
+  box-sizing: border-box;
 }
 .body-brush-status {
   color: var(--muted);
