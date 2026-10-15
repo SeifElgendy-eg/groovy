@@ -4,9 +4,8 @@
 // the branded background filling wherever the body moves away (as the empty backdrop does), and the
 // keyed outline (exact to the pixel) replaces the segmenter's. Photos without a green screen, or
 // with kiosk.json "greenScreen": "off", are not touched.
-import { personCover } from "../effects/body/backdrop";
 import type { PersonMask } from "../effects/body/effect";
-import { boundAlpha, composite, despill, findKey, keyAlpha, unmix } from "../effects/body/greenScreen";
+import { composite, findKey, keyPerson } from "../effects/body/greenScreen";
 import { kioskConfig } from "./kioskConfig";
 
 /** A body photo on a green screen, put on the branded background. */
@@ -41,7 +40,10 @@ export function loadBackground(): Promise<void> {
   return loading;
 }
 
-/** The background fitted to w x h, filling it (cropped, centred), as a canvas. */
+/**
+ * The background fitted to w x h, filling it, as a canvas: cropped evenly at the sides, and from
+ * the bottom only (the logo at the top stays whole on a wider photo).
+ */
 function fitted(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = w;
@@ -49,7 +51,7 @@ function fitted(w: number, h: number): HTMLCanvasElement {
   const img = picture!;
   const k = Math.max(w / img.naturalWidth, h / img.naturalHeight);
   const dw = img.naturalWidth * k, dh = img.naturalHeight * k;
-  c.getContext("2d")!.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  c.getContext("2d")!.drawImage(img, (w - dw) / 2, 0, dw, dh);
   return c;
 }
 
@@ -68,14 +70,7 @@ export function keyPhoto(source: HTMLCanvasElement, person: PersonMask | null): 
   const key = findKey(pixels.data, w, h);
   if (!key) return null;
   const t0 = performance.now();
-  const alpha = keyAlpha(pixels.data, w, h, key);
-  if (person) {
-    // generous: the whole person, arms out, hair; a floor or objects farther away are background
-    const long = Math.max(person.w, person.h);
-    boundAlpha(alpha, w, h, personCover(person, 0.06 * long, 0.01 * long));
-  }
-  unmix(pixels.data, alpha, key.rgb);
-  despill(pixels.data, alpha);
+  const alpha = keyPerson(pixels.data, w, h, key, person);
   const background = fitted(w, h);
   const bg = background.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, w, h);
   const out = new ImageData(w, h);
@@ -88,15 +83,17 @@ export function keyPhoto(source: HTMLCanvasElement, person: PersonMask | null): 
   const k = Math.min(1, MASK_LONG_SIDE / Math.max(w, h));
   const mw = Math.max(1, Math.round(w * k)), mh = Math.max(1, Math.round(h * k));
   const sum = new Float32Array(mw * mh), cnt = new Float32Array(mw * mh);
+  const col = new Int32Array(w);
+  for (let x = 0; x < w; x++) col[x] = Math.min(mw - 1, Math.floor(x * k));
   for (let y = 0; y < h; y++) {
-    const my = Math.min(mh - 1, Math.floor(y * k)) * mw;
+    const my = Math.min(mh - 1, Math.floor(y * k)) * mw, row = y * w;
     for (let x = 0; x < w; x++) {
-      const i = my + Math.min(mw - 1, Math.floor(x * k));
-      sum[i] += alpha[y * w + x] / 255;
+      const i = my + col[x];
+      sum[i] += alpha[row + x];
       cnt[i]++;
     }
   }
-  for (let i = 0; i < sum.length; i++) sum[i] /= cnt[i] || 1;
+  for (let i = 0; i < sum.length; i++) sum[i] /= 255 * (cnt[i] || 1);
   console.info(`green screen: keyed (screen on ${Math.round(100 * key.share)}% of the border) in ${Math.round(performance.now() - t0)} ms`);
   return { composite: canvas, background, mask: { data: sum, w: mw, h: mh } };
 }
