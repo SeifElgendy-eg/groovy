@@ -1,6 +1,7 @@
 // The effect instances and the canvases they share with the pipeline.
 import { AcneEffect } from "../effects/acne/effect";
 import { BodyEffect, type PersonMask } from "../effects/body/effect";
+import type { GreenPhoto } from "./greenScreen";
 import { LipRenderer } from "../effects/lips/renderer";
 import { LipRenderer as ClassicLipRenderer } from "../effects/lips/classic/renderer";
 import { SkinBrightness } from "../effects/skin/brightness";
@@ -26,7 +27,7 @@ if (new URLSearchParams(location.search).get("debug") === "body") (globalThis as
  * `manual` drawn by hand with the Body Brush (used instead when set); `photo` counts the photos (a
  * new one drops the hand-drawn outline).
  */
-export const bodyPerson: { mask: PersonMask | null; manual: PersonMask | null; photo: number } = { mask: null, manual: null, photo: 0 };
+export const bodyPerson: { mask: PersonMask | null; manual: PersonMask | null; photo: number; green: GreenPhoto | null } = { mask: null, manual: null, photo: 0, green: null };
 
 /** Raw skin segmentation (alpha = skin), in the model's orientation. */
 export const segMask = scratch();

@@ -6,6 +6,8 @@ import { headPose } from "../face/alignment";
 import { CROP_SIZE, FRAME_MAX, faceCropRect, marginFromScores, skinAlpha, type CropRect, type MarginMap } from "../face/segmentation";
 import type { NormalizedLandmark } from "../effects/skin/input";
 import { insetSkinMask } from "../imaging/maskOps";
+import { maskUnsure } from "../effects/body/bodypix";
+import { keyPhoto } from "./greenScreen";
 import type { FaceLandmarker, FaceLandmarkerResult, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
 import { loadModels, loadVideoLandmarker, type Models } from "../ml/models";
 import { tracked } from "./activity";
@@ -142,6 +144,12 @@ function segmentPerson(segmenter: ImageSegmenter, source: HTMLCanvasElement): vo
   } finally {
     closeSegmentation(r);
   }
+  // A green screen behind the person: the exact keyed outline, and the person on the branded
+  // background (app/greenScreen.ts). The segmenter's outline, if it is sure, bounds the key.
+  const seg = bodyPerson.mask;
+  const green = tracked.sync("green screen", () => keyPhoto(source, seg && !maskUnsure(seg.data) ? seg : null));
+  bodyPerson.green = green;
+  if (green) bodyPerson.mask = green.mask;
 }
 
 const frameCanvas = document.createElement("canvas");

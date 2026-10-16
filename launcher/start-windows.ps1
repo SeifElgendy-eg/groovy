@@ -65,6 +65,13 @@ try {
                 if ([IO.File]::Exists($kiosk)) { Send-Response $stream 200 'application/json' ([IO.File]::ReadAllBytes($kiosk)) $headOnly } else { Send-Response $stream 404 'text/plain' ([byte[]]@()) $headOnly }
                 continue
             }
+            if ((($target -split '\?',2)[0]) -match '^/booth/([A-Za-z0-9_. -]+\.(jpg|jpeg|png|webp))$') {
+                # The booth's own pictures (the branded background), next to kiosk.json: staff replace them
+                $boothFile = Join-Path (Join-Path $root 'booth') $Matches[1]
+                $boothType = @{'jpg'='image/jpeg';'jpeg'='image/jpeg';'png'='image/png';'webp'='image/webp'}[$Matches[2].ToLowerInvariant()]
+                if ([IO.File]::Exists($boothFile)) { Send-Response $stream 200 $boothType ([IO.File]::ReadAllBytes($boothFile)) $headOnly } else { Send-Response $stream 404 'text/plain' ([byte[]]@()) $headOnly }
+                continue
+            }
             if ($target -eq '/__groovy_health') { Send-Response $stream 200 'text/plain' ([Text.Encoding]::UTF8.GetBytes($identity)) $headOnly; continue }
             $relative = [Uri]::UnescapeDataString(($target -split '\?',2)[0]).TrimStart('/')
             if (-not $relative) { $relative='index.html' }

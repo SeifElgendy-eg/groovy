@@ -29,6 +29,8 @@ export interface Service {
   busy(): boolean;
   /** Draw the effect onto the stage (the Before view never calls this). */
   draw(stage: Stage): void;
+  /** Draw the Before view, when it is not simply the photo as taken (optional). */
+  drawBefore?(stage: Stage): void;
   /** On every redraw, whether this service is the one shown (to show or hide its own overlays). */
   sync?(shown: boolean): void;
   /** The stage shows the photo as it is for now (the body outline being edited by hand). */

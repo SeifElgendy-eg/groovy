@@ -30,8 +30,16 @@ KIOSK SETTINGS (staff): kiosk.json, next to "Start Groovy.vbs". Open it with Not
 change a value, save, then close the browser window and start Groovy again.
   "lipsLook": "classic"  = the lips filter from before 3 Oct (the clinic's choice)
               "current"  = the newer lips filter
+  "greenScreen": "auto" = in body shaping, a person photographed in front of a green screen
+                         is put on the branded background; "off" = never
+  "background": the branded background picture, in the booth folder. To use your own, replace
+              booth\background.jpg (upright, 2160 x 3840, JPG or PNG) or name another file there.
 Keep the quotes and commas as they are; if the file has a mistake, the app says so and
 uses its defaults.
+
+GREEN SCREEN: light the screen evenly, keep people about 1 m in front of it (less green
+reflects onto them), and avoid green clothes (they would be keyed out too). A green floor
+gives clean feet; without one, the floor near the feet stays as photographed.
 
 CAMERA SETTINGS (staff): press Ctrl+Alt+C in the app (or add ?camera to the address).
 It shows the real camera resolution (should be 3840x2160 for the EMEET S600) and the

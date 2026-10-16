@@ -71,7 +71,8 @@ function drawStage(): void {
   if (state.sourceMode === "camera" && (!cameraNeedsEffect() || !state.faceAligned)) return;
   // Composite the effect over the exact captured frame used by the models.
   if (state.sourceMode === "camera") drawForDisplay(ctx, w, h);
-  if (!service || state.showBefore || service.holdsOriginal?.()) return;
+  if (!service || service.holdsOriginal?.()) return;
+  if (state.showBefore) return void service.drawBefore?.({ ctx, w, h });
   service.draw({ ctx, w, h });
   renderSkinDebug(w, h);
 }
